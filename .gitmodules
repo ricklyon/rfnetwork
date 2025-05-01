@@ -1,0 +1,3 @@
+[submodule "rfnetwork/core/lib/eigen"]
+	path = rfnetwork/core/lib/eigen
+	url = https://gitlab.com/libeigen/eigen.git
