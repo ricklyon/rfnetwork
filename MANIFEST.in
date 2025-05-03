@@ -1,0 +1,6 @@
+recursive-include rfnetwork/core *.cpp *.h *.c *.py
+recursive-include rfnetwork/core/lib/eigen/Eigen *
+recursive-exclude * *.so
+recursive-exclude * __pycache__
+recursive-exclude tests *
+recursive-exclude examples *

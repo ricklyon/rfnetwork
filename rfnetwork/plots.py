@@ -188,7 +188,7 @@ def plot(
     # get xaxis vector
     f_multiplier = dict(hz=1, khz=1e3, mhz=1e6, ghz=1e9)[freq_unit]
     f_label = dict(hz="Hz", khz="kHz", mhz="MHz", ghz="GHz")[freq_unit]
-    xdata = sdata.dim["frequency"] / f_multiplier
+    xdata = sdata.coords["frequency"] / f_multiplier
 
     # default line label
     global_label = "" if label is None else label + " "

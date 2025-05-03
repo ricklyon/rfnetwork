@@ -401,10 +401,10 @@ class Line(Component):
         frequency = np.atleast_1d(frequency)
         # create a labeled array with rows as frequency and columns as data type (zo, loss, etc...).
         # parameters will be interpolated to match the freq passed into evaluate
-        dim = dict(frequency=self._frequency, value=["z0", "er", "loss"])
+        coords = dict(frequency=self._frequency, value=["z0", "er", "loss"])
 
         # initialize properties array.
-        properties = ldarray(dim=dim)
+        properties = ldarray(coords=coords)
 
         # populate each column, if values are single numbers numpy will broadcast the value to the correct length.
         for i, p in enumerate([self.z0, self.er, self.loss]):
@@ -413,7 +413,7 @@ class Line(Component):
 
         if len(self._frequency) < 2:
             # broadcast single-point properties across the provided frequency vector
-            shape = (len(frequency), len(properties.dim["value"]))
+            shape = (len(frequency), len(properties.coords["value"]))
             properties = np.broadcast_to(properties, shape).copy()
         else:
             # interpolate the line properties over frequency
@@ -421,8 +421,8 @@ class Line(Component):
             properties = sp1(frequency)
 
         # cast result as ldarray
-        ndim = dict(frequency=frequency, value=["z0", "er", "loss"])
-        return ldarray(properties, dim=ndim)
+        ncoords = dict(frequency=frequency, value=["z0", "er", "loss"])
+        return ldarray(properties, coords=ncoords)
 
 
 

@@ -139,10 +139,10 @@ def read_snp(filepath: Path | str) -> Tuple[ldarray, ldarray, list]:
         sdata = np.transpose(sdata, (0,2,1))
 
     # return as a labeled numpy array
-    sdata_ld = ldarray(sdata, dim=dict(frequency=s_freq, b=np.arange(1,N+1), a=np.arange(1,N+1)))
+    sdata_ld = ldarray(sdata, coords=dict(frequency=s_freq, b=np.arange(1,N+1), a=np.arange(1,N+1)))
 
     if n_freq is not None:
-        ndata_ld = ldarray(ndata, dim=dict(frequency=n_freq, noise_param=["nf_min", "gamma_opt", "rn"]))
+        ndata_ld = ldarray(ndata, coords=dict(frequency=n_freq, noise_param=["nf_min", "gamma_opt", "rn"]))
     else:
         ndata_ld = None
 

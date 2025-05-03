@@ -222,7 +222,7 @@ class Network(Component, metaclass=NetworkMeta):
         # separate the probe matrix and save to a cached variable
         if s_b > s_a:
             self._probe_data = ldarray(
-                sdata[:, s_a:], dim=dict(frequency=frequency, b=probe_names_ordered, a=np.arange(1, s_a + 1))
+                sdata[:, s_a:], coords=dict(frequency=frequency, b=probe_names_ordered, a=np.arange(1, s_a + 1))
             )
         else:
             self._probe_data = None

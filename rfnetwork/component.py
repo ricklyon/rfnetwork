@@ -100,8 +100,8 @@ class Component(object):
             
         # attempt to use the frequency vector already in the sdata if frequency is not provided.
         if frequency is None:
-            if hasattr(sdata, "dim"):
-                frequency = sdata.dim["frequency"]
+            if hasattr(sdata, "coords") and sdata.coords is not None:
+                frequency = sdata.coords["frequency"]
             else:
                 raise RuntimeError("Frequency data not found in sdata.")
 
@@ -110,10 +110,10 @@ class Component(object):
         pnum = sdata.shape[-2]
         port_a = np.arange(1, pnum +1)
 
-        ret_data["s"] = ldarray(sdata, dim=dict(frequency=frequency, b=port_a, a=port_a))
+        ret_data["s"] = ldarray(sdata, coords=dict(frequency=frequency, b=port_a, a=port_a))
 
         if noise:
-            ret_data["n"] = ldarray(ndata, dim=dict(frequency=frequency, b=port_a, a=port_a))
+            ret_data["n"] = ldarray(ndata, coords=dict(frequency=frequency, b=port_a, a=port_a))
 
         if getattr(self, "_probe_data", None) is not None:
             ret_data["probes"] = self._probe_data
@@ -188,7 +188,7 @@ class Component_SnP(Component):
 
         # interpolate the s-parameters at the desired frequency points
         if frequency is not None:
-            sp1 = CubicSpline(sdata.dim["frequency"], sdata, axis=-3)
+            sp1 = CubicSpline(sdata.coords["frequency"], sdata, axis=-3)
             sdata = sp1(frequency)
 
         return sdata
@@ -199,14 +199,14 @@ class Component_SnP(Component):
         sdata = self.evaluate_sdata(frequency)
 
         if frequency is None:
-            frequency = data.dim["frequency"]
+            frequency = data.coords["frequency"]
 
         # get noise parameters from cache
         _, np_data = self._data_cache[self.state]
 
         if np_data is not None:
             # interpolate the noise parameters at the sdata frequency points, allow extrapolation
-            sp2 = CubicSpline(np_data.dim["frequency"], np_data, axis=-2)
+            sp2 = CubicSpline(np_data.coords["frequency"], np_data, axis=-2)
             np_data = sp2(frequency)
 
             ndata = core.noise_params_to_ndata(np_data, sdata)
