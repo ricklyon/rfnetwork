@@ -8,6 +8,5 @@
 __pycache__/
 /tests/.figures
 /docs/scripts
-data/
 archive/
 *.so
