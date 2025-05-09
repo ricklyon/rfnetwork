@@ -497,7 +497,7 @@ class MSLine(Line):
         fields = ("w", "h", "t", "loss_tan")
         return all([np.all(getattr(self, f) == getattr(other, f)) for f in fields])
 
-    def __call__(self, w=None, length=None, e_len=None, fc=None):
+    def __call__(self, length=None, w=None, e_len=None, fc=None):
 
         lineseg = super().__call__(length=length, e_len=e_len, fc=fc)
 
