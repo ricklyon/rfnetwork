@@ -302,8 +302,6 @@ class Line(Component):
     def __call__(self, length=None, e_len=None, fc=None):
         # call is used to create a new Line instance with the specified length.
         # this allows multiple Line objects to be created with different lengths from the same line object
-        if self.length is not None:
-            raise RuntimeError("line already has length of {} in.".format(self.length))
 
         # assign electrical length if given
         if e_len is not None:
@@ -314,7 +312,9 @@ class Line(Component):
 
         # create new instance with length
         lineseg = dcopy(self)
-        lineseg.length = float(length)
+
+        if length is not None:
+            lineseg.length = float(length)
 
         return lineseg
 
@@ -497,6 +497,15 @@ class MSLine(Line):
         fields = ("w", "h", "t", "loss_tan")
         return all([np.all(getattr(self, f) == getattr(other, f)) for f in fields])
 
+    def __call__(self, w=None, length=None, e_len=None, fc=None):
+
+        lineseg = super().__call__(length=length, e_len=e_len, fc=fc)
+
+        if w is not None:
+            lineseg.w = float(w)
+
+        return lineseg
+    
     def get_properties(self, frequency):
         """
         Returns a list of characteristic impedance and effective dielectric constants over frequency.
