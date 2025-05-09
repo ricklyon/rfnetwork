@@ -112,7 +112,8 @@ class conv():
         km_nmi = 1.85200,
         km_mi  = 1.60934,
         in_m   = 39.3701,
-        mil_mm = 39.3701
+        mil_mm = 39.3701,
+        mm_in = 25.4
     )
 
 # add conversion functions for simple ratios

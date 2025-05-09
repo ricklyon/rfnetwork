@@ -283,7 +283,7 @@ def connect_node(
                 probe_netlist[c].pop(p - 1)
 
     # case #1: node is a single connection between two ports from two different components
-    if node_num_ports == 2 and len(node_ports.keys()) == 2 and not node_is_external:
+    elif node_num_ports == 2 and len(node_ports.keys()) == 2 and not node_is_external:
         # sdata for connected components
         c1, c2 = node_ports.keys()
         s1, s2 = comp_data[c1], comp_data[c2]

@@ -242,8 +242,10 @@ def get_passive_ndata(sdata: np.ndarray):
     s_conj_T = np.transpose(sdata, (-3, -1, -2)).conj()
     return (idn - np.einsum("...ij, ...jk->...ik", sdata, s_conj_T)) * const.k * const.t0
 
+
 def is_passive(sdata: np.ndarray):
     return np.max(np.abs(sdata)) < 1.01
+
 
 def noise_figure_from_ndata(sdata: np.ndarray, ndata: np.ndarray, path: tuple, t0: float = 290):
     """

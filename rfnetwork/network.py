@@ -132,11 +132,13 @@ class Network(Component, metaclass=NetworkMeta):
 
         # connect all ground nodes first
         if 0 in all_nodes:
-            nlist.connect_node(component_data, netlist, probe_netlist, ports=self.ports, node=0, noise=noise)
+            node_is_external = 0 in self.ports.values()
+            nlist.connect_node(component_data, netlist, probe_netlist, 0, node_is_external, noise=noise)
 
         # terminate open circuited ports
         if -1 in all_nodes:
-            nlist.connect_node(component_data, netlist, probe_netlist, ports=self.ports, node=-1, noise=noise)
+            node_is_external = -1 in self.ports.values()
+            nlist.connect_node(component_data, netlist, probe_netlist, -1, node_is_external, noise=noise)
 
         # update node list with 0 and -1 removed
         remaining_nodes = nlist.get_all_nodes(netlist)

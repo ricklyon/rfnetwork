@@ -132,7 +132,7 @@ class Component_SnP(Component):
             self.file = dict(default=Path(file))
 
         elif isinstance(file, dict):
-            self.file = dict(**{k: Path(v) for k,v in file.items()})
+            self.file = {**{k: Path(v) for k,v in file.items()}}
 
         # check that all files have the same number of ports
         pnums = np.array([utils.get_pnum_from_snp(v) for v in self.file.values()])
