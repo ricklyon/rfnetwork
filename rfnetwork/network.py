@@ -44,7 +44,7 @@ class NetworkMeta(type):
 
         # similar to the normal netlist, but each value is either None for no probe, or a probe name in the
         # index for the port it's assigned to. Probes the voltage wave leaving the port.
-        probe_netlist = nlist.build_probe_netlist(components, probes, netlist)
+        probe_netlist, probe_names = nlist.build_probe_netlist(components, probes, netlist)
 
         # add _cls_blocks and declared_ports as a class member and call type.__new__
         classdict["cls_components"] = components
@@ -52,6 +52,7 @@ class NetworkMeta(type):
         classdict["probe_netlist"] = probe_netlist
         classdict["ports"] = ports
         classdict["probes"] = probes
+        classdict["probe_names"] = probe_names
 
         ncls = super().__new__(metacls, cls, bases, classdict)
         return ncls
@@ -70,7 +71,6 @@ class Network(Component, metaclass=NetworkMeta):
             self.components[k] = deepcopy(v)
 
         self.set_state(**kwargs)
-        self._probe_data = None
 
         super().__init__(passive=passive, shunt=shunt, pnum=nports)
                  
@@ -200,13 +200,12 @@ class Network(Component, metaclass=NetworkMeta):
         # indices of the current ports that put them in order
         port_node_idx = [port_nodes.index(node) for node in port_nodes_ordered]
 
-        # probe names in the order given in the dictionary
-        probe_names_ordered = list(self.probes.keys())
         # indices of the probe names that put them in order
-        probe_names_idx = [probe_names.index(name) for name in probe_names_ordered]
+        probe_names_idx = [probe_names.index(name) for name in self.probe_names]
 
-        # reorder the sdata rows to match the desired port order
-        sdata[:] = sdata[:, np.array(port_node_idx + probe_names_idx), :]
+        # reorder the sdata rows to match the desired port order. leave the probe order as is
+        row_order = port_node_idx + probe_names_idx
+        sdata = sdata[:, np.array(row_order), :]
         # reorder the columns
         sdata[..., :] = sdata[..., np.array(port_node_idx)]
 
@@ -215,22 +214,22 @@ class Network(Component, metaclass=NetworkMeta):
             ndata = component_data[network_comp]["n"]
 
             # reorder the ndata rows to match the desired port order
-            ndata[:] = ndata[:, np.array(port_node_idx), :]
+            ndata = ndata[:, np.array(port_node_idx), :]
             # reorder the columns
             ndata[..., :] = ndata[..., np.array(port_node_idx)]
         else:
             ndata = None
         
-        # separate the probe matrix and save to a cached variable
+        # label the probe rows if present
         if s_b > s_a:
-            self._probe_data = ldarray(
-                sdata[:, s_a:], coords=dict(frequency=frequency, b=probe_names_ordered, a=np.arange(1, s_a + 1))
+            a_ports = np.arange(1, s_a + 1)
+            b_names = [int(a) for a in a_ports] + probe_names[s_a:]
+            sdata = ldarray(
+                sdata, coords=dict(frequency=frequency, b=b_names, a=a_ports)
             )
-        else:
-            self._probe_data = None
 
         # return the square matrix sdata (excluding probes), and the noise data
-        return sdata[:, :s_a], ndata
+        return sdata, ndata
         
 
 

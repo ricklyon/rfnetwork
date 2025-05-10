@@ -96,8 +96,11 @@ def build_probe_netlist(components: dict, probes: dict, netlist: dict):
     # reversed dictionary mapping obj ids to their reference
     refdes_lookup_by_obj = {id(v): k for k,v in components.items()}
     # initialize empty netlist with None assigned to every port
-    probe_netlist = {k: [None] * len(v) for k, v in netlist.items()}
-
+    probe_netlist = {}
+    for k, v in netlist.items():
+        probe_netlist[k] = [None] * len(v) 
+            
+    # populate the probe netlist with probe names attached to the top level network
     for name, (cobj, port) in probes.items():
         # check that the object is in the component mapping
         if id(cobj) not in refdes_lookup_by_obj.keys():
@@ -110,7 +113,18 @@ def build_probe_netlist(components: dict, probes: dict, netlist: dict):
         # populate the netlist at the port index with the probe name
         probe_netlist[designator][port - 1] = name
 
-    return probe_netlist
+    # add probes from sub-networks and compile a list of all probes from all sub-networks. 
+    # The order here doesn't matter because evaluate will ensure the sdata rows match whatever order is assigned here.
+    probe_names = list(probes.keys())
+    for k, v in probe_netlist.items():
+        # Extend the probe list to include the existing probes of a component that is a another network.
+        if hasattr(components[k], "probe_names"):
+            subntwk_probe_names = [f"{k}.{p}" for p in components[k].probe_names]
+
+            probe_netlist[k] += subntwk_probe_names
+            probe_names += subntwk_probe_names
+
+    return probe_netlist, probe_names
 
 
 def build_netlist(nodes: list, cascades: list, components: dict) -> dict:

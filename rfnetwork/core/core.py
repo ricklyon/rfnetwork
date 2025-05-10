@@ -90,12 +90,13 @@ def connect(s1: dict, s2: dict, connections: list, probes: list = None, noise: b
     cas_data = dict(s=np.einsum("...ij,...jk->...ik", m1_inv[:, row_order], m2, optimize="greedy"))
 
     if noise:
-        # get rows corresponding to the external ports, including the connected ports but excluding any previous probe
-        # rows
-        # split columns between the first and second component
+        # get the columns/rows of the square m1_inv matrix that correspond to external ports (drop probes)
         rows_ext = np.concatenate([np.arange(s1_a), s1_b + np.arange(s2_a)])
-        m1_1 = np.array(m1_inv[:, rows_ext, :s1_a], order="C")
-        m1_2 = np.array(m1_inv[:, rows_ext, s1_a:], order="C")
+        m1_ext = m1_inv[:, rows_ext, :]
+        m1_ext = m1_ext[:, :, rows_ext]
+        # split columns between the first and second component
+        m1_1 = np.array(m1_ext[..., :s1_a], order="C")
+        m1_2 = np.array(m1_ext[..., s1_a:], order="C")
 
         # get the correlation matrices for each component
         c1, c2 = np.array(s1["n"], order="C"), np.array(s2["n"], order="C")

@@ -215,7 +215,10 @@ def plot(
 
         # create the label for this line
         p1_name, p2_name = path_names[i]
-        label = r"{}{}$_{{ {},{} }}$".format(global_label, fmt_prefix[fmt], p1_name, p2_name)
+        # escape underscores in port names
+        p1_name = "\mathrm{" + p1_name.replace("_", "\\_") + "}"
+        p2_name = "\mathrm{" + p2_name.replace("_", "\\_") + "}"
+        label = r"{}{}$({{ {},{} }})$".format(global_label, fmt_prefix[fmt], p1_name, p2_name)
 
         # plot like normal if lines were not provided
         axes.plot(xdata_s, ydata, label=label, **line_kwargs)

@@ -107,16 +107,16 @@ class Component(object):
 
         # cast data as labeled arrays
         ret_data = dict()
-        pnum = sdata.shape[-2]
+        pnum = sdata.shape[-1]
         port_a = np.arange(1, pnum +1)
 
-        ret_data["s"] = ldarray(sdata, coords=dict(frequency=frequency, b=port_a, a=port_a))
+        if not isinstance(sdata, ldarray):
+            sdata = ldarray(sdata, coords=dict(frequency=frequency, b=port_a, a=port_a))
+
+        ret_data["s"] = sdata
 
         if noise:
             ret_data["n"] = ldarray(ndata, coords=dict(frequency=frequency, b=port_a, a=port_a))
-
-        if getattr(self, "_probe_data", None) is not None:
-            ret_data["probes"] = self._probe_data
 
         return ret_data
 
