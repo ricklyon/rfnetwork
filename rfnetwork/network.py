@@ -222,8 +222,8 @@ class Network(Component, metaclass=NetworkMeta):
         
         # label the probe rows if present
         if s_b > s_a:
-            a_ports = np.arange(1, s_a + 1)
-            b_names = [int(a) for a in a_ports] + probe_names[s_a:]
+            a_ports = [a for a in range(1, s_a + 1)]
+            b_names = a_ports + self.probe_names
             sdata = ldarray(
                 sdata, coords=dict(frequency=frequency, b=b_names, a=a_ports)
             )

@@ -108,10 +108,12 @@ def format_smithchart(ax: plt.Axes, values=None, line_kwargs=dict(linewidth=0.25
 
 
 def plot(
-    data,
+    sdata,
     *paths,
     fmt="db",
+    ndata=None,
     freq_unit="ghz",
+    ref_path=None,
     axes=None,
     label=None,
     smithchart_kwargs={},
@@ -167,7 +169,6 @@ def plot(
         # draw lines on smithchart
         format_smithchart(axes, **smithchart_kwargs)
 
-    sdata = data["s"]
     pnum = sdata.shape[-1]
     # plot all possible paths if not given
     if not len(paths) and fmt != 'smith':
@@ -180,10 +181,14 @@ def plot(
     if isinstance(paths[0], int):
         # break integers into sets of 2-tuples: 21 -> (2,1)
         paths = [((p // 10), (p % 10)) for p in paths]
-        path_names = [(str(p1), str(p2)) for p1, p2 in paths]
-    else:
-        paths = list(paths)
-        path_names = [(str(p1), str(p2)) for p1, p2 in paths]
+
+    # break reference path into tuple
+    if ref_path is not None:
+        ref_path = ((ref_path // 10), (ref_path % 10)) if isinstance(ref_path, int) else ref_path
+
+        # check that noise figure is not plotted when reference is provided
+        if fmt in ["nf"]:
+            raise ValueError("Plotting against a reference path is not supported for noise figure plots.")
 
     # get xaxis vector
     f_multiplier = dict(hz=1, khz=1e3, mhz=1e6, ghz=1e9)[freq_unit]
@@ -204,21 +209,31 @@ def plot(
         # pull the path data out
         path_data = sdata[{"b": p1, "a": p2}]
 
+        # divide by the reference data
+        if ref_path is not None:
+            r1, r2 = ref_path
+            path_data /= sdata[{"b": r1, "a": r2}]
+
         # apply formatting to data (convert to dB, ang, etc...)
         if fmt == "nf":
-            ydata = conv.db10_lin(core.noise_figure_from_ndata(data["s"], data["n"], (p1, p2)))
+            ydata = conv.db10_lin(core.noise_figure_from_ndata(sdata, ndata, (p1, p2)))
         else:
             ydata = fmt_func[fmt](path_data)
 
         # transform xdata to the real part of the ydata if plotting for a smithchart
         xdata_s = fmt_func["real"](path_data) if fmt == "smith" else xdata
 
-        # create the label for this line
-        p1_name, p2_name = path_names[i]
         # escape underscores in port names
-        p1_name = "\mathrm{" + p1_name.replace("_", "\\_") + "}"
-        p2_name = "\mathrm{" + p2_name.replace("_", "\\_") + "}"
+        p1_name = "\mathrm{" + str(p1).replace("_", "\\_") + "}"
+        p2_name = "\mathrm{" + str(p2).replace("_", "\\_") + "}"
+        # build legend label for line, e.g S(2,1)
         label = r"{}{}$({{ {},{} }})$".format(global_label, fmt_prefix[fmt], p1_name, p2_name)
+
+        # add a "divide by" path to the label if a reference is given
+        if ref_path is not None:
+            r1_name = "\mathrm{" + str(r1).replace("_", "\\_") + "}"
+            r2_name = "\mathrm{" + str(r2).replace("_", "\\_") + "}"
+            label += r" / {}$({{ {},{} }})$".format(fmt_prefix[fmt], r1_name, r2_name)
 
         # plot like normal if lines were not provided
         axes.plot(xdata_s, ydata, label=label, **line_kwargs)

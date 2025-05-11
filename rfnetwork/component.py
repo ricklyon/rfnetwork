@@ -63,7 +63,8 @@ class Component(object):
         
         """
         data = self.evaluate(frequency, noise=fmt in ["nf"])
-        return plots.plot(data, *paths, fmt=fmt, **kwargs)
+        ndata = data["n"] if fmt in ["nf"] else None
+        return plots.plot(data["s"], *paths, fmt=fmt, ndata=ndata, **kwargs)
     
     def evaluate(self, frequency: np.ndarray = None, noise: bool = False) -> dict:
         """
