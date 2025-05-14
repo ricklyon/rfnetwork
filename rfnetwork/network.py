@@ -147,7 +147,7 @@ class Network(Component, metaclass=NetworkMeta):
         for i in range(max_connections):
 
             min_cas_ports = np.inf
-            min_node = -1
+            min_node = np.nan
 
             # find the node connection that results in the fewest external ports
             for node in remaining_nodes:
@@ -166,7 +166,7 @@ class Network(Component, metaclass=NetworkMeta):
                     min_cas_ports = num_cas_ports
                     min_node = node
 
-            if min_node < 0:
+            if not np.isfinite(min_node):
                 break
 
             # remove this node from the list

@@ -270,10 +270,6 @@ def connect_node(
     if node in [0, -1] and node_is_external:
         raise RuntimeError("Cannot make open or ground node external.")
 
-    # if there is only one connecting port, skip this node, no action needed
-    if (node_num_ports == 1):
-        return
-
     # case #0: ground and open loads
     if node in [0, -1]:
         c1 = list(comp_data.keys())[0]
@@ -296,6 +292,10 @@ def connect_node(
                 # ground and loads cannot be assigned as probe ports and will be removed from the probe netlist
                 probe_netlist[c].pop(p - 1)
 
+    # if there is only one connecting port, skip this node, no action needed
+    elif (node_num_ports == 1):
+        return
+    
     # case #1: node is a single connection between two ports from two different components
     elif node_num_ports == 2 and len(node_ports.keys()) == 2 and not node_is_external:
         # sdata for connected components

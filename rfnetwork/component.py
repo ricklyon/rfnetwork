@@ -70,6 +70,9 @@ class Component(object):
         """
         Returns a dictionary with keys: "n" (noise correlation matrix) and "s" (s-matrix). 
         """
+
+        frequency = np.atleast_1d(frequency)
+        
         # compute noise data only if not passive
         if self._passive or not noise:
             sdata = self.evaluate_sdata(frequency)
@@ -189,8 +192,11 @@ class Component_SnP(Component):
 
         # interpolate the s-parameters at the desired frequency points
         if frequency is not None:
-            sp1 = CubicSpline(sdata.coords["frequency"], sdata, axis=-3)
-            sdata = sp1(frequency)
+            if len(sdata.coords["frequency"]) > 1:
+                sp1 = CubicSpline(sdata.coords["frequency"], sdata, axis=-3)
+                sdata = sp1(frequency)
+            else:
+                sdata = sdata.sel(frequency=frequency)
 
         return sdata
         
@@ -233,5 +239,33 @@ class Component_SnP(Component):
     def state(self):
         return self._state
 
-class ComponentFromData(Component):
-    pass
+class Component_Data(Component):
+    """
+    Component defined from a user-defined or imported data.
+    """
+
+    def __init__(self, data: ldarray, shunt: bool = False, passive: bool = False):
+
+        self._sdata = data
+        pnum = data.shape[-2]
+        super().__init__(shunt=shunt, passive=passive, pnum=pnum)
+
+    def equals(self, other):
+        return False
+
+    def __call__(self):
+        # simple syntax for duplicating components in Network declarations
+        return dcopy(self)
+    
+    def evaluate_sdata(self, frequency) -> np.ndarray:
+        
+        sdata = self._sdata
+
+        # interpolate the s-parameters at the desired frequency points
+        if len(sdata.coords["frequency"]) > 1:
+            sp1 = CubicSpline(sdata.coords["frequency"], sdata, axis=-3)
+            sdata = sp1(frequency)
+        else:
+            sdata = sdata.sel(frequency=frequency)
+
+        return sdata
