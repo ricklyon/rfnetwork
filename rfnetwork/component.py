@@ -58,13 +58,18 @@ class Component(object):
         """
         raise NotImplementedError()
     
-    def plot(self, frequency = None, *paths, fmt: str = "db", **kwargs):
+    def plot(self, frequency = None, *paths, fmt: str = "db", return_lines: bool = False, **kwargs):
         """
         
         """
         data = self.evaluate(frequency, noise=fmt in ["nf"])
         ndata = data["n"] if fmt in ["nf"] else None
-        return plots.plot(data["s"], *paths, fmt=fmt, ndata=ndata, **kwargs)
+        ax, lines = plots.plot(data["s"], *paths, fmt=fmt, ndata=ndata, **kwargs)
+    
+        if return_lines:
+            return ax, lines
+        else: 
+            return ax
     
     def plot_stability_circles(self, f0: float, **kwargs):
         """
