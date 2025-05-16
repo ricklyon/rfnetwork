@@ -58,7 +58,7 @@ class Component(object):
         """
         raise NotImplementedError()
     
-    def plot(self, frequency, *paths, fmt: str = "db", **kwargs):
+    def plot(self, frequency = None, *paths, fmt: str = "db", **kwargs):
         """
         
         """
@@ -66,12 +66,19 @@ class Component(object):
         ndata = data["n"] if fmt in ["nf"] else None
         return plots.plot(data["s"], *paths, fmt=fmt, ndata=ndata, **kwargs)
     
+    def plot_stability_circles(self, f0: float, **kwargs):
+        """
+        
+        """
+        data = self.evaluate(f0)["s"]
+        return plots.plot_stability_circles(data, f0, **kwargs)
+    
     def evaluate(self, frequency: np.ndarray = None, noise: bool = False) -> dict:
         """
         Returns a dictionary with keys: "n" (noise correlation matrix) and "s" (s-matrix). 
         """
 
-        frequency = np.atleast_1d(frequency)
+        frequency = np.atleast_1d(frequency) if frequency is not None else None
         
         # compute noise data only if not passive
         if self._passive or not noise:

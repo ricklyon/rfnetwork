@@ -4,6 +4,7 @@ from matplotlib.lines import Line2D
 from .core.units import conv
 from . core import core
 import mpl_markers as mplm
+from np_struct import ldarray
 
 # conversion functions for supported formats
 fmt_func = {
@@ -61,6 +62,7 @@ def smith_circles(values: list, line_type: str, npoints = 5001, gamma_clip: floa
 
     old_settings = np.geterr()
     np.seterr(all='ignore')
+
     # circle center (x0, y0), and the circle radius for each line type
     line_xyr = dict(
         r = (values / (1 + values), np.zeros_like(values), 1 / (1+values)),
@@ -70,14 +72,15 @@ def smith_circles(values: list, line_type: str, npoints = 5001, gamma_clip: floa
         gamma = (np.zeros_like(values), np.zeros_like(values), values), 
         vswr = (np.zeros_like(values), np.zeros_like(values), (values - 1) / (values + 1))
     )
-    np.seterr(**old_settings)
-
+    
     # generate lines
     x0, y0, r = line_xyr[line_type]
     ang = np.linspace(0, 2 * np.pi, npoints, endpoint=True)
     circles = r[..., None] * np.exp(1j * ang)[None] + (x0 + 1j * y0)[..., None]
     # clip circles beyond gamma=1 (or whatever the user specified)
     circles = np.where(np.abs(circles) > gamma_clip * (1 + 1e-6), np.nan, circles)
+
+    np.seterr(**old_settings)
 
     # the transpose can be directly plotted: ax.plot(np.real(circles), np.imag(circles))
     return circles.T
@@ -96,16 +99,64 @@ def format_smithchart(ax: plt.Axes, values=None, line_kwargs=dict(linewidth=0.25
     xp = smith_circles(values, "x")
     xn = smith_circles(-np.array(values), "x")
 
+    g = smith_circles(values, "g")
+    sp = smith_circles(values, "s")
+    sn = smith_circles(-np.array(values), "s")
+
     sm_lines = ax.plot(r.real, r.imag, **line_kwargs)
     sm_lines += ax.plot(xp.real, xp.imag, **line_kwargs)
     sm_lines += ax.plot(xn.real, xn.imag, **line_kwargs)
 
-    # draw xy axis
+    admittance_kwargs = dict(color="m", alpha=0.4, linewidth=0.2)
+
+    sm_lines = ax.plot(g.real, g.imag, **admittance_kwargs)
+    sm_lines += ax.plot(sp.real, sp.imag, **admittance_kwargs)
+    sm_lines += ax.plot(sn.real, sn.imag, **admittance_kwargs)
+
+    # draw x axis line
     sm_lines += ax.plot([-1, 1], [0, 0], **line_kwargs)
-    sm_lines += ax.plot([0, 0], [-1, 1], **line_kwargs)
 
     mplm.disable_lines(sm_lines, axes=ax)
 
+def plot_stability_circles(sdata: ldarray, f0: float, axes = None, load_kwargs=dict(), source_kwargs=dict()):
+    """
+    Plot source and load stability circles at f0. 
+    """
+    if axes is None:
+        # create axes if one was not given
+        fig = plt.figure(figsize=(7, 7))
+        axes = fig.subplots(1, 1)
+        format_smithchart(axes)
+
+    s11 = sdata.sel(frequency=f0, b=1, a=1)
+    s22 = sdata.sel(frequency=f0, b=2, a=2)
+    s21 = sdata.sel(frequency=f0, b=2, a=1)
+    s12 = sdata.sel(frequency=f0, b=1, a=2)
+
+    def stability_circle_output(s11, s12, s21, s22):
+        del_ = s11*s22 - (s12*s21)
+        r = np.abs((s12*s21)/(np.abs(s22)**2 - np.abs(del_)**2))
+        c = np.conj(s22 - (del_*np.conj(s11))) / (np.abs(s22)**2 - np.abs(del_)**2)
+        return r, c
+
+    def stability_circle_input(s11, s12, s21, s22):
+        del_ = s11*s22 - (s12*s21)
+        r = np.abs((s12*s21)/(np.abs(s11)**2 - np.abs(del_)**2))
+        c = np.conj(s11 - (del_*np.conj(s22))) / (np.abs(s11)**2 - np.abs(del_)**2)
+        return r, c
+
+
+    rl, cl = stability_circle_output(s11, s12, s21, s22)
+    rs, cs = stability_circle_input(s11, s12, s21, s22)
+
+    xdat = np.linspace(0, 2*np.pi, 1000, endpoint=True)
+    s_circ = rs*np.exp(1j * xdat) + cs
+    l_circ = rl*np.exp(1j * xdat) + cl
+
+    l_line = axes.plot(l_circ.real, l_circ.imag, label=r"$\Gamma_L$ Stability", **load_kwargs)
+    s_line = axes.plot(s_circ.real, s_circ.imag, label=r"$\Gamma_S$ Stability", **source_kwargs)
+
+    return axes, s_line[0], l_line[0]
 
 def plot(
     sdata,
@@ -161,13 +212,13 @@ def plot(
 
     if axes is None:
         # create axes if one was not given
-        figsize = (5,5) if fmt == "smith" else (7,5)
+        figsize = (7,7) if fmt == "smith" else (7,5)
         fig = plt.figure(figsize=figsize)
         axes = fig.subplots(1, 1)
 
-    if fmt == "smith":
-        # draw lines on smithchart
-        format_smithchart(axes, **smithchart_kwargs)
+        if fmt == "smith":
+            # draw lines on smithchart
+            format_smithchart(axes, **smithchart_kwargs)
 
     pnum = sdata.shape[-1]
     # plot all possible paths if not given
@@ -203,6 +254,8 @@ def plot(
     axes.set_ylabel(fmt_label.get(fmt))
     axes.grid(True)
 
+    lines = []
+
     # plot over each path given, keep track of the index for tuning calls where each line in a list is updated
     for i, (p1, p2) in enumerate(paths):
         
@@ -224,21 +277,21 @@ def plot(
         xdata_s = fmt_func["real"](path_data) if fmt == "smith" else xdata
 
         # escape underscores in port names
-        p1_name = "\mathrm{" + str(p1).replace("_", "\\_") + "}"
-        p2_name = "\mathrm{" + str(p2).replace("_", "\\_") + "}"
+        p1_name = r"\mathrm{" + str(p1).replace("_", "\\_") + "}"
+        p2_name = r"\mathrm{" + str(p2).replace("_", "\\_") + "}"
         # build legend label for line, e.g S(2,1)
         label = r"{}{}$({{ {},{} }})$".format(global_label, fmt_prefix[fmt], p1_name, p2_name)
 
         # add a "divide by" path to the label if a reference is given
         if ref_path is not None:
-            r1_name = "\mathrm{" + str(r1).replace("_", "\\_") + "}"
-            r2_name = "\mathrm{" + str(r2).replace("_", "\\_") + "}"
+            r1_name = r"\mathrm{" + str(r1).replace("_", "\\_") + "}"
+            r2_name = r"\mathrm{" + str(r2).replace("_", "\\_") + "}"
             label += r" / {}$({{ {},{} }})$".format(fmt_prefix[fmt], r1_name, r2_name)
 
         # plot like normal if lines were not provided
-        axes.plot(xdata_s, ydata, label=label, **line_kwargs)
+        lines += axes.plot(xdata_s, ydata, label=label, **line_kwargs)
 
     axes.margins(x=0)
     axes.legend()
 
-    return axes
+    return axes, lines
