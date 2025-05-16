@@ -42,6 +42,15 @@ class NetworkMeta(type):
         # compile netlist and network port name to node mapping
         netlist, ports = nlist.build_netlist(nodes, cascades, components)
 
+        # compile a probe map of all valid nodes in the network if probes is set to True
+        if probes is True:
+            probes = dict()
+            for c, nodes in netlist.items():
+                for i, n in enumerate(nodes):
+                    # exclude ground, open and port nodes
+                    if n not in [0, -1] and n not in ports.values():
+                        probes[f"{c}|{i+1}"] = components[c]|(i + 1)
+
         # similar to the normal netlist, but each value is either None for no probe, or a probe name in the
         # index for the port it's assigned to. Probes the voltage wave leaving the port.
         probe_netlist, probe_names = nlist.build_probe_netlist(components, probes, netlist)
