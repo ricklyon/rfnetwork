@@ -299,6 +299,13 @@ class Line(Component):
         fields = ("z0", "er", "loss", "length", "_frequency")
         return all([np.all(getattr(self, f) == getattr(other, f)) for f in fields])
     
+    def set_state(self, length):
+        self.length = length
+
+    @property
+    def state(self):
+        return self.length
+    
     def __call__(self, length=None, e_len=None, fc=None):
         # call is used to create a new Line instance with the specified length.
         # this allows multiple Line objects to be created with different lengths from the same line object

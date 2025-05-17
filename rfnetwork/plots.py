@@ -109,7 +109,7 @@ def format_smithchart(ax: plt.Axes, values=None, line_kwargs=dict(linewidth=0.25
 
     admittance_kwargs = dict(color="m", alpha=0.4, linewidth=0.2)
 
-    sm_lines = ax.plot(g.real, g.imag, **admittance_kwargs)
+    sm_lines += ax.plot(g.real, g.imag, **admittance_kwargs)
     sm_lines += ax.plot(sp.real, sp.imag, **admittance_kwargs)
     sm_lines += ax.plot(sn.real, sn.imag, **admittance_kwargs)
 
