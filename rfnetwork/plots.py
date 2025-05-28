@@ -50,6 +50,15 @@ fmt_prefix = {
     "nf": "NF",
 }
 
+
+def smithchart_marker(ax, frequency, fc: float):
+    """ place a smith chart marker by frequency rather than x/y position """
+    
+    f_idx = np.argmin(np.abs(frequency - fc))
+    return mplm.line_marker(
+        idx=f_idx, axes=ax, xline=False, yformatter=lambda x, y, idx: f"{frequency[idx]/1e6:.0f}MHz"
+    )
+
 def smith_circles(values: list, line_type: str, npoints = 5001, gamma_clip: float = 1):
     """
     Generate smith chart impedance/admittance circles
@@ -167,7 +176,9 @@ def plot(
     ref_path=None,
     axes=None,
     label=None,
+    label_mode: str = "prefix",
     smithchart_kwargs={},
+    lines=None,
     **line_kwargs
 ) -> plt.Axes:
     """
@@ -210,15 +221,6 @@ def plot(
 
     """
 
-    if axes is None:
-        # create axes if one was not given
-        figsize = (7,7) if fmt == "smith" else (7,5)
-        fig = plt.figure(figsize=figsize)
-        axes = fig.subplots(1, 1)
-
-        if fmt == "smith":
-            # draw lines on smithchart
-            format_smithchart(axes, **smithchart_kwargs)
 
     pnum = sdata.shape[-1]
     # plot all possible paths if not given
@@ -246,15 +248,39 @@ def plot(
     f_label = dict(hz="Hz", khz="kHz", mhz="MHz", ghz="GHz")[freq_unit]
     xdata = sdata.coords["frequency"] / f_multiplier
 
+    custom_label = None
+    prefix_label = ""
+    suffix_label = ""
     # default line label
-    global_label = "" if label is None else label + " "
+    if label_mode == "override":
+        # broadcast label(s) across all paths
+        custom_label = np.broadcast_to(label, len(paths)).copy()
+    elif label_mode == "prefix":
+        prefix_label = "" if label is None else label + " "
+    elif label_mode == "suffix": #append
+        suffix_label = "" if label is None else " " + label
 
-    # apply labels and grid
-    axes.set_xlabel(f"Frequency [{f_label}]")
-    axes.set_ylabel(fmt_label.get(fmt))
-    axes.grid(True)
+    if lines is not None:
+        axes = lines[0].axes
 
-    lines = []
+    elif axes is None:
+        # create axes if one was not given
+        figsize = (7,7) if fmt == "smith" else (7,5)
+        fig = plt.figure(figsize=figsize)
+        axes = fig.subplots(1, 1)
+
+        if fmt == "smith":
+            # draw lines on smithchart
+            format_smithchart(axes, **smithchart_kwargs)
+            
+        axes.margins(x=0)
+
+        # apply labels and grid
+        axes.set_xlabel(f"Frequency [{f_label}]")
+        axes.set_ylabel(fmt_label.get(fmt))
+        axes.grid(True)
+
+    lines = [] if lines is None else lines
 
     # plot over each path given, keep track of the index for tuning calls where each line in a list is updated
     for i, (p1, p2) in enumerate(paths):
@@ -279,19 +305,26 @@ def plot(
         # escape underscores in port names
         p1_name = r"\mathrm{" + str(p1).replace("_", "\\_") + "}"
         p2_name = r"\mathrm{" + str(p2).replace("_", "\\_") + "}"
-        # build legend label for line, e.g S(2,1)
-        label = r"{}{}$({{ {},{} }})$".format(global_label, fmt_prefix[fmt], p1_name, p2_name)
 
-        # add a "divide by" path to the label if a reference is given
-        if ref_path is not None:
-            r1_name = r"\mathrm{" + str(r1).replace("_", "\\_") + "}"
-            r2_name = r"\mathrm{" + str(r2).replace("_", "\\_") + "}"
-            label += r" / {}$({{ {},{} }})$".format(fmt_prefix[fmt], r1_name, r2_name)
+        if custom_label is None:
+            label = prefix_label
+            # build legend label for line, e.g S(2,1)
+            label += r"{}$({{ {},{} }})$".format(fmt_prefix[fmt], p1_name, p2_name)
 
-        # plot like normal if lines were not provided
-        lines += axes.plot(xdata_s, ydata, label=label, **line_kwargs)
+            # add a "divide by" path to the label if a reference is given
+            if ref_path is not None:
+                r1_name = r"\mathrm{" + str(r1).replace("_", "\\_") + "}"
+                r2_name = r"\mathrm{" + str(r2).replace("_", "\\_") + "}"
+                label += r" / {}$({{ {},{} }})$".format(fmt_prefix[fmt], r1_name, r2_name)
 
-    axes.margins(x=0)
-    axes.legend()
+            label += suffix_label
+        else:
+            label = custom_label[i]
+
+        if len(lines) > i:
+            lines[i].set_data(xdata_s, ydata)
+        else:
+            # plot like normal if lines were not provided
+            lines += axes.plot(xdata_s, ydata, label=label, **line_kwargs)
 
     return axes, lines

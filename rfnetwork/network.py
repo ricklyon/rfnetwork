@@ -12,6 +12,8 @@ import numpy as np
 from copy import deepcopy
 from . import netlist as nlist
 from np_struct import ldarray
+from . import plots
+
 
 from typing import Tuple
 
@@ -104,6 +106,32 @@ class Network(Component, metaclass=NetworkMeta):
     @property
     def state(self):
         return {k: v.state for k, v in self.components.items() if hasattr(v, "state") and v.state != "default"}
+    
+
+    def plot_probe(self, frequency, *paths, input_port=1, fmt= "db", **kwargs):
+
+        explicit_paths = []
+        ref_path = None
+        labels = []
+
+        for p in paths:
+
+            if not (isinstance(p, (tuple, list)) and len(p) == 2):
+                raise ValueError("path must be a tuple of length 2.")
+            
+            explicit_paths += [(p[0], input_port)]
+            
+            if ref_path is None:
+                ref_path = p[1]
+            elif p[1] != ref_path:
+                raise ValueError(f"All input probes must be identical, got {p[1]} and {ref_path}.")
+            
+            labels += [r"{}({}, {})$_{{{}}}$".format(plots.fmt_prefix[fmt], p[0], p[1], input_port)]
+            
+        return super().plot(
+            frequency, *explicit_paths, ref_path=(ref_path, input_port), label=labels, label_mode="override", fmt=fmt, **kwargs
+        )
+
 
     def evaluate_sdata(self, frequency: np.ndarray) -> np.ndarray:
         return self.evaluate_data(frequency, noise=False)[0]
