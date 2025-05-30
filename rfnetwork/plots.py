@@ -173,7 +173,7 @@ def plot(
     fmt="db",
     ndata=None,
     freq_unit="ghz",
-    ref_path=None,
+    ref=None,
     axes=None,
     label=None,
     label_mode: str = "prefix",
@@ -202,7 +202,7 @@ def plot(
             realz
             imagz
 
-    refpath (tuple, int):
+    ref (tuple, int):
         Normalizes all paths to this path. For example, to plot the phase difference between S21 and S31:
             .plot(21, refpath=31, fmt='ang')
     axes (Axes):
@@ -235,13 +235,24 @@ def plot(
         # break integers into sets of 2-tuples: 21 -> (2,1)
         paths = [((p // 10), (p % 10)) for p in paths]
 
-    # break reference path into tuple
-    if ref_path is not None:
-        ref_path = ((ref_path // 10), (ref_path % 10)) if isinstance(ref_path, int) else ref_path
+    # break reference path into list of tuples
+    if ref is not None:
 
         # check that noise figure is not plotted when reference is provided
         if fmt in ["nf"]:
             raise ValueError("Plotting against a reference path is not supported for noise figure plots.")
+        
+        # require that ref be a list the same length as paths. Single values are broadcast to the length of paths
+        if not isinstance(ref, list):
+            ref = [ref] * len(paths)
+
+        if isinstance(ref[0], int):
+            # break integers into sets of 2-tuples: 21 -> (2,1)
+            ref = [((r // 10), (r % 10)) for r in ref]
+
+        if len(ref) != len(paths):
+            raise ValueError(f"Reference paths must be the same length as paths. Got {len(ref)}, expected {len(paths)}")
+
 
     # get xaxis vector
     f_multiplier = dict(hz=1, khz=1e3, mhz=1e6, ghz=1e9)[freq_unit]
@@ -289,8 +300,8 @@ def plot(
         path_data = sdata[{"b": p1, "a": p2}]
 
         # divide by the reference data
-        if ref_path is not None:
-            r1, r2 = ref_path
+        if ref is not None:
+            r1, r2 = ref[i]
             path_data /= sdata[{"b": r1, "a": r2}]
 
         # apply formatting to data (convert to dB, ang, etc...)
@@ -312,7 +323,7 @@ def plot(
             label += r"{}$({{ {},{} }})$".format(fmt_prefix[fmt], p1_name, p2_name)
 
             # add a "divide by" path to the label if a reference is given
-            if ref_path is not None:
+            if ref is not None:
                 r1_name = r"\mathrm{" + str(r1).replace("_", "\\_") + "}"
                 r2_name = r"\mathrm{" + str(r2).replace("_", "\\_") + "}"
                 label += r" / {}$({{ {},{} }})$".format(fmt_prefix[fmt], r1_name, r2_name)
