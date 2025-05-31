@@ -26,6 +26,7 @@ class Component(object):
         self._shunt = shunt
         self._passive = passive
         self._pnum = pnum
+        self._cache = None
 
     @property
     def pnum(self):
@@ -62,7 +63,11 @@ class Component(object):
         """
         
         """
-        data = self.evaluate(frequency, noise=fmt in ["nf"])
+        if self._cache is not None:
+            data = self._cache
+        else:
+            data = self.evaluate(frequency, noise=fmt in ["nf"])
+            
         ndata = data["n"] if fmt in ["nf"] else None
         ax, lines = plots.plot(data["s"], *paths, fmt=fmt, ndata=ndata, **kwargs)
     

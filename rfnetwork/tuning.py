@@ -7,7 +7,7 @@ from PySide6 import QtCore
 import sys
 from typing import Callable
 from PySide6.QtWidgets import (QApplication, QWidget, QLineEdit, QSlider, QGridLayout, QLabel, QVBoxLayout)
-
+import threading
 
 def round_to_multiple(value, multiple=1):
     """ Rounds value to nearest multiple. Multiple can be greater or less than 1.
@@ -29,6 +29,32 @@ def round_to_multiple(value, multiple=1):
     else:
         return np.around(w/invmul, int(np.abs(mlog10)))
 
+
+class TunerThread(QtCore.QThread):
+
+    def __init__(self, plot: Callable):
+
+        self._wait = QtCore.QWaitCondition()
+        self.mutex = QtCore.QMutex()
+        self.queue = []
+        self.plot = plot
+        super().__init__()
+
+    @QtCore.Slot(str)
+    def push(self):
+
+        self._wait.wakeAll()
+
+    def run(self):
+
+        while 1:
+            self.mutex.lock()
+            self._wait.wait(self.mutex)
+            self.mutex.unlock()
+
+            self.plot()
+
+    
 class DoubleSlider(QSlider):
 
     def __init__(self, step_size, *args, **kargs):
@@ -73,13 +99,22 @@ class DoubleSlider(QSlider):
 
 
 class FloatTuner(QWidget):
-    def __init__(self, label: str, lower: float, upper: float, initial: float, multiplier: float, callback: Callable, plot: Callable):
+    def __init__(
+        self, 
+        label: str, 
+        lower: float, 
+        upper: float, 
+        initial: float, 
+        multiplier: float, 
+        callback: Callable, 
+        processor: QtCore.QThread
+    ):
         super(FloatTuner, self).__init__()
         name = QLabel(label)
 
         self.multiplier = multiplier
 
-        self.plot = plot
+        self.processor = processor
         
         self.lower_limit = QLineEdit(str(lower))
         self.lower_limit.setFixedWidth(50)
@@ -130,10 +165,11 @@ class FloatTuner(QWidget):
     def slider_value_changed(self, value):
         value = self.slider.value()
         prev_value = float(self.value.text())
+
         if np.abs(value - prev_value) > (self.step / 2):
             self.value.setText(str(value))
             self.callback(value * self.multiplier)
-            self.plot()
+            self.processor.push()
 
     def set_scale(self):
         min_ = float(self.lower_limit.text())
@@ -145,10 +181,13 @@ class TunerGroup(QWidget):
     def __init__(self, tuners, plot):
         super(TunerGroup,self).__init__()
 
+        self.processor = TunerThread(plot)
+        self.processor.start()
+
         mainLayout = QVBoxLayout()
         self.tuners = []
         for i, (k, v) in enumerate(tuners.items()):
-            self.tuners.append(FloatTuner(**v, plot=plot))
+            self.tuners.append(FloatTuner(**v, processor=self.processor))
             mainLayout.addWidget(self.tuners[i], i)
 
         mainLayout.setSpacing(1)
