@@ -313,29 +313,30 @@ def plot(
         # transform xdata to the real part of the ydata if plotting for a smithchart
         xdata_s = fmt_func["real"](path_data) if fmt == "smith" else xdata
 
-        # escape underscores in port names
-        p1_name = r"\mathrm{" + str(p1).replace("_", "\\_") + "}"
-        p2_name = r"\mathrm{" + str(p2).replace("_", "\\_") + "}"
-
-        if custom_label is None:
-            label = prefix_label
-            # build legend label for line, e.g S(2,1)
-            label += r"{}$({{ {},{} }})$".format(fmt_prefix[fmt], p1_name, p2_name)
-
-            # add a "divide by" path to the label if a reference is given
-            if ref is not None:
-                r1_name = r"\mathrm{" + str(r1).replace("_", "\\_") + "}"
-                r2_name = r"\mathrm{" + str(r2).replace("_", "\\_") + "}"
-                label += r" / {}$({{ {},{} }})$".format(fmt_prefix[fmt], r1_name, r2_name)
-
-            label += suffix_label
-        else:
-            label = custom_label[i]
-
         if len(lines) > i:
             lines[i].set_data(xdata_s, ydata)
+
+        # plot like normal if lines were not provided
         else:
-            # plot like normal if lines were not provided
+            if custom_label is None:
+                # escape underscores in port names
+                p1_name = r"\mathrm{" + str(p1).replace("_", "\\_") + "}"
+                p2_name = r"\mathrm{" + str(p2).replace("_", "\\_") + "}"
+
+                label = prefix_label
+                # build legend label for line, e.g S(2,1)
+                label += r"{}$({{ {},{} }})$".format(fmt_prefix[fmt], p1_name, p2_name)
+
+                # add a "divide by" path to the label if a reference is given
+                if ref is not None:
+                    r1_name = r"\mathrm{" + str(r1).replace("_", "\\_") + "}"
+                    r2_name = r"\mathrm{" + str(r2).replace("_", "\\_") + "}"
+                    label += r" / {}$({{ {},{} }})$".format(fmt_prefix[fmt], r1_name, r2_name)
+
+                label += suffix_label
+            else:
+                label = custom_label[i]
+
             lines += axes.plot(xdata_s, ydata, label=label, **line_kwargs)
 
     return axes, lines

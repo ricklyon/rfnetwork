@@ -7,9 +7,16 @@ from copy import deepcopy as dcopy
 from abc import abstractmethod
 from typing import Tuple
 
+import mpl_markers as mplm
+import matplotlib.pyplot as plt
+
+from PySide6.QtWidgets import (QApplication)
+import sys
+
 from . import touchstone, const, utils
 from . core import core
 from . import plots
+from . tuning import TunerGroup
 
 class Component(object):
     
@@ -26,7 +33,7 @@ class Component(object):
         self._shunt = shunt
         self._passive = passive
         self._pnum = pnum
-        self._cache = None
+        self._tune = dict(frequency=None, args=[], axes=[])
 
     @property
     def pnum(self):
@@ -59,29 +66,70 @@ class Component(object):
         """
         raise NotImplementedError()
     
-    def plot(self, frequency = None, *paths, fmt: str = "db", return_lines: bool = False, **kwargs):
+    def plot(self, frequency = None, *paths, fmt: str = "db", tune: bool = False, **kwargs):
         """
         
         """
-        if self._cache is not None:
-            data = self._cache
-        else:
-            data = self.evaluate(frequency, noise=fmt in ["nf"])
+        data = self.evaluate(frequency, noise=fmt in ["nf"])
             
         ndata = data["n"] if fmt in ["nf"] else None
         ax, lines = plots.plot(data["s"], *paths, fmt=fmt, ndata=ndata, **kwargs)
+
+        if tune:
+            # TODO: check that frequency is the same for all tune plots
+            self._tune["frequency"] = frequency
+            self._tune["args"] += [(fmt, lines, paths, kwargs)]
+
+            if ax not in self._tune["axes"]:
+                self._tune["axes"] += [ax]
     
-        if return_lines:
-            return ax, lines
-        else: 
-            return ax
+        return ax, lines
     
-    def plot_stability_circles(self, f0: float, **kwargs):
-        """
+    def tune(self, tuners):
+        # add callback functions
+        for k, v in tuners.items():
+            component = self
+            # drill down to a sub-component if this is a network
+            for c in k.split("."):
+                component = component[c]
+
+            tuners[k]["callback"] = component.set_state
+
+        for ax in self._tune["axes"]:
+            mplm.init_axes(ax)
+
+        # bring the plot window up
+        plt.show(block=False)
+
+        window = TunerGroup(tuners, self._update_tune_plot)
+        window.setWindowTitle("Tuning")
+
+        # start the tuner app
+        qapp = QApplication.instance()
+        if qapp is None:
+            qapp = QApplication(sys.argv)
+
+        window.show()
+        qapp.exec()
+    
+    def _update_tune_plot(self):
+
+        if self._tune["frequency"] is None:
+            return
         
-        """
-        data = self.evaluate(f0)["s"]
-        return plots.plot_stability_circles(data, f0, **kwargs)
+        # call evaluate once for all plots, assumes frequency is the same
+        nf = any([tp[0] in ["nf"] for tp in self._tune["args"]])
+
+        data = self.evaluate(self._tune["frequency"], noise=nf)
+        ndata = data["n"] if nf else None
+
+        # update the data lines
+        for (fmt, lines, paths, kwargs) in self._tune["args"]:
+            plots.plot(data["s"], *paths, fmt=fmt, ndata=ndata, lines=lines, **kwargs)
+        
+        # blit the axes
+        for ax in self._tune["axes"]:
+            mplm.draw_all(ax)
     
     def evaluate(self, frequency: np.ndarray = None, noise: bool = False) -> dict:
         """

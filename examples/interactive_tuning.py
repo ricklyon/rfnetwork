@@ -13,7 +13,7 @@ np.set_printoptions(suppress=True, threshold=12)
 DATA_DIR = Path(__file__).parent / "data/PD55008E_S_parameter"
 
 # frequency range for plots
-frequency = np.arange(300, 500, 10) * 1e6 
+frequency = np.arange(350, 550, 5) * 1e6 
 f0 = 440e6 # design frequency
 
 def smithchart_marker(ax, fc: float, **properties):
@@ -38,6 +38,13 @@ ms50 = rfn.elements.MSLine(
     h=0.030, 
     er=2.55, 
     w=0.08,
+    loss_tan=0.017,
+)
+
+ms20 = rfn.elements.MSLine(
+    h=0.030, 
+    er=2.55, 
+    w=0.150,
     loss_tan=0.017,
 )
 
@@ -95,80 +102,41 @@ class pa_match(rfn.Network):
 
 n = pa_match()
 
-lines = dict()
+ax1, lines1 = n.plot_probe(
+    frequency,
+    ("m_in.ms3|1", "m_in.c2|2"),
+    ("m_in.c1|1", "m_in.ms3|2"),
+    ("m_in.ms2|1", "m_in.c1|2"),
+    ("m_in.r1|1", "m_in.ms2|2"),
+    ("u1|1", "m_in|2"),
+    input_port=1, fmt="smith", tune=True
+)
 
-def plot(init=False):
+ax1, ln_s11 = n.plot(frequency, 11, fmt="smith", tune=True, axes=ax1)
+ax1.legend()
 
-    n._cache = n.evaluate(frequency)
+smithchart_marker(ax1, f0, lines=lines1)
+smithchart_marker(ax1, f0, lines=ln_s11, ylabel=False)
 
-    if init:
-        lines1 = None
-        lines2 = None
-        ln_s11 = None
-        ln_s22 = None
-    else:
-        lines1 = lines["ax1"]
-        lines2 = lines["ax2"]
-        ln_s11 = lines["s11"]
-        ln_s22 = lines["s22"]
+ax2, lines2 = n.plot_probe(
+    frequency,
+    ("u1|2", "m_out|1"),
+    ("m_out.ms1|2", "m_out.c1|1"),
+    ("m_out.c1|2", "m_out.ms2|1"),
+    ("m_out.ms2|2", "m_out.c2|1"),
+    input_port=2, fmt="smith", tune=True
+)
 
-    ax1, lines1 = n.plot_probe(
-        frequency,
-        ("u1|1", "m_in|2"),
-        ("m_in.r1|1", "m_in.ms2|2"),
-        ("m_in.ms2|1", "m_in.c1|2"),
-        ("m_in.c1|1", "m_in.ms3|2"),
-        ("m_in.ms3|1", "m_in.c2|2"),
-        input_port=1, fmt="smith", return_lines=True, lines=lines1
-    )
+ax2, ln_s22 = n.plot(frequency, 22, axes=ax2, fmt="smith", tune=True)
+ax2.legend()
 
-    ax1, ln_s11 = n.plot(frequency, 11, axes=ax1, fmt="smith", return_lines=True, lines=ln_s11)
+smithchart_marker(ax2, f0, lines=lines2, ylabel=False)
+smithchart_marker(ax2, f0, lines=ln_s22)
 
-    if init:
-        mplm.init_axes(ax1)
-        smithchart_marker(ax1, f0, ylabel=False, lines=lines1)
-        smithchart_marker(ax1, f0, lines=ln_s11)
-        lines["ax1"] = lines1
-        lines["s11"] = ln_s11
-    else:
-        mplm.draw_all(ax1)
-
-
-    ax2, lines2 = n.plot_probe(
-        frequency,
-        ("u1|2", "m_out|1"),
-        ("m_out.ms1|2", "m_out.c1|1"),
-        ("m_out.c1|2", "m_out.ms2|1"),
-        ("m_out.ms2|2", "m_out.c2|1"),
-        input_port=2, fmt="smith", return_lines=True, lines=lines2
-    )
-
-    ax2, ln_s22 = n.plot(frequency, 22, axes=ax2, fmt="smith", return_lines=True, lines=ln_s22)
-
-    if init:
-        mplm.init_axes(ax2)
-        smithchart_marker(ax2, f0, ylabel=False, lines=lines2)
-        smithchart_marker(ax2, f0, lines=ln_s22)
-        lines["ax2"] = lines2
-        lines["s22"] = ln_s22
-    else:
-        mplm.draw_all(ax2)
-
-    n._cache = None
-
-def timeplot():
-    stime = time()
-    plot()
-    print(time() - stime)
-
-plot(init=True)
-plt.show(block=False)
-
-
-qapp = QApplication.instance()
-if qapp is None:
-    qapp = QApplication(sys.argv)
-
+ax3, _ = n.plot(frequency, 11, 22, 21, fmt="db", tune=True)
+ax3.legend()
+ax3.set_ylim([-20, 20])
+mplm.line_marker(x=f0/1e9)
 
 
 tuners = {
@@ -176,6 +144,7 @@ tuners = {
     "m_in.ms3": dict(lower=0.1, upper=2, initial=1.1, label="MS3 [in]", multiplier=1),
     "m_in.c1": dict(lower=10, upper=80, initial=40, label="C1 [pF]", multiplier=1e-12),
     "m_in.ms2": dict(lower=0.1, upper=1, initial=0.4, label="MS2 [in]", multiplier=1),
+    "m_in.r1": dict(lower=0.1, upper=5, initial=2, label="R1 [ohms]", multiplier=1),
     "m_out.ms1": dict(lower=0.1, upper=1, initial=0.4, label="MS1 [in]", multiplier=1),
     "m_out.c1": dict(lower=10, upper=100, initial=65, label="C1 [pF]", multiplier=1e-12),
     "m_out.ms2": dict(lower=0.1, upper=2, initial=1.1, label="MS2 [in]", multiplier=1),
@@ -183,20 +152,5 @@ tuners = {
 }
 
 
+n.tune(tuners)
 
-
-# add callback functions
-for k, v in tuners.items():
-    component = n
-    for c in k.split("."):
-        component = component[c]
-
-    tuners[k]["callback"] = component.set_state
-
-window = rfn.TunerGroup(tuners, plot)
-
-window.setWindowTitle("Tuning")
-window.show()
-qapp.exec()
-
-##################

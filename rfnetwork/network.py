@@ -127,10 +127,9 @@ class Network(Component, metaclass=NetworkMeta):
             
             labels += [r"{}({}, {})$_{{{}}}$".format(plots.fmt_prefix[fmt], p[0], p[1], input_port)]
             
-        return super().plot(
+        return self.plot(
             frequency, *ext_paths, ref=ref_paths, label=labels, label_mode="override", fmt=fmt, **kwargs
         )
-
 
     def evaluate_sdata(self, frequency: np.ndarray) -> np.ndarray:
         return self.evaluate_data(frequency, noise=False)[0]
@@ -211,6 +210,9 @@ class Network(Component, metaclass=NetworkMeta):
             # make the connection
             node_is_external = min_node in self.ports.values()
             nlist.connect_node(component_data, netlist, probe_netlist, min_node, node_is_external, noise=noise)
+
+        if i >= (max_connections - 1):
+            raise RuntimeError("Reached maximum number of connections.")
 
         # after connecting all the nodes, we should have only one component left in the netlist which
         # is the network sdata. However, if there are isolated regions in the network, we can 
