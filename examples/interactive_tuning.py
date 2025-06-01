@@ -10,7 +10,8 @@ from PySide6.QtWidgets import (QApplication, QWidget, QLineEdit, QSlider, QGridL
 
 np.set_printoptions(suppress=True, threshold=12)
 
-DATA_DIR = Path(__file__).parent / "data/PD55008E_S_parameter"
+dir_ = Path(__file__).parent
+DATA_DIR = dir_ / "data/PD55008E_S_parameter"
 
 # frequency range for plots
 frequency = np.arange(350, 550, 5) * 1e6 
@@ -85,7 +86,6 @@ class pa_output(rfn.Network):
     probes=True
 
 
-
 class pa_match(rfn.Network):
     """
     Matched amplifier circuit
@@ -102,7 +102,15 @@ class pa_match(rfn.Network):
 
 n = pa_match()
 
-ax1, lines1 = n.plot_probe(
+fig, axes = plt.subplot_mosaic(
+    [["s11", "s22"], ["s21", "im"]], figsize=(10, 7)
+)
+
+rfn.plots.draw_smithchart(axes["s11"])
+rfn.plots.draw_smithchart(axes["s22"])
+
+lines1 = n.plot_probe(
+    axes["s11"],
     frequency,
     ("m_in.ms3|1", "m_in.c2|2"),
     ("m_in.c1|1", "m_in.ms3|2"),
@@ -112,13 +120,14 @@ ax1, lines1 = n.plot_probe(
     input_port=1, fmt="smith", tune=True
 )
 
-ax1, ln_s11 = n.plot(frequency, 11, fmt="smith", tune=True, axes=ax1)
-ax1.legend()
+ln_s11 = n.plot(axes["s11"], frequency, 11, fmt="smith", tune=True)
+axes["s11"].legend(fontsize=8)
 
-smithchart_marker(ax1, f0, lines=lines1)
-smithchart_marker(ax1, f0, lines=ln_s11, ylabel=False)
+smithchart_marker(axes["s11"], f0, lines=lines1, ylabel=False)
+smithchart_marker(axes["s11"], f0, lines=ln_s11)
 
-ax2, lines2 = n.plot_probe(
+lines2 = n.plot_probe(
+    axes["s22"],
     frequency,
     ("u1|2", "m_out|1"),
     ("m_out.ms1|2", "m_out.c1|1"),
@@ -127,28 +136,34 @@ ax2, lines2 = n.plot_probe(
     input_port=2, fmt="smith", tune=True
 )
 
-ax2, ln_s22 = n.plot(frequency, 22, axes=ax2, fmt="smith", tune=True)
-ax2.legend()
+ln_s22 = n.plot(axes["s22"], frequency, 22, fmt="smith", tune=True)
+axes["s22"].legend(fontsize=8)
 
-smithchart_marker(ax2, f0, lines=lines2, ylabel=False)
-smithchart_marker(ax2, f0, lines=ln_s22)
+smithchart_marker(axes["s22"], f0, lines=lines2, ylabel=False)
+smithchart_marker(axes["s22"], f0, lines=ln_s22)
 
-ax3, _ = n.plot(frequency, 11, 22, 21, fmt="db", tune=True)
-ax3.legend()
-ax3.set_ylim([-20, 20])
+ln = n.plot(axes["s21"], frequency, 11, 22, 21, fmt="db", tune=True)
+axes["s21"].legend()
+axes["s21"].set_ylim([-20, 20])
 mplm.line_marker(x=f0/1e9)
+
+im = plt.imread(dir_ / "data/img/pa_tuning.png")
+axes["im"].imshow(im)
+axes["im"].set_axis_off()
+
+fig.tight_layout()
 
 
 tuners = {
-    "m_in.c2": dict(lower=1, upper=30, initial=12, label="C2 [pF]", multiplier=1e-12),
-    "m_in.ms3": dict(lower=0.1, upper=2, initial=1.1, label="MS3 [in]", multiplier=1),
-    "m_in.c1": dict(lower=10, upper=80, initial=40, label="C1 [pF]", multiplier=1e-12),
-    "m_in.ms2": dict(lower=0.1, upper=1, initial=0.4, label="MS2 [in]", multiplier=1),
-    "m_in.r1": dict(lower=0.1, upper=5, initial=2, label="R1 [ohms]", multiplier=1),
-    "m_out.ms1": dict(lower=0.1, upper=1, initial=0.4, label="MS1 [in]", multiplier=1),
-    "m_out.c1": dict(lower=10, upper=100, initial=65, label="C1 [pF]", multiplier=1e-12),
-    "m_out.ms2": dict(lower=0.1, upper=2, initial=1.1, label="MS2 [in]", multiplier=1),
-    "m_out.c2": dict(lower=5, upper=30, initial=15, label="C2 [pF]", multiplier=1e-12),
+    "m_in.c2": dict(lower=1, upper=30, label="C2 [pF]", multiplier=1e-12),
+    "m_in.ms3": dict(lower=0.1, upper=2, label="MS3 [in]", multiplier=1),
+    "m_in.c1": dict(lower=10, upper=80, label="C1 [pF]", multiplier=1e-12),
+    "m_in.ms2": dict(lower=0.1, upper=1, label="MS2 [in]", multiplier=1),
+    "m_in.r1": dict(lower=0.1, upper=5, label="R1 [ohms]", multiplier=1),
+    "m_out.ms1": dict(lower=0.1, upper=1, label="MS1 [in]", multiplier=1),
+    "m_out.c1": dict(lower=10, upper=100, label="C1 [pF]", multiplier=1e-12),
+    "m_out.ms2": dict(lower=0.1, upper=2, label="MS2 [in]", multiplier=1),
+    "m_out.c2": dict(lower=5, upper=30, label="C2 [pF]", multiplier=1e-12),
 }
 
 

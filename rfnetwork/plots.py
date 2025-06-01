@@ -95,14 +95,14 @@ def smith_circles(values: list, line_type: str, npoints = 5001, gamma_clip: floa
     return circles.T
 
 
-def format_smithchart(ax: plt.Axes, values=None, line_kwargs=dict(linewidth=0.25, color="k")):
+def draw_smithchart(axes: plt.Axes, values=None, line_kwargs=dict(linewidth=0.25, color="k")):
 
     if values is None:
         values = [10 , 5, 2, 1, 0.5, 0.2, 0]
 
-    ax.set_aspect('equal')
-    ax.set_axis_off()
-    ax.axis([-1.1, 1.1, -1.1, 1.1])
+    axes.set_aspect('equal')
+    axes.set_axis_off()
+    axes.axis([-1.1, 1.1, -1.1, 1.1])
 
     r = smith_circles(values, "r")
     xp = smith_circles(values, "x")
@@ -112,20 +112,20 @@ def format_smithchart(ax: plt.Axes, values=None, line_kwargs=dict(linewidth=0.25
     sp = smith_circles(values, "s")
     sn = smith_circles(-np.array(values), "s")
 
-    sm_lines = ax.plot(r.real, r.imag, **line_kwargs)
-    sm_lines += ax.plot(xp.real, xp.imag, **line_kwargs)
-    sm_lines += ax.plot(xn.real, xn.imag, **line_kwargs)
+    sm_lines = axes.plot(r.real, r.imag, **line_kwargs)
+    sm_lines += axes.plot(xp.real, xp.imag, **line_kwargs)
+    sm_lines += axes.plot(xn.real, xn.imag, **line_kwargs)
 
     admittance_kwargs = dict(color="m", alpha=0.4, linewidth=0.2)
 
-    sm_lines += ax.plot(g.real, g.imag, **admittance_kwargs)
-    sm_lines += ax.plot(sp.real, sp.imag, **admittance_kwargs)
-    sm_lines += ax.plot(sn.real, sn.imag, **admittance_kwargs)
+    sm_lines += axes.plot(g.real, g.imag, **admittance_kwargs)
+    sm_lines += axes.plot(sp.real, sp.imag, **admittance_kwargs)
+    sm_lines += axes.plot(sn.real, sn.imag, **admittance_kwargs)
 
     # draw x axis line
-    sm_lines += ax.plot([-1, 1], [0, 0], **line_kwargs)
+    sm_lines += axes.plot([-1, 1], [0, 0], **line_kwargs)
 
-    mplm.disable_lines(sm_lines, axes=ax)
+    mplm.disable_lines(sm_lines, axes=axes)
 
 def plot_stability_circles(sdata: ldarray, f0: float, axes = None, load_kwargs=dict(), source_kwargs=dict()):
     """
@@ -135,7 +135,7 @@ def plot_stability_circles(sdata: ldarray, f0: float, axes = None, load_kwargs=d
         # create axes if one was not given
         fig = plt.figure(figsize=(7, 7))
         axes = fig.subplots(1, 1)
-        format_smithchart(axes)
+        draw_smithchart(axes)
 
     s11 = sdata.sel(frequency=f0, b=1, a=1)
     s22 = sdata.sel(frequency=f0, b=2, a=2)
@@ -168,18 +168,17 @@ def plot_stability_circles(sdata: ldarray, f0: float, axes = None, load_kwargs=d
     return axes, s_line[0], l_line[0]
 
 def plot(
-    sdata,
+    axes: plt.Axes,
+    sdata: ldarray,
     *paths,
-    fmt="db",
-    ndata=None,
-    freq_unit="ghz",
-    ref=None,
-    axes=None,
-    label=None,
+    ndata: ldarray = None,
+    fmt: str = "db",
+    freq_unit: str = "ghz",
+    ref: tuple = None,
+    label: str = None,
     label_mode: str = "prefix",
-    smithchart_kwargs={},
     lines=None,
-    **line_kwargs
+    **kwargs
 ) -> plt.Axes:
     """
     Plots s-matrix data for each path over the primary axis. Matplotlib supports plotting over 2 dimensions, so
@@ -271,25 +270,11 @@ def plot(
     elif label_mode == "suffix": #append
         suffix_label = "" if label is None else " " + label
 
-    if lines is not None:
-        axes = lines[0].axes
-
-    elif axes is None:
-        # create axes if one was not given
-        figsize = (7,7) if fmt == "smith" else (7,5)
-        fig = plt.figure(figsize=figsize)
-        axes = fig.subplots(1, 1)
-
-        if fmt == "smith":
-            # draw lines on smithchart
-            format_smithchart(axes, **smithchart_kwargs)
-            
-        axes.margins(x=0)
-
-        # apply labels and grid
+    if lines is None:
         axes.set_xlabel(f"Frequency [{f_label}]")
         axes.set_ylabel(fmt_label.get(fmt))
         axes.grid(True)
+        axes.margins(x=0)
 
     lines = [] if lines is None else lines
 
@@ -337,6 +322,6 @@ def plot(
             else:
                 label = custom_label[i]
 
-            lines += axes.plot(xdata_s, ydata, label=label, **line_kwargs)
+            lines += axes.plot(xdata_s, ydata, label=label, **kwargs)
 
-    return axes, lines
+    return lines

@@ -88,12 +88,6 @@ class Network(Component, metaclass=NetworkMeta):
     def equals(self, other):
         # TODO: check active states of all components in network and make sure they are equal.
         return False
-
-    def __call__(self, **kwargs):
-        # simple syntax for duplicating components in Network declarations
-        nobj = deepcopy(self)
-        nobj.set_state(**kwargs)
-        return nobj
     
     def __getitem__(self, key):
         return self.components[key]
@@ -111,7 +105,7 @@ class Network(Component, metaclass=NetworkMeta):
         return {k: v.state for k, v in self.components.items() if hasattr(v, "state") and v.state != "default"}
     
 
-    def plot_probe(self, frequency, *paths, input_port=1, fmt= "db", **kwargs):
+    def plot_probe(self, axes, frequency, *paths, input_port=1, fmt= "db", **kwargs):
 
         ext_paths = []
         ref_paths = []
@@ -128,7 +122,7 @@ class Network(Component, metaclass=NetworkMeta):
             labels += [r"{}({}, {})$_{{{}}}$".format(plots.fmt_prefix[fmt], p[0], p[1], input_port)]
             
         return self.plot(
-            frequency, *ext_paths, ref=ref_paths, label=labels, label_mode="override", fmt=fmt, **kwargs
+            axes, frequency, *ext_paths, ref=ref_paths, label=labels, label_mode="override", fmt=fmt, **kwargs
         )
 
     def evaluate_sdata(self, frequency: np.ndarray) -> np.ndarray:

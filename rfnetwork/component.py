@@ -2,7 +2,7 @@ import numpy as np
 from np_struct import ldarray
 from pathlib import Path
 from scipy.interpolate import CubicSpline
-from copy import deepcopy as dcopy
+from copy import deepcopy
 
 from abc import abstractmethod
 from typing import Tuple
@@ -20,7 +20,7 @@ from . tuning import TunerGroup
 
 class Component(object):
     
-    def __init__(self, shunt: bool = False, passive: bool = True, pnum: int = 2):
+    def __init__(self, shunt: bool = False, passive: bool = True, pnum: int = 2, state: str | dict = None):
         """
         Parameters
         ----------
@@ -33,11 +33,16 @@ class Component(object):
         self._shunt = shunt
         self._passive = passive
         self._pnum = pnum
+        self._state = state
         self._tune = dict(frequency=None, args=[], axes=[])
 
     @property
     def pnum(self):
         return self._pnum
+
+    @property
+    def state(self):
+        return self._state
     
     def __or__(self, other):
         """ Allows port to be indexed with the syntax: block|2 """
@@ -50,7 +55,7 @@ class Component(object):
         """
         self_class = self.__class__.__name__
         other_class = other.__class__.__name__
-        return (self_class == other_class) and (self._shunt == other._shunt) and (self._passive == other._passive)
+        return (self_class == other_class) and (self._shunt == other._shunt) and (self._passive == other._passive) and (self._state == other._state)
     
     @abstractmethod
     def evaluate_data(self, frequency: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
@@ -65,28 +70,44 @@ class Component(object):
         Returns s-matrix data of the component.
         """
         raise NotImplementedError()
+
+    def set_state(self, state: str | dict = None):
+        if state == self._state or state is None:
+            return
+        
+        self._state = state
+        
+    def __call__(self, **kwargs):
+        # simple syntax for duplicating components in Network declarations
+        nobj = deepcopy(self)
+        nobj.set_state(**kwargs)
+        return nobj
     
-    def plot(self, frequency = None, *paths, fmt: str = "db", tune: bool = False, **kwargs):
+    def plot(self, axes, frequency = None, *paths, fmt: str = "db", tune: bool = False, **kwargs):
         """
         
         """
         data = self.evaluate(frequency, noise=fmt in ["nf"])
+
+        if frequency is None:
+            frequency = data["s"].coords["frequency"]
             
         ndata = data["n"] if fmt in ["nf"] else None
-        ax, lines = plots.plot(data["s"], *paths, fmt=fmt, ndata=ndata, **kwargs)
+        lines = plots.plot(axes, data["s"], *paths, fmt=fmt, ndata=ndata, **kwargs)
+        axes.legend()
 
         if tune:
             # TODO: check that frequency is the same for all tune plots
             self._tune["frequency"] = frequency
-            self._tune["args"] += [(fmt, lines, paths, kwargs)]
+            self._tune["args"] += [(axes, fmt, lines, paths, kwargs)]
 
-            if ax not in self._tune["axes"]:
-                self._tune["axes"] += [ax]
+            if axes not in self._tune["axes"]:
+                self._tune["axes"] += [axes]
     
-        return ax, lines
+        return lines
     
-    def tune(self, tuners):
-        # add callback functions
+    def tune(self, tuners: dict):
+        # add callback functions and initial values
         for k, v in tuners.items():
             component = self
             # drill down to a sub-component if this is a network
@@ -94,6 +115,7 @@ class Component(object):
                 component = component[c]
 
             tuners[k]["callback"] = component.set_state
+            tuners[k]["initial"] = component.state / tuners[k]["multiplier"]
 
         for ax in self._tune["axes"]:
             mplm.init_axes(ax)
@@ -124,8 +146,8 @@ class Component(object):
         ndata = data["n"] if nf else None
 
         # update the data lines
-        for (fmt, lines, paths, kwargs) in self._tune["args"]:
-            plots.plot(data["s"], *paths, fmt=fmt, ndata=ndata, lines=lines, **kwargs)
+        for (axes, fmt, lines, paths, kwargs) in self._tune["args"]:
+            plots.plot(axes, data["s"], *paths, fmt=fmt, ndata=ndata, lines=lines, **kwargs)
         
         # blit the axes
         for ax in self._tune["axes"]:
@@ -214,34 +236,26 @@ class Component_SnP(Component):
         if not np.all(pnums == pnum):
             raise ValueError("Files must all have the same number of ports.")
         
-        self._state = state if state is not None else tuple(self.file.keys())[0]
         self._comments = []
         self._data_cache = dict()
+
+        if state is None:
+            state = tuple(self.file.keys())[0]
 
         if shunt and not np.all(pnums == 2):
             raise ValueError("Only 2-port components can be shunted.")
         
         # component might be passive, but don't assume that it is by default, check for passivity in evaluate_data
-        super().__init__(shunt=shunt, passive=passive, pnum=pnum)
+        super().__init__(shunt=shunt, passive=passive, pnum=pnum, state=state)
 
-    def __call__(self, state: str = None):
-        # simple syntax for duplicating components in Network declarations, optionally with a different state.
-        # for example: 
-        # c1 = ComponentFromFile(<path>)
-        # c2 = sw()
-        nobj = dcopy(self)
-        nobj.set_state(state)
-
-        return nobj
-    
     def equals(self, other):
         
         if not super().equals(other):
             return False
         
-        files_match = self.file[self.state] == other.file[other.state]
-        return self.state == other.state and files_match
-    
+        return self.file[self.state] == other.file[other.state]
+        
+
     def evaluate_sdata(self, frequency: np.ndarray = None) -> np.ndarray:
 
         # reading touchstones is slow, only read file if state hasn't been hit before
@@ -267,6 +281,9 @@ class Component_SnP(Component):
         
 
     def evaluate_data(self, frequency: np.ndarray = None) -> Tuple[np.ndarray, np.ndarray]:
+        
+        if self.state is not None and self.state not in self.file.keys():
+            raise KeyError(f"Unrecognized state: {self.state}")
 
         sdata = self.evaluate_sdata(frequency)
 
@@ -291,18 +308,6 @@ class Component_SnP(Component):
         
         return sdata, ndata
 
-    def set_state(self, state: str = None):
-        if state == self._state or state is None:
-            return
-
-        if state not in self.file.keys():
-            raise KeyError(f"Unrecognized state: {state}")
-        
-        self._state = state
-
-    @property
-    def state(self):
-        return self._state
 
 class Component_Data(Component):
     """
@@ -317,10 +322,6 @@ class Component_Data(Component):
 
     def equals(self, other):
         return False
-
-    def __call__(self):
-        # simple syntax for duplicating components in Network declarations
-        return dcopy(self)
     
     def evaluate_sdata(self, frequency) -> np.ndarray:
         
