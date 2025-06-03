@@ -127,15 +127,10 @@ def draw_smithchart(axes: plt.Axes, values=None, line_kwargs=dict(linewidth=0.25
 
     mplm.disable_lines(sm_lines, axes=axes)
 
-def plot_stability_circles(sdata: ldarray, f0: float, axes = None, load_kwargs=dict(), source_kwargs=dict()):
+def plot_stability_circles(axes: plt.Axes, sdata: ldarray, f0: float, load_kwargs=dict(), source_kwargs=dict()):
     """
     Plot source and load stability circles at f0. 
     """
-    if axes is None:
-        # create axes if one was not given
-        fig = plt.figure(figsize=(7, 7))
-        axes = fig.subplots(1, 1)
-        draw_smithchart(axes)
 
     s11 = sdata.sel(frequency=f0, b=1, a=1)
     s22 = sdata.sel(frequency=f0, b=2, a=2)
@@ -165,7 +160,7 @@ def plot_stability_circles(sdata: ldarray, f0: float, axes = None, load_kwargs=d
     l_line = axes.plot(l_circ.real, l_circ.imag, label=r"$\Gamma_L$ Stability", **load_kwargs)
     s_line = axes.plot(s_circ.real, s_circ.imag, label=r"$\Gamma_S$ Stability", **source_kwargs)
 
-    return axes, s_line[0], l_line[0]
+    return s_line[0], l_line[0]
 
 def plot(
     axes: plt.Axes,

@@ -23,7 +23,7 @@ def smithchart_marker(ax, fc: float, **properties):
     f_idx = np.argmin(np.abs(frequency - fc))
     return mplm.line_marker(
         idx=f_idx, axes=ax, xline=False, yformatter=lambda x, y, idx: f"{frequency[idx]/1e6:.0f}MHz", **properties
-)
+    )
 
 
 pa_8w = rfn.Component_SnP(
@@ -42,27 +42,19 @@ ms50 = rfn.elements.MSLine(
     loss_tan=0.017,
 )
 
-ms20 = rfn.elements.MSLine(
-    h=0.030, 
-    er=2.55, 
-    w=0.150,
-    loss_tan=0.017,
-)
-
-
 class pa_input(rfn.Network):
     """
     Amplifier input matching network
     """
-    c2 = rfn.elements.Capacitor(12e-12, shunt=True)
-    ms3 = ms50(1.1)
-    c1 = rfn.elements.Capacitor(40e-12, shunt=True)
+    c1 = rfn.elements.Capacitor(12e-12, shunt=True)
+    ms1 = ms50(1.1)
+    c2 = rfn.elements.Capacitor(40e-12, shunt=True)
     ms2 = ms50(0.4)
     r1 = rfn.elements.Resistor(2)
 
     # Port 2 will connect to port 1 of the amplifer
     cascades = [
-        ("P1", c2, ms3, c1, ms2, r1, "P2"),
+        ("P1", c1, ms1, c2, ms2, r1, "P2"),
     ]
 
     probes=True
@@ -71,14 +63,14 @@ class pa_output(rfn.Network):
     """
     PA output matching network
     """
-    ms1 = ms50(0.4) # length is in inches
-    c1 = rfn.elements.Capacitor(65e-12, shunt=True)
-    ms2 = ms50(1.1)
-    c2 = rfn.elements.Capacitor(15e-12, shunt=True)
+    ms3 = ms50(0.4)
+    c3 = rfn.elements.Capacitor(65e-12, shunt=True)
+    ms4 = ms50(1.1)
+    c4 = rfn.elements.Capacitor(15e-12, shunt=True)
 
     # Port 1 will connect to the amplifier output
     cascades = [
-        ("P1", ms1, c1, ms2, c2, "P2"),
+        ("P1", ms3, c3, ms4, c4, "P2"),
     ]
     
     # individual probes can be assigned here, but setting to True
@@ -103,7 +95,7 @@ class pa_match(rfn.Network):
 n = pa_match()
 
 fig, axes = plt.subplot_mosaic(
-    [["s11", "s22"], ["s21", "im"]], figsize=(10, 7)
+    [["s11", "s22"], ["im", "im"]], figsize=(10, 7), height_ratios=[1, 0.3]
 )
 
 rfn.plots.draw_smithchart(axes["s11"])
@@ -112,11 +104,11 @@ rfn.plots.draw_smithchart(axes["s22"])
 lines1 = n.plot_probe(
     axes["s11"],
     frequency,
-    ("m_in.ms3|1", "m_in.c2|2"),
-    ("m_in.c1|1", "m_in.ms3|2"),
-    ("m_in.ms2|1", "m_in.c1|2"),
-    ("m_in.r1|1", "m_in.ms2|2"),
     ("u1|1", "m_in|2"),
+    ("m_in.r1|1", "m_in.ms2|2"),
+    ("m_in.ms2|1", "m_in.c2|2"),
+    ("m_in.c2|1", "m_in.ms1|2"),
+    ("m_in.ms1|1", "m_in.c1|2"),
     input_port=1, fmt="smith", tune=True
 )
 
@@ -130,9 +122,9 @@ lines2 = n.plot_probe(
     axes["s22"],
     frequency,
     ("u1|2", "m_out|1"),
-    ("m_out.ms1|2", "m_out.c1|1"),
-    ("m_out.c1|2", "m_out.ms2|1"),
-    ("m_out.ms2|2", "m_out.c2|1"),
+    ("m_out.ms3|2", "m_out.c3|1"),
+    ("m_out.c3|2", "m_out.ms4|1"),
+    ("m_out.ms4|2", "m_out.c4|1"),
     input_port=2, fmt="smith", tune=True
 )
 
@@ -142,30 +134,35 @@ axes["s22"].legend(fontsize=8)
 smithchart_marker(axes["s22"], f0, lines=lines2, ylabel=False)
 smithchart_marker(axes["s22"], f0, lines=ln_s22)
 
-ln = n.plot(axes["s21"], frequency, 11, 22, 21, fmt="db", tune=True)
-axes["s21"].legend()
-axes["s21"].set_ylim([-20, 20])
-mplm.line_marker(x=f0/1e9)
 
 im = plt.imread(dir_ / "data/img/pa_tuning.png")
 axes["im"].imshow(im)
 axes["im"].set_axis_off()
 
+
 fig.tight_layout()
+
+# plot S21
+fig, ax = plt.subplots()
+ln = n.plot(ax, frequency, 11, 22, 21, fmt="db", tune=True)
+ax.legend()
+ax.set_ylim([-20, 20])
+mplm.line_marker(x=f0/1e9)
 
 
 tuners = {
-    "m_in.c2": dict(lower=1, upper=30, label="C2 [pF]", multiplier=1e-12),
-    "m_in.ms3": dict(lower=0.1, upper=2, label="MS3 [in]", multiplier=1),
-    "m_in.c1": dict(lower=10, upper=80, label="C1 [pF]", multiplier=1e-12),
+    "m_in.c1": dict(lower=1, upper=30, label="C1 [pF]", multiplier=1e-12),
+    "m_in.ms1": dict(lower=0.1, upper=2, label="MS1 [in]", multiplier=1),
+    "m_in.c2": dict(lower=10, upper=80, label="C2 [pF]", multiplier=1e-12),
     "m_in.ms2": dict(lower=0.1, upper=1, label="MS2 [in]", multiplier=1),
     "m_in.r1": dict(lower=0.1, upper=5, label="R1 [ohms]", multiplier=1),
-    "m_out.ms1": dict(lower=0.1, upper=1, label="MS1 [in]", multiplier=1),
-    "m_out.c1": dict(lower=10, upper=100, label="C1 [pF]", multiplier=1e-12),
-    "m_out.ms2": dict(lower=0.1, upper=2, label="MS2 [in]", multiplier=1),
-    "m_out.c2": dict(lower=5, upper=30, label="C2 [pF]", multiplier=1e-12),
+    "m_out.ms3": dict(lower=0.1, upper=1, label="MS3 [in]", multiplier=1),
+    "m_out.c3": dict(lower=10, upper=100, label="C3 [pF]", multiplier=1e-12),
+    "m_out.ms4": dict(lower=0.1, upper=2, label="MS2 [in]", multiplier=1),
+    "m_out.c4": dict(lower=5, upper=30, label="C4 [pF]", multiplier=1e-12),
 }
 
+# plt.show()
 
 n.tune(tuners)
 
