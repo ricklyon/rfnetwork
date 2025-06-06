@@ -101,18 +101,18 @@ class DoubleSlider(QSlider):
 class FloatTuner(QWidget):
     def __init__(
         self, 
+        key: str,
         label: str, 
         lower: float, 
         upper: float, 
         initial: float, 
-        multiplier: float, 
         callback: Callable, 
         processor: QtCore.QThread
     ):
         super(FloatTuner, self).__init__()
         name = QLabel(label)
 
-        self.multiplier = multiplier
+        self.key = key
 
         self.processor = processor
         
@@ -157,21 +157,30 @@ class FloatTuner(QWidget):
         self.upper_limit.returnPressed.connect(self.set_scale)
     
     def value_box_changed(self):
+        """
+        Update the slider if the value in the text box changes.
+        """
         value = float(self.value.text())
         self.slider.setValue(value)
         value = self.slider.value()
         self.value.setText(str(value))
 
     def slider_value_changed(self, value):
+        """
+        Invoke the callback function when the slider changes value.
+        """
         value = self.slider.value()
         prev_value = float(self.value.text())
 
         if np.abs(value - prev_value) > (self.step / 2):
             self.value.setText(str(value))
-            self.callback(value * self.multiplier)
+            self.callback(**{self.key : value})
             self.processor.push()
 
     def set_scale(self):
+        """
+        Update the slider to be in-bounds if the upper or lower bounds are changed.
+        """
         min_ = float(self.lower_limit.text())
         max_ = float(self.upper_limit.text())
         self.step = (max_ - min_) / 100

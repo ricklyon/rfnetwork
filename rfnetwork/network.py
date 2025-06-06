@@ -71,7 +71,7 @@ class NetworkMeta(type):
 
 class Network(Component, metaclass=NetworkMeta):
 
-    def __init__(self, shunt: bool = False, passive: bool = False, **kwargs):
+    def __init__(self, shunt: bool = False, passive: bool = False, name: str = None, state: dict = dict()):
         nports = len(self.ports.keys())
 
         self.components = dict()
@@ -80,14 +80,11 @@ class Network(Component, metaclass=NetworkMeta):
             # make a copy of all network components so multiple instances of the network
             # can have different states
             self.components[k] = deepcopy(v)
+            self.components[k].set_name(k)
 
-        self.set_state(**kwargs)
+        super().__init__(passive=passive, shunt=shunt, pnum=nports, name=name)
 
-        super().__init__(passive=passive, shunt=shunt, pnum=nports)
-                 
-    def equals(self, other):
-        # TODO: check active states of all components in network and make sure they are equal.
-        return False
+        self.set_state(**state)
     
     def __getitem__(self, key):
         return self.components[key]
@@ -95,15 +92,12 @@ class Network(Component, metaclass=NetworkMeta):
     def set_state(self, **kwargs):
 
         for k, v in kwargs.items():
-            if isinstance(v, dict):
-                self.components[k].set_state(**v)
-            else:
-                self.components[k].set_state(v)
+            v = dict(value=v) if not isinstance(v, dict) else v
+            self.components[k].set_state(**v)
 
     @property
     def state(self):
-        return {k: v.state for k, v in self.components.items() if hasattr(v, "state") and v.state != "default"}
-    
+        return {k: v.state for k, v in self.components.items()}
 
     def plot_probe(self, axes, frequency, *paths, input_port=1, fmt= "db", **kwargs):
 

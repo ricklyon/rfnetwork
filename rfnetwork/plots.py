@@ -127,6 +127,9 @@ def draw_smithchart(axes: plt.Axes, values=None, line_kwargs=dict(linewidth=0.25
 
     mplm.disable_lines(sm_lines, axes=axes)
 
+    # add a flag that this axes has been formatted for a smithchart already
+    axes._smithchart = True
+
 def plot_stability_circles(axes: plt.Axes, sdata: ldarray, f0: float, load_kwargs=dict(), source_kwargs=dict()):
     """
     Plot source and load stability circles at f0. 
@@ -265,7 +268,9 @@ def plot(
     elif label_mode == "suffix": #append
         suffix_label = "" if label is None else " " + label
 
-    if lines is None:
+    if fmt == "smith" and not hasattr(axes, "_smithchart"):
+        draw_smithchart(axes)
+    elif lines is None:
         axes.set_xlabel(f"Frequency [{f_label}]")
         axes.set_ylabel(fmt_label.get(fmt))
         axes.grid(True)

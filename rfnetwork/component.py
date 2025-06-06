@@ -20,7 +20,14 @@ from . tuning import TunerGroup
 
 class Component(object):
     
-    def __init__(self, shunt: bool = False, passive: bool = True, pnum: int = 2, state: str | dict = None):
+    def __init__(
+        self, 
+        shunt: bool = False, 
+        passive: bool = True, 
+        pnum: int = 2, 
+        state: dict = dict(), 
+        name: str = None
+    ):
         """
         Parameters
         ----------
@@ -33,8 +40,11 @@ class Component(object):
         self._shunt = shunt
         self._passive = passive
         self._pnum = pnum
-        self._state = state
+        self._state = {k: None for k in state.keys()}
         self._tune = dict(frequency=None, args=[], axes=[])
+        self._name = name
+
+        self.set_state(**state)
 
     @property
     def pnum(self):
@@ -44,18 +54,43 @@ class Component(object):
     def state(self):
         return self._state
     
+    @property
+    def name(self):
+        return self._name
+
+    def set_state(self, **kwargs):
+        
+        for k, v in kwargs.items():
+            if k not in self.state.keys():
+                raise KeyError(f"Invalid state key, {k}.")
+            
+            self._state[k] = deepcopy(v)
+
+    def set_name(self, name):
+        self._name = name
+        
     def __or__(self, other):
         """ Allows port to be indexed with the syntax: block|2 """
         return (self, int(other))
     
     def equals(self, other):
         """
-        Returns True if other is equivalent to this object. Subclasses must override this method with their own
-        checks and call ``super().equals(other)``.
+        Returns True if the s-matrix data from other is equivalent to this object.
         """
-        self_class = self.__class__.__name__
-        other_class = other.__class__.__name__
-        return (self_class == other_class) and (self._shunt == other._shunt) and (self._passive == other._passive) and (self._state == other._state)
+        if self.__class__.__name__ != other.__class__.__name__:
+            return False
+        
+        if self._passive == other._passive != self._shunt == other._shunt:
+            return False
+
+        # check that state keys are identical
+        state_keys = [k for k in self.state.keys() if k in other.state.keys()]
+
+        if len(state_keys) != len(other.state.keys()) or len(state_keys) != len(self.state.keys()):
+            return False
+        
+        # check state values, they may be numpy arrays. lists or single values
+        return all([np.all(self.state[k] == other.state[k]) for k in state_keys])
     
     @abstractmethod
     def evaluate_data(self, frequency: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
@@ -70,13 +105,6 @@ class Component(object):
         Returns s-matrix data of the component.
         """
         raise NotImplementedError()
-
-    def set_state(self, state: str | dict = None):
-        if state == self._state or state is None:
-            return
-        
-        self._state = state
-        
     def __call__(self, **kwargs):
         # simple syntax for duplicating components in Network declarations
         nobj = deepcopy(self)
@@ -113,9 +141,9 @@ class Component(object):
             # drill down to a sub-component if this is a network
             for c in k.split("."):
                 component = component[c]
-
+                
             tuners[k]["callback"] = component.set_state
-            tuners[k]["initial"] = component.state / tuners[k]["multiplier"]
+            tuners[k]["initial"] = component.state[v["key"]]
 
         for ax in self._tune["axes"]:
             mplm.init_axes(ax)
@@ -217,11 +245,12 @@ class Component_SnP(Component):
     Component defined from a touchstone file (.snp)
     """
 
-    def __init__(self, file: str | dict, state: str = None, shunt: bool = False, passive: bool = False):
+    def __init__(self, file: str | dict, state: dict = dict(), shunt: bool = False, passive: bool = False, **kwargs):
 
         if isinstance(file, (str, Path)):
             self.file = dict(default=Path(file))
 
+        # convert any string paths to Path
         elif isinstance(file, dict):
             self.file = {**{k: Path(v) for k,v in file.items()}}
 
@@ -239,35 +268,36 @@ class Component_SnP(Component):
         self._comments = []
         self._data_cache = dict()
 
-        if state is None:
-            state = tuple(self.file.keys())[0]
+        if not len(state):
+            state = dict(file=tuple(self.file.keys())[0])
 
         if shunt and not np.all(pnums == 2):
             raise ValueError("Only 2-port components can be shunted.")
         
         # component might be passive, but don't assume that it is by default, check for passivity in evaluate_data
-        super().__init__(shunt=shunt, passive=passive, pnum=pnum, state=state)
+        super().__init__(shunt=shunt, passive=passive, pnum=pnum, state=state, **kwargs)
 
     def equals(self, other):
         
         if not super().equals(other):
             return False
         
-        return self.file[self.state] == other.file[other.state]
+        # even if the file keys are the same, they might point to different paths
+        return self.file[self.state["file"]] == other.file[other.state["file"]]
         
 
     def evaluate_sdata(self, frequency: np.ndarray = None) -> np.ndarray:
 
         # reading touchstones is slow, only read file if state hasn't been hit before
-        if self.state not in self._data_cache.keys():
-            filepath = self.file[self.state]
+        if self.state["file"] not in self._data_cache.keys():
+            filepath = self.file[self.state["file"]]
             sdata, np_data, self._comments = touchstone.read_snp(filepath)
             # store into cache
-            self._data_cache[self.state] = [sdata, np_data]
+            self._data_cache[self.state["file"]] = [sdata, np_data]
 
         # otherwise load from cache
         else:
-            sdata, np_data = self._data_cache[self.state]
+            sdata, np_data = self._data_cache[self.state["file"]]
 
         # interpolate the s-parameters at the desired frequency points
         if frequency is not None:
@@ -282,16 +312,13 @@ class Component_SnP(Component):
 
     def evaluate_data(self, frequency: np.ndarray = None) -> Tuple[np.ndarray, np.ndarray]:
         
-        if self.state is not None and self.state not in self.file.keys():
-            raise KeyError(f"Unrecognized state: {self.state}")
-
         sdata = self.evaluate_sdata(frequency)
 
         if frequency is None:
             frequency = data.coords["frequency"]
 
         # get noise parameters from cache
-        _, np_data = self._data_cache[self.state]
+        _, np_data = self._data_cache[self.state["file"]]
 
         if np_data is not None:
             # interpolate the noise parameters at the sdata frequency points, allow extrapolation
@@ -314,18 +341,18 @@ class Component_Data(Component):
     Component defined from a user-defined or imported data.
     """
 
-    def __init__(self, data: ldarray, shunt: bool = False, passive: bool = False):
+    def __init__(self, data: ldarray, passive: bool = False, **kwargs):
 
         self._sdata = data
         pnum = data.shape[-2]
-        super().__init__(shunt=shunt, passive=passive, pnum=pnum)
+        super().__init__(pnum=pnum, passive=passive, **kwargs)
 
     def equals(self, other):
         return False
     
     def evaluate_sdata(self, frequency) -> np.ndarray:
         
-        sdata = self._sdata
+        sdata = self._sdata.sel(**self.state)
 
         # interpolate the s-parameters at the desired frequency points
         if len(sdata.coords["frequency"]) > 1:

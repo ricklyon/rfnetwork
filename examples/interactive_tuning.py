@@ -46,9 +46,9 @@ class pa_input(rfn.Network):
     """
     Amplifier input matching network
     """
-    c1 = rfn.elements.Capacitor(12e-12, shunt=True)
+    c1 = rfn.elements.Capacitor_pF(12, shunt=True)
     ms1 = ms50(1.1)
-    c2 = rfn.elements.Capacitor(40e-12, shunt=True)
+    c2 = rfn.elements.Capacitor_pF(40, shunt=True)
     ms2 = ms50(0.4)
     r1 = rfn.elements.Resistor(2)
 
@@ -64,9 +64,9 @@ class pa_output(rfn.Network):
     PA output matching network
     """
     ms3 = ms50(0.4)
-    c3 = rfn.elements.Capacitor(65e-12, shunt=True)
+    c3 = rfn.elements.Capacitor_pF(65, shunt=True)
     ms4 = ms50(1.1)
-    c4 = rfn.elements.Capacitor(15e-12, shunt=True)
+    c4 = rfn.elements.Capacitor_pF(15, shunt=True)
 
     # Port 1 will connect to the amplifier output
     cascades = [
@@ -83,7 +83,7 @@ class pa_match(rfn.Network):
     Matched amplifier circuit
     """
     m_in = pa_input()
-    u1 = pa_8w(state=150)
+    u1 = pa_8w(file=150)
     m_out = pa_output()
 
     cascades = [
@@ -142,24 +142,24 @@ axes["im"].set_axis_off()
 
 fig.tight_layout()
 
-# plot S21
-fig, ax = plt.subplots()
-ln = n.plot(ax, frequency, 11, 22, 21, fmt="db", tune=True)
-ax.legend()
-ax.set_ylim([-20, 20])
-mplm.line_marker(x=f0/1e9)
+# # plot S21
+# fig, ax = plt.subplots()
+# ln = n.plot(ax, frequency, 11, 22, 21, fmt="db", tune=True)
+# ax.legend()
+# ax.set_ylim([-20, 20])
+# mplm.line_marker(x=f0/1e9)
 
 
 tuners = {
-    "m_in.c1": dict(lower=1, upper=30, label="C1 [pF]", multiplier=1e-12),
-    "m_in.ms1": dict(lower=0.1, upper=2, label="MS1 [in]", multiplier=1),
-    "m_in.c2": dict(lower=10, upper=80, label="C2 [pF]", multiplier=1e-12),
-    "m_in.ms2": dict(lower=0.1, upper=1, label="MS2 [in]", multiplier=1),
-    "m_in.r1": dict(lower=0.1, upper=5, label="R1 [ohms]", multiplier=1),
-    "m_out.ms3": dict(lower=0.1, upper=1, label="MS3 [in]", multiplier=1),
-    "m_out.c3": dict(lower=10, upper=100, label="C3 [pF]", multiplier=1e-12),
-    "m_out.ms4": dict(lower=0.1, upper=2, label="MS2 [in]", multiplier=1),
-    "m_out.c4": dict(lower=5, upper=30, label="C4 [pF]", multiplier=1e-12),
+    "m_in.c1": dict(key="value", lower=1, upper=30, label="C1 [pF]"),
+    "m_in.ms1": dict(key="length", lower=0.1, upper=2, label="MS1 [in]"),
+    "m_in.c2": dict(key="value", lower=10, upper=80, label="C2 [pF]"),
+    "m_in.ms2": dict(key="length", lower=0.1, upper=1, label="MS2 [in]"),
+    "m_in.r1": dict(key="value", lower=0.1, upper=5, label="R1 [ohms]"),
+    "m_out.ms3": dict(key="length", lower=0.1, upper=1, label="MS3 [in]"),
+    "m_out.c3": dict(key="value", lower=10, upper=100, label="C3 [pF]"),
+    "m_out.ms4": dict(key="length", lower=0.1, upper=2, label="MS2 [in]"),
+    "m_out.c4": dict(key="value", lower=5, upper=30, label="C4 [pF]"),
 }
 
 # plt.show()
