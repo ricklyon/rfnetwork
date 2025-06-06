@@ -125,11 +125,11 @@ def bp_filter(fc1: float, fc2: float, n: int, mode: str = "bandpass") -> rfn.Net
             if i % 2 == 0:  # start with series element
                 L = (g_k * r0) / (w0 * fb)
                 C = fb / (r0 * w0 * g_k)
-                components[f"S{i+1}"] = Filter_Series_Section(l1=L, c2=C, passive=True)
+                components[f"S{i+1}"] = Filter_Series_Section(passive=True, state=dict(l1=L, c2=C))
             else:
                 L = (fb * r0) / (w0 * g_k)
                 C = g_k / (w0 * fb * r0)
-                components[f"P{i+1}"] = Filter_Parallel_Section(l1=L, c2=C, shunt=True, passive=True)
+                components[f"P{i+1}"] = Filter_Parallel_Section(shunt=True, passive=True, state=dict(l1=L, c2=C))
 
         return components
     
@@ -141,11 +141,11 @@ def bp_filter(fc1: float, fc2: float, n: int, mode: str = "bandpass") -> rfn.Net
             if i % 2 == 0:  # start with series element
                 L = (g_k * r0 * fb) / (w0)
                 C = 1 / (r0 * w0 * g_k * fb)
-                components[f"S{i+1}"] = Filter_Parallel_Section(l1=L, c2=C, passive=True)
+                components[f"S{i+1}"] = Filter_Parallel_Section(passive=True, state=dict(l1=L, c2=C))
             else:
                 L = r0 / (w0 * g_k * fb)
                 C = (g_k * fb) / (w0 * r0)
-                components[f"P{i+1}"] = Filter_Series_Section(l1=L, c2=C, shunt=True, passive=True)
+                components[f"P{i+1}"] = Filter_Series_Section(shunt=True, passive=True, state=dict(l1=L, c2=C))
 
         return components
 
@@ -164,7 +164,8 @@ if __name__ == "__main__":
     f = bp_filter(fc1, fc2, 3)
 
     frequency = np.arange(0.5e9,  1.5e9, 1e6)
-    f.evaluate(frequency)
 
-    ax = rfn.plots.plot(f.sdata, 21)
+    fig, ax = plt.subplots()
+    f.plot(ax, frequency, 21)
     ax.set_ylim([-50, 0])
+    plt.show()

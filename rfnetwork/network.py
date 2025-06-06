@@ -12,6 +12,8 @@ import numpy as np
 from copy import deepcopy
 from . import netlist as nlist
 from np_struct import ldarray
+from . import plots
+
 
 from typing import Tuple
 
@@ -69,7 +71,7 @@ class NetworkMeta(type):
 
 class Network(Component, metaclass=NetworkMeta):
 
-    def __init__(self, shunt: bool = False, passive: bool = False, **kwargs):
+    def __init__(self, shunt: bool = False, passive: bool = False, name: str = None, state: dict = dict()):
         nports = len(self.ports.keys())
 
         self.components = dict()
@@ -78,32 +80,44 @@ class Network(Component, metaclass=NetworkMeta):
             # make a copy of all network components so multiple instances of the network
             # can have different states
             self.components[k] = deepcopy(v)
+            self.components[k].set_name(k)
 
-        self.set_state(**kwargs)
+        super().__init__(passive=passive, shunt=shunt, pnum=nports, name=name)
 
-        super().__init__(passive=passive, shunt=shunt, pnum=nports)
-                 
-    def equals(self, other):
-        # TODO: check active states of all components in network and make sure they are equal.
-        return False
-
-    def __call__(self, **kwargs):
-        # simple syntax for duplicating components in Network declarations
-        nobj = deepcopy(self)
-        nobj.set_state(**kwargs)
-        return nobj
+        self.set_state(**state)
+    
+    def __getitem__(self, key):
+        return self.components[key]
     
     def set_state(self, **kwargs):
 
         for k, v in kwargs.items():
-            if isinstance(v, dict):
-                self.components[k].set_state(**v)
-            else:
-                self.components[k].set_state(v)
+            v = dict(value=v) if not isinstance(v, dict) else v
+            self.components[k].set_state(**v)
 
     @property
     def state(self):
-        return {k: v.state for k, v in self.components.items() if hasattr(v, "state") and v.state != "default"}
+        return {k: v.state for k, v in self.components.items()}
+
+    def plot_probe(self, axes, frequency, *paths, input_port=1, fmt= "db", **kwargs):
+
+        ext_paths = []
+        ref_paths = []
+        labels = []
+
+        for p in paths:
+
+            if not (isinstance(p, (tuple, list)) and len(p) == 2):
+                raise ValueError("Each path must be a tuple of length 2.")
+            
+            ext_paths += [(p[0], input_port)]
+            ref_paths += [(p[1], input_port)]
+            
+            labels += [r"{}({}, {})$_{{{}}}$".format(plots.fmt_prefix[fmt], p[0], p[1], input_port)]
+            
+        return self.plot(
+            axes, frequency, *ext_paths, ref=ref_paths, label=labels, label_mode="override", fmt=fmt, **kwargs
+        )
 
     def evaluate_sdata(self, frequency: np.ndarray) -> np.ndarray:
         return self.evaluate_data(frequency, noise=False)[0]
@@ -184,6 +198,9 @@ class Network(Component, metaclass=NetworkMeta):
             # make the connection
             node_is_external = min_node in self.ports.values()
             nlist.connect_node(component_data, netlist, probe_netlist, min_node, node_is_external, noise=noise)
+
+        if i >= (max_connections - 1):
+            raise RuntimeError("Reached maximum number of connections.")
 
         # after connecting all the nodes, we should have only one component left in the netlist which
         # is the network sdata. However, if there are isolated regions in the network, we can 

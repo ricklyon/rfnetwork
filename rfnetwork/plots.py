@@ -50,6 +50,15 @@ fmt_prefix = {
     "nf": "NF",
 }
 
+
+def smithchart_marker(ax, frequency, fc: float):
+    """ place a smith chart marker by frequency rather than x/y position """
+    
+    f_idx = np.argmin(np.abs(frequency - fc))
+    return mplm.line_marker(
+        idx=f_idx, axes=ax, xline=False, yformatter=lambda x, y, idx: f"{frequency[idx]/1e6:.0f}MHz"
+    )
+
 def smith_circles(values: list, line_type: str, npoints = 5001, gamma_clip: float = 1):
     """
     Generate smith chart impedance/admittance circles
@@ -86,14 +95,14 @@ def smith_circles(values: list, line_type: str, npoints = 5001, gamma_clip: floa
     return circles.T
 
 
-def format_smithchart(ax: plt.Axes, values=None, line_kwargs=dict(linewidth=0.25, color="k")):
+def draw_smithchart(axes: plt.Axes, values=None, line_kwargs=dict(linewidth=0.25, color="k")):
 
     if values is None:
         values = [10 , 5, 2, 1, 0.5, 0.2, 0]
 
-    ax.set_aspect('equal')
-    ax.set_axis_off()
-    ax.axis([-1.1, 1.1, -1.1, 1.1])
+    axes.set_aspect('equal')
+    axes.set_axis_off()
+    axes.axis([-1.1, 1.1, -1.1, 1.1])
 
     r = smith_circles(values, "r")
     xp = smith_circles(values, "x")
@@ -103,30 +112,28 @@ def format_smithchart(ax: plt.Axes, values=None, line_kwargs=dict(linewidth=0.25
     sp = smith_circles(values, "s")
     sn = smith_circles(-np.array(values), "s")
 
-    sm_lines = ax.plot(r.real, r.imag, **line_kwargs)
-    sm_lines += ax.plot(xp.real, xp.imag, **line_kwargs)
-    sm_lines += ax.plot(xn.real, xn.imag, **line_kwargs)
+    sm_lines = axes.plot(r.real, r.imag, **line_kwargs)
+    sm_lines += axes.plot(xp.real, xp.imag, **line_kwargs)
+    sm_lines += axes.plot(xn.real, xn.imag, **line_kwargs)
 
     admittance_kwargs = dict(color="m", alpha=0.4, linewidth=0.2)
 
-    sm_lines += ax.plot(g.real, g.imag, **admittance_kwargs)
-    sm_lines += ax.plot(sp.real, sp.imag, **admittance_kwargs)
-    sm_lines += ax.plot(sn.real, sn.imag, **admittance_kwargs)
+    sm_lines += axes.plot(g.real, g.imag, **admittance_kwargs)
+    sm_lines += axes.plot(sp.real, sp.imag, **admittance_kwargs)
+    sm_lines += axes.plot(sn.real, sn.imag, **admittance_kwargs)
 
     # draw x axis line
-    sm_lines += ax.plot([-1, 1], [0, 0], **line_kwargs)
+    sm_lines += axes.plot([-1, 1], [0, 0], **line_kwargs)
 
-    mplm.disable_lines(sm_lines, axes=ax)
+    mplm.disable_lines(sm_lines, axes=axes)
 
-def plot_stability_circles(sdata: ldarray, f0: float, axes = None, load_kwargs=dict(), source_kwargs=dict()):
+    # add a flag that this axes has been formatted for a smithchart already
+    axes._smithchart = True
+
+def plot_stability_circles(axes: plt.Axes, sdata: ldarray, f0: float, load_kwargs=dict(), source_kwargs=dict()):
     """
     Plot source and load stability circles at f0. 
     """
-    if axes is None:
-        # create axes if one was not given
-        fig = plt.figure(figsize=(7, 7))
-        axes = fig.subplots(1, 1)
-        format_smithchart(axes)
 
     s11 = sdata.sel(frequency=f0, b=1, a=1)
     s22 = sdata.sel(frequency=f0, b=2, a=2)
@@ -156,19 +163,20 @@ def plot_stability_circles(sdata: ldarray, f0: float, axes = None, load_kwargs=d
     l_line = axes.plot(l_circ.real, l_circ.imag, label=r"$\Gamma_L$ Stability", **load_kwargs)
     s_line = axes.plot(s_circ.real, s_circ.imag, label=r"$\Gamma_S$ Stability", **source_kwargs)
 
-    return axes, s_line[0], l_line[0]
+    return s_line[0], l_line[0]
 
 def plot(
-    sdata,
+    axes: plt.Axes,
+    sdata: ldarray,
     *paths,
-    fmt="db",
-    ndata=None,
-    freq_unit="ghz",
-    ref_path=None,
-    axes=None,
-    label=None,
-    smithchart_kwargs={},
-    **line_kwargs
+    ndata: ldarray = None,
+    fmt: str = "db",
+    freq_unit: str = "ghz",
+    ref: tuple = None,
+    label: str = None,
+    label_mode: str = "prefix",
+    lines=None,
+    **kwargs
 ) -> plt.Axes:
     """
     Plots s-matrix data for each path over the primary axis. Matplotlib supports plotting over 2 dimensions, so
@@ -191,7 +199,7 @@ def plot(
             realz
             imagz
 
-    refpath (tuple, int):
+    ref (tuple, int):
         Normalizes all paths to this path. For example, to plot the phase difference between S21 and S31:
             .plot(21, refpath=31, fmt='ang')
     axes (Axes):
@@ -210,15 +218,6 @@ def plot(
 
     """
 
-    if axes is None:
-        # create axes if one was not given
-        figsize = (7,7) if fmt == "smith" else (7,5)
-        fig = plt.figure(figsize=figsize)
-        axes = fig.subplots(1, 1)
-
-        if fmt == "smith":
-            # draw lines on smithchart
-            format_smithchart(axes, **smithchart_kwargs)
 
     pnum = sdata.shape[-1]
     # plot all possible paths if not given
@@ -233,28 +232,51 @@ def plot(
         # break integers into sets of 2-tuples: 21 -> (2,1)
         paths = [((p // 10), (p % 10)) for p in paths]
 
-    # break reference path into tuple
-    if ref_path is not None:
-        ref_path = ((ref_path // 10), (ref_path % 10)) if isinstance(ref_path, int) else ref_path
+    # break reference path into list of tuples
+    if ref is not None:
 
         # check that noise figure is not plotted when reference is provided
         if fmt in ["nf"]:
             raise ValueError("Plotting against a reference path is not supported for noise figure plots.")
+        
+        # require that ref be a list the same length as paths. Single values are broadcast to the length of paths
+        if not isinstance(ref, list):
+            ref = [ref] * len(paths)
+
+        if isinstance(ref[0], int):
+            # break integers into sets of 2-tuples: 21 -> (2,1)
+            ref = [((r // 10), (r % 10)) for r in ref]
+
+        if len(ref) != len(paths):
+            raise ValueError(f"Reference paths must be the same length as paths. Got {len(ref)}, expected {len(paths)}")
+
 
     # get xaxis vector
     f_multiplier = dict(hz=1, khz=1e3, mhz=1e6, ghz=1e9)[freq_unit]
     f_label = dict(hz="Hz", khz="kHz", mhz="MHz", ghz="GHz")[freq_unit]
     xdata = sdata.coords["frequency"] / f_multiplier
 
+    custom_label = None
+    prefix_label = ""
+    suffix_label = ""
     # default line label
-    global_label = "" if label is None else label + " "
+    if label_mode == "override":
+        # broadcast label(s) across all paths
+        custom_label = np.broadcast_to(label, len(paths)).copy()
+    elif label_mode == "prefix":
+        prefix_label = "" if label is None else label + " "
+    elif label_mode == "suffix": #append
+        suffix_label = "" if label is None else " " + label
 
-    # apply labels and grid
-    axes.set_xlabel(f"Frequency [{f_label}]")
-    axes.set_ylabel(fmt_label.get(fmt))
-    axes.grid(True)
+    if fmt == "smith" and not hasattr(axes, "_smithchart"):
+        draw_smithchart(axes)
+    elif lines is None:
+        axes.set_xlabel(f"Frequency [{f_label}]")
+        axes.set_ylabel(fmt_label.get(fmt))
+        axes.grid(True)
+        axes.margins(x=0)
 
-    lines = []
+    lines = [] if lines is None else lines
 
     # plot over each path given, keep track of the index for tuning calls where each line in a list is updated
     for i, (p1, p2) in enumerate(paths):
@@ -263,8 +285,8 @@ def plot(
         path_data = sdata[{"b": p1, "a": p2}]
 
         # divide by the reference data
-        if ref_path is not None:
-            r1, r2 = ref_path
+        if ref is not None:
+            r1, r2 = ref[i]
             path_data /= sdata[{"b": r1, "a": r2}]
 
         # apply formatting to data (convert to dB, ang, etc...)
@@ -276,22 +298,30 @@ def plot(
         # transform xdata to the real part of the ydata if plotting for a smithchart
         xdata_s = fmt_func["real"](path_data) if fmt == "smith" else xdata
 
-        # escape underscores in port names
-        p1_name = r"\mathrm{" + str(p1).replace("_", "\\_") + "}"
-        p2_name = r"\mathrm{" + str(p2).replace("_", "\\_") + "}"
-        # build legend label for line, e.g S(2,1)
-        label = r"{}{}$({{ {},{} }})$".format(global_label, fmt_prefix[fmt], p1_name, p2_name)
-
-        # add a "divide by" path to the label if a reference is given
-        if ref_path is not None:
-            r1_name = r"\mathrm{" + str(r1).replace("_", "\\_") + "}"
-            r2_name = r"\mathrm{" + str(r2).replace("_", "\\_") + "}"
-            label += r" / {}$({{ {},{} }})$".format(fmt_prefix[fmt], r1_name, r2_name)
+        if len(lines) > i:
+            lines[i].set_data(xdata_s, ydata)
 
         # plot like normal if lines were not provided
-        lines += axes.plot(xdata_s, ydata, label=label, **line_kwargs)
+        else:
+            if custom_label is None:
+                # escape underscores in port names
+                p1_name = r"\mathrm{" + str(p1).replace("_", "\\_") + "}"
+                p2_name = r"\mathrm{" + str(p2).replace("_", "\\_") + "}"
 
-    axes.margins(x=0)
-    axes.legend()
+                label = prefix_label
+                # build legend label for line, e.g S(2,1)
+                label += r"{}$({{ {},{} }})$".format(fmt_prefix[fmt], p1_name, p2_name)
 
-    return axes, lines
+                # add a "divide by" path to the label if a reference is given
+                if ref is not None:
+                    r1_name = r"\mathrm{" + str(r1).replace("_", "\\_") + "}"
+                    r2_name = r"\mathrm{" + str(r2).replace("_", "\\_") + "}"
+                    label += r" / {}$({{ {},{} }})$".format(fmt_prefix[fmt], r1_name, r2_name)
+
+                label += suffix_label
+            else:
+                label = custom_label[i]
+
+            lines += axes.plot(xdata_s, ydata, label=label, **kwargs)
+
+    return lines

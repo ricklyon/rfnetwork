@@ -31,14 +31,14 @@ class Junction(Component):
     N-port lossless junction
     """
 
-    def __init__(self, N):
+    def __init__(self, N, **kwargs):
         """
         Parameters:
         ----------
         N (int):
             number of junction ports
         """
-        super().__init__(pnum=N)
+        super().__init__(pnum=N, **kwargs)
         assert N > 0, "N must be positive"
         self.N = int(N)
 
@@ -51,26 +51,15 @@ class Load(Component):
     1-port Load with variable impedance.
     """
 
-    def __init__(self, value=50):
+    def __init__(self, value=50, **kwargs):
         """
         Parameters:
         ----------
         value (float, complex):
             real or complex impedance [ohms]. Defaults to 50 ohms
         """
-        super().__init__(pnum=1)
+        super().__init__(pnum=1, state=dict(value=value), **kwargs)
         assert value > 0, "Load must be passive"
-        self.value = value
-
-    def equals(self, other):
-        return super().equals(other) and (other.value == self.value)
-
-    def set_state(self, state):
-        self.value = state
-
-    @property
-    def state(self):
-        return self.value
     
     def evaluate_sdata(self, frequency: np.ndarray) -> np.ndarray:
         return np.full((len(frequency), 1, 1), conv.gamma_z(self.value), dtype="complex128")
@@ -79,8 +68,8 @@ class Open(Component):
     """
     1-port open-circuit load
     """
-    def __init__(self):
-        super().__init__(pnum=1)
+    def __init__(self, **kwargs):
+        super().__init__(pnum=1, **kwargs)
 
     def evaluate_sdata(self, frequency: np.ndarray) -> np.ndarray:
         return np.full((len(frequency), 1, 1), 1, dtype="complex128")
@@ -90,8 +79,8 @@ class Short(Component):
     """
     1-port short-circuit load
     """
-    def __init__(self):
-        super().__init__(pnum=1)
+    def __init__(self, **kwargs):
+        super().__init__(pnum=1, **kwargs)
 
     def evaluate_sdata(self, frequency: np.ndarray):
         return np.full((len(frequency), 1, 1), -1, dtype="complex128")
@@ -107,8 +96,8 @@ class Hybrid90(Component):
     Port 4: Isolated
     """
 
-    def __init__(self):
-        super().__init__(pnum=4)
+    def __init__(self, **kwargs):
+        super().__init__(pnum=4, **kwargs)
 
     def evaluate_sdata(self, frequency: np.ndarray):
         sdata = (-1 / np.sqrt(2)) * np.array([
@@ -130,8 +119,8 @@ class Hybrid180(Component):
     Port 4: Isolated
     """
 
-    def __init__(self):
-        super().__init__(pnum=4)
+    def __init__(self, **kwargs):
+        super().__init__(pnum=4, **kwargs)
 
     def evaluate_sdata(self, frequency: np.ndarray):
         sdata = (-1j / np.sqrt(2)) * np.array([
@@ -148,27 +137,17 @@ class LumpedElement(Component):
     """
     Base Class for 2-port series and shunt lumped elements
     """
+    MULTIPLIER = 1
 
-    def __init__(self, value: float = 0, shunt: bool = False):
+    def __init__(self, value: float = 0, shunt: bool = False, **kwargs):
         """
         Parameters
         ----------
         value : float
             Resistance (Ohms), capacitance (F), or inductance (H) of component.
         """
-        self.value = value
-        super().__init__(passive=True, shunt=shunt)
-        
-    def equals(self, other):
-        return super().equals(other) and (other.value == self.value)
+        super().__init__(passive=True, shunt=shunt, state=dict(value=value), **kwargs)
 
-    def set_state(self, value):
-        self.value = value
-
-    @property
-    def state(self):
-        return self.value
-    
     def evaluate_sdata_from_z(self, z: np.ndarray):
 
         # initialize new sdata matrix
@@ -192,63 +171,77 @@ class LumpedElement(Component):
 
 class Resistor(LumpedElement):
     """
-    Simple Resistor network element.
+    Ideal Resistor network element.
     """
 
     def evaluate_sdata(self, frequency: np.ndarray):
 
-        z = np.full(frequency.shape, self.value)
+        z = np.full(frequency.shape, (self.state["value"] * self.MULTIPLIER))
         return super().evaluate_sdata_from_z(z)
 
 
 class Capacitor(LumpedElement):
     """
-    Simple Capacitor network element.
+    Ideal Capacitor network element.
     """
 
     def evaluate_sdata(self, frequency: np.ndarray):
 
         # z = 1/jwC
-        z = 1 / (1j * 2 * np.pi * frequency * self.value)
+        z = 1 / (1j * 2 * np.pi * frequency * (self.state["value"] * self.MULTIPLIER))
         return super().evaluate_sdata_from_z(z)
 
 
 class Inductor(LumpedElement):
     """
-    Simple Inductor network element.
-
+    Ideal Inductor network element.
     """
     
     def evaluate_sdata(self, frequency: np.ndarray):
 
         # z = jwL
-        z = 1j * 2 * np.pi * frequency * self.value
+        z = 1j * 2 * np.pi * frequency * (self.state["value"] * self.MULTIPLIER)
         return super().evaluate_sdata_from_z(z)
 
 
+class Capacitor_pF(Capacitor):
+    """
+    Ideal Capacitor network element, in pF units.
+    """
+
+    MULTIPLIER = 1e-12
+    
+
+class Inductor_nH(LumpedElement):
+    """
+    Ideal Inductor network element, in nH units.
+    """
+    MULTIPLIER = 1e-9
+
+
 class Attenuator(Component):
-    def __init__(self, attenuation_db=0):
+    def __init__(self, attenuation_db, **kwargs):
         """
         Parameters:
         ----------
         attenuation_db: float
             positive value attenuation in dB
         """
-
-        self.s21 = core.conv.lin_db20(-np.abs(attenuation_db))
-        super().__init__(passive=True)
+        super().__init__(passive=True, state=dict(value=-np.abs(attenuation_db)), **kwargs)
 
     def evaluate_sdata(self, frequency: np.ndarray):
 
-        sdata = np.array([[1e-6, self.s21], [self.s21, 1e-6]], dtype="complex128")
+        s21 = core.conv.lin_db20(self.state["value"])
+        sdata = np.array([[1e-6, s21], [s21, 1e-6]], dtype="complex128")
         return np.broadcast_to(sdata, (len(frequency), 2, 2)).copy()
+
 
 class Line(Component):
     """
     Base class for generic transmission lines. Use this to model stripline or GCPW lines.
     """
 
-    def __init__(self, z0=50, er=1, loss=0, frequency=0, length=None, shunt=False):
+    def __init__(self, z0=50, er=1, loss=0, frequency=0, length=None, shunt=False, state: dict = dict(), **kwargs):
         """
         Parameters:
         -----------
@@ -282,29 +275,8 @@ class Line(Component):
 
         """
 
-        super().__init__(shunt=shunt)
-
-        self.z0 = z0
-        self.er = er
-        self.loss = loss
         self._frequency = np.atleast_1d(frequency)
-        self.properties = None
-
-        self.length = length
-
-    def equals(self, other):
-        if not super().equals(other):
-            return False
-        
-        fields = ("z0", "er", "loss", "length", "_frequency")
-        return all([np.all(getattr(self, f) == getattr(other, f)) for f in fields])
-    
-    def set_state(self, length):
-        self.length = length
-
-    @property
-    def state(self):
-        return self.length
+        super().__init__(shunt=shunt, state=dict(length=length, z0=z0, er=er, loss=loss, **state), **kwargs)
     
     def __call__(self, length=None, e_len=None, fc=None):
         # call is used to create a new Line instance with the specified length.
@@ -321,7 +293,7 @@ class Line(Component):
         lineseg = dcopy(self)
 
         if length is not None:
-            lineseg.length = float(length)
+            lineseg.set_state(length=float(length))
 
         return lineseg
 
@@ -349,15 +321,15 @@ class Line(Component):
         Returns the phase delay [deg] and time delay [ns] at the specified frequency.
 
         """
-        if self.length is None:
+        if self.state["length"] is None:
             raise RuntimeError("Line must have length assigned to compute delay")
 
         lmbda = self.get_wavelength(frequency)
 
-        pdelay = np.rad2deg((2 * np.pi * self.length) / lmbda)
+        pdelay = np.rad2deg((2 * np.pi * self.state["length"]) / lmbda)
 
         vp = lmbda * frequency
-        tdelay = self.length / vp
+        tdelay = self.state["length"] / vp
 
         return pdelay, tdelay * 1e9
 
@@ -366,7 +338,7 @@ class Line(Component):
         Computes the lossy s-matrix of a transmission line.
         """
 
-        if self.length is None:
+        if self.state["length"] is None:
             raise RuntimeError("Line length must be specified before evaluating sdata")
         
         frequency = np.atleast_1d(frequency)
@@ -375,7 +347,7 @@ class Line(Component):
 
         sdata = np.zeros(shape=(len(frequency), 2, 2), dtype="complex128")
 
-        length = self.length
+        length = self.state["length"]
         z0 = properties.sel(value="z0")
         er = properties.sel(value="er")
         db_loss = properties.sel(value="loss")
@@ -414,7 +386,7 @@ class Line(Component):
         properties = ldarray(coords=coords)
 
         # populate each column, if values are single numbers numpy will broadcast the value to the correct length.
-        for i, p in enumerate([self.z0, self.er, self.loss]):
+        for i, p in enumerate([self.state["z0"], self.state["er"], self.state["loss"]]):
             # ensure all properties are positive numbers (no negative permittivity materials or amplifier lines)
             properties[..., i] = np.abs(p)
 
@@ -446,11 +418,12 @@ class MSLine(Line):
         w: float=None, 
         z0: float = 0, 
         t: float = 0.0013, 
-        loss_tan: float = None, 
+        loss_tan: float = 0, 
         loss: float = 0,
         frequency = 0,
         length = None,
         shunt = False,
+        **kwargs
     ):
         """
         Parameters:
@@ -487,29 +460,21 @@ class MSLine(Line):
                         frequency= [10e9, 12e9],
                         )
         """
-        self.w = w
-        self.h = h
-        self.t = t
-        self.loss_tan = loss_tan
         # get initial guess for width if z0 was given but not width
         if z0 and (w is None):
-            self.w = self.calculate_approx_width(z0, er, h)
+            w = self.calculate_approx_width(z0, er, h)
 
-        super().__init__(z0=z0, er=er, loss=loss, frequency=frequency, length=length, shunt=shunt)
-
-    def equals(self, other):
-        if not super().equals(other):
-            return False
-        
-        fields = ("w", "h", "t", "loss_tan")
-        return all([np.all(getattr(self, f) == getattr(other, f)) for f in fields])
+        state = dict(w=w, h=h, t=t, loss_tan=loss_tan)
+        super().__init__(
+            z0=z0, er=er, loss=loss, frequency=frequency, length=length, shunt=shunt, state=state, **kwargs
+        )
 
     def __call__(self, length=None, w=None, e_len=None, fc=None):
 
         lineseg = super().__call__(length=length, e_len=e_len, fc=fc)
 
         if w is not None:
-            lineseg.w = float(w)
+            lineseg.set_state(w = float(w))
 
         return lineseg
     
@@ -535,9 +500,9 @@ class MSLine(Line):
 
         er = properties[{"value": "er"}]
         # B is in mm
-        B = conv.mm_mil(self.h * 1e3)
-        T = self.t / self.h
-        U = self.w / self.h
+        B = conv.mm_mil(self.state["h"]* 1e3)
+        T = self.state["t"] / self.state["h"]
+        U = self.state["w"]/ self.state["h"]
         eta = 376.73
 
         U1 = U + (T * np.log(1 + ((4 * np.e) / T) * (np.tanh((6.517 * U) ** (1 / 2))) ** 2)) / np.pi
@@ -572,15 +537,15 @@ class MSLine(Line):
         properties[{"value": "er"}] = eff_f
         
         # generate dielectric loss from the loss tangent, as well as conductor losses
-        if self.loss_tan is not None:
+        if np.any(np.array(self.state["loss_tan"]) > 0):
 
             # interpolate loss tangent
             if len(self._frequency) < 2:
                 # broadcast single-point properties across the provided frequency vector
-                loss_tan = np.broadcast_to(self.loss_tan, len(frequency))
+                loss_tan = np.broadcast_to(self.state["loss_tan"], len(frequency))
             else:
                 # interpolate the line properties over frequency
-                sp1 = CubicSpline(self._frequency, self.loss_tan)
+                sp1 = CubicSpline(self._frequency, self.state["loss_tan"])
                 loss_tan = sp1(frequency)
 
             lmbda0_in = const.c0_in / (f_ghz * 1e9)
@@ -593,7 +558,7 @@ class MSLine(Line):
 
             # calculate losses due to copper conductor in np/m.
             # use width in meters
-            w_m = conv.m_in(self.w)
+            w_m = conv.m_in(self.state["w"])
             a_c = Rs / (Z0_f * w_m)
             # convert loss to per inch
             ac_in = a_c / 39.3701
@@ -633,10 +598,11 @@ class Stripline(Line):
             b: float, 
             er: float,
             t: float = 0.0006, 
-            loss_tan: float = None, 
+            loss_tan: float = 0, 
             loss: float = 0,
             frequency = 0,
-            length = None
+            length = None,
+            **kwargs
         ):
         """
         Parameters:
@@ -662,19 +628,9 @@ class Stripline(Line):
         provided as a list, a frequency list must be provided that maps each value to a frequency.
         """
         
-        self.w = w
-        self.b = b
-        self.t = t
-        self.loss_tan = loss_tan
-        super().__init__(z0=0, er=er, loss=loss, frequency=frequency, length=length)
+        state = dict(w=w, b=b, t=t, loss_tan=loss_tan)
+        super().__init__(z0=0, er=er, loss=loss, frequency=frequency, length=length, state=state, **kwargs)
 
-    def equals(self, other):
-        if not super().equals(other):
-            return False
-        
-        fields = ("w", "b", "t", "loss_tan")
-        return all([np.all(getattr(self, f) == getattr(other, f)) for f in fields])
-    
     def get_properties(self, frequency):
         """
         Returns a list of characteristic impedance and effective dielectric constants over frequency.
@@ -697,7 +653,7 @@ class Stripline(Line):
         er = properties[{"value": "er"}]
 
         # effective width
-        w_over_b = (self.w / self.b) 
+        w_over_b = (self.state["w"] / self.state["b"]) 
         we_b = w_over_b if w_over_b >= 0.35 else w_over_b - (0.35 - w_over_b)**2
 
         # characteristic impedance
@@ -708,24 +664,24 @@ class Stripline(Line):
         self.properties[{"value": "z0"}] = z0
 
         # generate dielectric loss from the loss tangent, as well as conductor losses
-        if self.loss_tan is not None:
+        if np.any(np.array(self.state["loss_tan"]) > 0):
 
             # interpolate loss tangent
             if len(self._frequency) < 2:
                 # broadcast single-point properties across the provided frequency vector
-                loss_tan = np.broadcast_to(self.loss_tan, len(frequency))
+                loss_tan = np.broadcast_to(self.state["loss_tan"], len(frequency))
             else:
                 # interpolate the line properties over frequency
-                sp1 = CubicSpline(self._frequency, self.loss_tan)
+                sp1 = CubicSpline(self._frequency, self.state["loss_tan"])
                 loss_tan = sp1(frequency)
 
             # calculate copper resistivity using conductivity in seimens per meter
             Rs = np.sqrt((2 * np.pi * f_ghz * 1e9 * const.u0) / (2 * const.cu_sigma))
 
             # 'A' parameter. We can stay in inches here since everything is a ratio
-            w = self.w
-            b = self.b
-            t = self.t
+            w = self.state["w"]
+            b = self.state["b"]
+            t = self.state["t"]
             A = 1 + ((2*w)/(b-t)) + (1/np.pi)*((b+t)/(b-t)) * np.log((2*b -t)/t)
 
             # 'B' parameter
