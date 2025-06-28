@@ -1,9 +1,11 @@
 
 import numpy as np
+from typing import Union, List, Tuple
 
 from .component import Component
 from .core.units import conv, const
 from .core import core
+from . import utils
 from np_struct import ldarray
 from copy import deepcopy as dcopy
 from scipy.interpolate import CubicSpline
@@ -238,56 +240,87 @@ class Attenuator(Component):
 
 class Line(Component):
     """
-    Base class for generic transmission lines. Use this to model stripline or GCPW lines.
+    Base class for generic transmission lines. 
     """
 
-    def __init__(self, z0=50, er=1, loss=0, frequency=0, length=None, shunt=False, state: dict = dict(), **kwargs):
+    def __init__(
+        self, 
+        z0: Union[float, List] = 50, 
+        er: Union[float, List] = 1, 
+        loss: Union[float, List] = 0, 
+        frequency: List = 0, 
+        length: float = None, 
+        shunt: bool = False, 
+        state: dict = dict()
+    ):
         """
-        Parameters:
-        -----------
-            z0 (float, list):
-                Real characteristic impedance. Assumes line is low loss so only real component of z0 should be given.
-            er (float, list, optional):
-                Dielectric constant of media. If modeling a mixed media line like microstrip,
-                use the effective dielectric constant.
-            loss (float, list, optional):
-                total loss, (dielectric + conductor) losses, in dB per inch. If not provided 0 db/inch loss is assumed.
-            frequency (float, list, optional):
-                array of frequencies in Hz matching the parameter lengths above, If the parameters are not arrays,
-                freq is ignored since the parameters will be
-                constant across all frequencies of the parent Network.
-            length (float, optional):
-                length in inches
+        Parameters
+        ----------
+        z0 : float | list, default: 50
+            Characteristic impedance of line.
+        er : float | list, default: 1
+            Dielectric constant of substrate.
+        loss : float | list, default: 0
+            Total loss, (dielectric + conductor) losses, in dB per inch.
+        frequency : list, optional
+            Array of frequencies in Hz for z0, er, and loss if they are provided as lists.
+        length : float, optional
+            Length of line segment in inches.
+        shunt : bool, default: False
+            If True, port 2 is connected to ground and port 1 is transformed into a 2-port component that can be 
+            cascaded with other components.
 
-        Any or all parameters can be supplied as a single value, or as a list of values over a frequency range.
-        If any of the parameters are provided as a list, a frequency list must be provided that maps
-        each value to a frequency.
+        Examples
+        --------
+        >>> import rfnetwork as rfn
+        >>> ln = rfn.elements.Line( 
+        ...    z0=55,
+        ...    er=[3.2, 3.5],
+        ...    loss=[0.5, 0.7],
+        ...    frequency=[10e9, 12e9],
+        ...    length=1.5,
+        ... )
+        >>> ln.state
+        {'length': 1.5, 'z0': 55, 'er': [3.2, 3.5], 'loss': [0.5, 0.7]}
 
-        Example:
-        ---------
+        If setting the length with the electrical length, keep in mind that it is relative to a wavelength in the
+        medium, not in free space. 
+        
+        >>> ln1 = ln(360, f0=10e9)
+        >>> ln1.state["length"]
+        0.6597...
 
-        exLine1 = Line( z0=    50,
-                        er=     [3.2,  3.5],
-                        loss=   [0.5,  0.6],
-                        frequency=   [10e9, 12e9] )
-
-        exLine2 = Line(z0=50, er=2.56)
+        Whereas a wavelength in free space is,
+        
+        >>> rfn.const.c0_in / 10e9
+        1.1802...
 
         """
 
         self._frequency = np.atleast_1d(frequency)
-        super().__init__(shunt=shunt, state=dict(length=length, z0=z0, er=er, loss=loss, **state), **kwargs)
+        super().__init__(shunt=shunt, state=dict(length=length, z0=z0, er=er, loss=loss, **state))
     
-    def __call__(self, length=None, e_len=None, fc=None):
-        # call is used to create a new Line instance with the specified length.
-        # this allows multiple Line objects to be created with different lengths from the same line object
+    def __call__(self, length: float = None, f0: float = None):
+        """
+        Create a new instance with the specified line length.
 
+        Parameters
+        ----------
+        length : float
+            length of line instance in inches. If f0 is given, interpreted as electrical length in degrees.
+        f0 : float, optional
+            Frequency for the electrical length, if length is given in degrees.
+     
+        """
         # assign electrical length if given
-        if e_len is not None:
-            # wavelength in inches at center frequency:
-            lmbda_c = const.c0_in / fc
+        if f0 is not None:
+            # get er at center frequency
+            er = self.get_properties(f0).sel(value="er")
+            # wavelength in inches at center frequency
+            vp_in = const.c0_in / np.sqrt(er)
+            lmbda_in = vp_in / f0
             # electrical length is e_len = (beta * len) = (2*np.pi)len/lmbda.
-            length = (np.deg2rad(e_len) * lmbda_c) / (2 * np.pi)
+            length = (np.deg2rad(length) * lmbda_in) / (2 * np.pi)
 
         # create new instance with length
         lineseg = dcopy(self)
@@ -297,9 +330,33 @@ class Line(Component):
 
         return lineseg
 
-    def get_wavelength(self, frequency, units="in"):
+    def get_wavelength(self, frequency, units="in") -> ldarray:
         """
-        Returns the propagation wavelength [inches] of the medium at the specified frequency (Hz).
+        Returns the propagation wavelength [inches] of the medium at the specified frequency [Hz].
+
+        Parameters
+        ----------
+        frequency: float | np.ndarray
+            Frequencies [Hz] at which to compute wavelength.
+        units: {"in", "m"}, default: "in"
+            units of the returned wavelength.
+
+        Returns
+        -------
+        ldarray:
+            Mx1 array where M is the number of frequencies.
+
+        Examples
+        --------
+        >>> import rfnetwork as rfn
+        >>> ln_er1 = rfn.elements.Line(er=1)
+        >>> ln_er3 = rfn.elements.Line(er=3)
+
+        >>> ln_er1.get_wavelength(10e9)
+        ldarray([1.18028591])...
+    
+        >>> ln_er3.get_wavelength(10e9)
+        ldarray([0.68143839])...
 
         """
 
@@ -316,10 +373,21 @@ class Line(Component):
 
         return lmbda
 
-    def get_delay(self, frequency):
+    def get_delay(self, frequency: Union[float, np.ndarray]) -> Tuple:
         """
-        Returns the phase delay [deg] and time delay [ns] at the specified frequency.
+        Returns the phase delay [deg] and time delay [ps] at the specified frequency.
 
+        Parameters
+        ----------
+        frequency: float | np.ndarray
+            Frequencies [Hz] at which to compute delay.
+
+        Returns
+        -------
+        phase_delay : ldarray
+            phase delay in degrees
+        time_delay : ldarray
+            time delay in degrees
         """
         if self.state["length"] is None:
             raise RuntimeError("Line must have length assigned to compute delay")
@@ -331,9 +399,9 @@ class Line(Component):
         vp = lmbda * frequency
         tdelay = self.state["length"] / vp
 
-        return pdelay, tdelay * 1e9
+        return pdelay, tdelay * 1e12
 
-    def evaluate_sdata(self, frequency):
+    def evaluate_sdata(self, frequency: np.ndarray) -> np.ndarray:
         """
         Computes the lossy s-matrix of a transmission line.
         """
@@ -375,7 +443,21 @@ class Line(Component):
 
         return sdata
 
-    def get_properties(self, frequency):
+    def get_properties(self, frequency: float | np.ndarray) -> ldarray:
+        """
+        Returns characteristic impedance and dielectric constant over frequency.
+
+        Parameters
+        ----------
+        frequency : float | np.ndarray
+            frequency value(s) to evaluate properties at.
+
+        Returns
+        -------
+        ldarray
+            Mx3 array, where M is the number of frequency points. Columns are z0, er, and loss per inch [dB].
+
+        """
 
         frequency = np.atleast_1d(frequency)
         # create a labeled array with rows as frequency and columns as data type (zo, loss, etc...).
@@ -407,89 +489,124 @@ class Line(Component):
 
 class MSLine(Line):
     """
-    Models microstrip lines based on closed form equations used in Rogers MWI tool.
-
+    Microstrip Line
     """
 
     def __init__(
         self, 
         h: float, 
-        er: float, 
-        w: float=None, 
+        er: Union[float, List], 
+        w: float = None, 
         z0: float = 0, 
         t: float = 0.0013, 
-        loss_tan: float = 0, 
-        loss: float = 0,
-        frequency = 0,
-        length = None,
-        shunt = False,
-        **kwargs
+        df: Union[float, List] = 0, 
+        loss: Union[float, List] = 0,
+        frequency: List = 0,
+        length: float = None,
+        shunt: bool = False
     ):
         """
-        Parameters:
-        ------------
-            h (float):
-                substrate thickness in inches
-            er (float, list):
-                dielectric constant of substrate, or design dk. Not the effective dielectric constant.
-            w (float, optional):
-                width of microstrip trace in inches. Specify w or z0, not both.
-            z0 (float, optional):
-                target characteristic impedance of line. Width will be set automatically.
-            t (float, optional):
-                copper thickness in inches, defaults to 1oz copper (1.3 mils). Does not affect loss (yet).
-            loss_tan (float, optional):
-                dielectric loss tangent as a single value over frequency range. If both loss_tan and loss are provided,
-                only loss_tan is used and loss is ignored.
+        Parameters
+        ----------
+        h : float
+            Substrate thickness in inches
+        er : float | list
+            Dielectric constant of substrate.
+        w : float, optional
+            Width of microstrip trace in inches. Specify w or z0, not both.
+        z0 : float, optional
+            Target characteristic impedance of line. Width will be set automatically if provided.
+        t : float, optional
+            Copper thickness in inches, defaults to 1oz copper (1.3 mils). Does not affect loss.
+        df : float | list, optional
+            Dissipation factor of substrate material, or dielectric loss tangent.
+        loss : float | list, optional
+            Total loss, (dielectric + conductor) losses, in dB per inch. Ignored if df is provided.
+        frequency : list, optional
+            Array of frequencies in Hz for er, df, and loss if they are provided as lists.
+        length : float, optional
+            Length of line segment in inches.
+        shunt : bool, default: False
+            if True, port 2 is connected to ground and port 1 is transformed into a 2-port component that can be 
+            cascaded with other components.
 
-            loss (float, list, optional):
-                total loss, (dielectric + conductor) losses, in dB per inch.
-            frequency (float, list, optional):
-                array of frequencies in Hz for the loss and/ore er lists above.
+        Examples
+        --------
 
-        er, and loss can be supplied as a single value, or as a list of values over a frequency range. If either are
-        provided as a list, a frequency list must be provided that maps each value to a frequency.
+        To create multiple instances of this line with different lengths, 
 
-        Example:
-        -----------
-        msline = MSLine(w =   .020,
-                        h =   .010,
-                        t =   .0013,
-                        er=   [3.0, 3.1],
-                        loss= [0.5, 0.6],
-                        frequency= [10e9, 12e9],
-                        )
+        >>> import rfnetwork as rfn
+        >>> ms = rfn.elements.MSLine(
+        ...    w=0.020,
+        ...    h=0.010,
+        ...    t=0.0013,
+        ...    er=3.0,
+        ...    loss=0.5,
+        ... )
+
+        >>> # create 0.5in segment
+        >>> ms1 = ms(0.5)  
+        >>> # create 1.0in segment
+        >>> ms2 = ms(1.0)  
+        >>> ms1.state
+        {'length': 0.5, ...
+
+        If f0 is provided, the length is interpreted as the electrical length in degrees.
+
+        >>> ms1 = ms(90, f0=10e9)  # create a 0.5in segment
+        >>> ms1.state["length"]  # state holds the length in degrees
+        0.2950...
+
         """
         # get initial guess for width if z0 was given but not width
         if z0 and (w is None):
-            w = self.calculate_approx_width(z0, er, h)
+            w = utils.ms_z_to_width(z0, er, h)
 
-        state = dict(w=w, h=h, t=t, loss_tan=loss_tan)
+        state = dict(w=w, h=h, t=t, df=df)
         super().__init__(
-            z0=z0, er=er, loss=loss, frequency=frequency, length=length, shunt=shunt, state=state, **kwargs
+            z0=z0, er=er, loss=loss, frequency=frequency, length=length, shunt=shunt, state=state
         )
 
-    def __call__(self, length=None, w=None, e_len=None, fc=None):
+    def __call__(self, length: float = None, w: float = None, f0: float = None):
+        """
+        Create a new instance with the specified line length, and optionally a new width.
 
-        lineseg = super().__call__(length=length, e_len=e_len, fc=fc)
+        Parameters
+        ----------
+        length : float
+            length of line instance in inches. If f0 is given, interpreted as electrical length in degrees.
+        w : float, optional
+            line width in inches
+        f0 : float, optional
+            Frequency for the electrical length, if length is given in degrees.
+     
+        """
+        lineseg = super().__call__(length=length, f0=f0)
 
         if w is not None:
             lineseg.set_state(w = float(w))
 
         return lineseg
     
-    def get_properties(self, frequency):
+    def get_properties(self, frequency: float | np.ndarray) -> ldarray:
         """
-        Returns a list of characteristic impedance and effective dielectric constants over frequency.
+        Returns characteristic impedance and effective dielectric constant over frequency.
+        Equations are the same as those Roger's MWI tool [1]. See page 149 of [2] for loss equations.
 
-        Reference:
-        ---------
+        Parameters
+        ----------
+        frequency : float | np.ndarray
+            frequency value(s) to evaluate properties at.
 
-            [1] Design-Data-for-Microstrip-Transmission-Lines-on-RT-duroid-Laminates, Rogers Corporation, 2013
+        Returns
+        -------
+        ldarray
+            Mx3 array, where M is the number of frequency points. Columns are z0, effective er, and loss per inch [dB].
 
-            (see ../docs/rogers_transmission_line_eq.pdf)
-
-            [2] Pozar page 149 for loss equations.
+        References
+        ----------
+        [1] Design-Data-for-Microstrip-Transmission-Lines-on-RT-duroid-Laminates, Rogers Corporation, 2013
+        [2] Pozar, David M. Microwave Engineering. 4th ed., Wiley, 2011.
 
         """
         frequency = np.atleast_1d(frequency)
@@ -537,21 +654,21 @@ class MSLine(Line):
         properties[{"value": "er"}] = eff_f
         
         # generate dielectric loss from the loss tangent, as well as conductor losses
-        if np.any(np.array(self.state["loss_tan"]) > 0):
+        if np.any(np.array(self.state["df"]) > 0):
 
             # interpolate loss tangent
             if len(self._frequency) < 2:
                 # broadcast single-point properties across the provided frequency vector
-                loss_tan = np.broadcast_to(self.state["loss_tan"], len(frequency))
+                df = np.broadcast_to(self.state["df"], len(frequency))
             else:
                 # interpolate the line properties over frequency
-                sp1 = CubicSpline(self._frequency, self.state["loss_tan"])
-                loss_tan = sp1(frequency)
+                sp1 = CubicSpline(self._frequency, self.state["df"])
+                df = sp1(frequency)
 
             lmbda0_in = const.c0_in / (f_ghz * 1e9)
             k0 = (2 * np.pi) / lmbda0_in
             # calculate dielectric loss per inch
-            ad_in = ((k0 * er) * (eff_f - 1) * loss_tan) / (2 * np.sqrt(eff_f) * (er - 1))
+            ad_in = ((k0 * er) * (eff_f - 1) * df) / (2 * np.sqrt(eff_f) * (er - 1))
 
             # calculate copper resistivity using conductivity in seimens per meter
             Rs = np.sqrt((2 * np.pi * f_ghz * 1e9 * const.u0) / (2 * const.cu_sigma))
@@ -568,77 +685,87 @@ class MSLine(Line):
 
         return properties
 
-    def calculate_approx_width(self, z, er, d):
-        """
-        [2] Pozar page 149
-        """
-        A = (z / 60) * np.sqrt((er+1)/2) + ((er-1)/(er+1)) *(0.23 + (0.11/er))
-        B = (377 * np.pi) /( 2 * z * np.sqrt(er))
-
-        # w/d > 2
-        wd2 = (2 / np.pi) * ( B -1 - np.log(2*B -1) + (er-1)/(2*er) *( np.log(B-1) + 0.39 - (0.61 / er)))
-        # w/d < 2
-        wd12 = (8 * np.exp(A)) /( np.exp(2* A) -2)
-
-        if wd2 > 2:
-            return wd2*d
-        else:
-            return wd12*d
-
 
 class Stripline(Line):
     """
-    Models stripline lines.
-
+    Simple stripline with homogenous media.
     """
 
     def __init__(
-            self, 
-            w: float, 
-            b: float, 
-            er: float,
-            t: float = 0.0006, 
-            loss_tan: float = 0, 
-            loss: float = 0,
-            frequency = 0,
-            length = None,
-            **kwargs
+        self, 
+        w: float, 
+        b: float, 
+        er: Union[float, List],
+        t: float = 0.0013, 
+        df: Union[float, List] = 0, 
+        loss: Union[float, List] = 0,
+        frequency: List = 0,
+        length: float = None,
+        shunt: bool = False
         ):
         """
         Parameters:
         ------------
-            w (float):
-                width of stripline trace in inches
-            b (float):
-                substrate thickness in inches between the ground planes (with line in the center)
-            t (float, optional):
-                copper thickness in inches, defaults to 1oz copper (1.3 mils). Does not affect loss (yet).
-            er (float, list):
-                dielectric constant of substrate, or design dk. Not the effective dielectric constant.
-            loss_tan (float, optional):
-                dielectric loss tangent as a single value over frequency range. If both loss_tan and loss are provided,
-                only loss_tan is used and loss is ignored.
+        w : float
+            width of stripline trace in inches
+        b : float
+            substrate thickness in inches (with line in the center).
+        t : float, optional
+            copper thickness in inches, defaults to 1oz copper (1.3 mils). Does not affect loss.
+        df : float | list, optional
+            Dissipation factor of substrate material, or dielectric loss tangent.
+        loss : float | list, optional
+            Total loss, (dielectric + conductor) losses, in dB per inch. Ignored if df is provided.
+        frequency : list, optional
+            Array of frequencies in Hz for er, df, and loss if they are provided as lists.
+        length : float, optional
+            Length of line segment in inches.
+        shunt : bool, default: False
+            if True, port 2 is connected to ground and port 1 is transformed into a 2-port component that can be 
+            cascaded with other components.
 
-            loss (float, list, optional):
-                total loss, (dielectric + conductor) losses, in dB per inch.
-            frequency (float, list, optional):
-                array of frequencies in Hz for the loss and/ore er lists above.
+        Examples
+        --------
 
-        er, and loss can be supplied as a single value, or as a list of values over a frequency range. If either are
-        provided as a list, a frequency list must be provided that maps each value to a frequency.
+        >>> import rfnetwork as rfn
+        >>> sl = rfn.elements.Stripline(
+        ...    w=0.008,
+        ...    b=0.010,
+        ...    er=3.0,
+        ...    loss=0.5,
+        ...    length=0.5
+        ... )
+
+        Evaluate s21 to get the loss of the line,
+
+        >>> s21 = sl.evaluate(10e9)["s"].sel(b=2, a=1)
+        >>> rfn.conv.db20_lin(s21)
+        ldarray([-0.32187157])...
+
         """
         
-        state = dict(w=w, b=b, t=t, loss_tan=loss_tan)
-        super().__init__(z0=0, er=er, loss=loss, frequency=frequency, length=length, state=state, **kwargs)
+        state = dict(w=w, b=b, t=t, df=df)
+        super().__init__(z0=0, er=er, loss=loss, frequency=frequency, length=length, state=state, shunt=shunt)
 
-    def get_properties(self, frequency):
+    def get_properties(self, frequency: float | np.ndarray) -> ldarray:
         """
-        Returns a list of characteristic impedance and effective dielectric constants over frequency.
+        Returns characteristic impedance and dielectric constant over frequency.
+        See section 3.8 in [2].
 
-        Reference:
-        ---------
+        Parameters
+        ----------
+        frequency : float | np.ndarray
+            frequency value(s) to evaluate properties at.
 
-            [1] Pozar section 3.8
+        Returns
+        -------
+        ldarray
+            Mx3 array, where M is the number of frequency points. Columns are z0, er, and loss per inch [dB].
+        
+        References
+        ----------
+        [1] Design-Data-for-Microstrip-Transmission-Lines-on-RT-duroid-Laminates, Rogers Corporation, 2013
+        [2] Pozar, David M. Microwave Engineering. 4th ed., Wiley, 2011.
 
         """
 
@@ -661,19 +788,19 @@ class Stripline(Line):
         z0 = ((30*np.pi) / n) * (1 / (we_b + 0.441))
 
         # update the properties values
-        self.properties[{"value": "z0"}] = z0
+        properties[{"value": "z0"}] = z0
 
         # generate dielectric loss from the loss tangent, as well as conductor losses
-        if np.any(np.array(self.state["loss_tan"]) > 0):
+        if np.any(np.array(self.state["df"]) > 0):
 
             # interpolate loss tangent
             if len(self._frequency) < 2:
                 # broadcast single-point properties across the provided frequency vector
-                loss_tan = np.broadcast_to(self.state["loss_tan"], len(frequency))
+                df = np.broadcast_to(self.state["df"], len(frequency))
             else:
                 # interpolate the line properties over frequency
-                sp1 = CubicSpline(self._frequency, self.state["loss_tan"])
-                loss_tan = sp1(frequency)
+                sp1 = CubicSpline(self._frequency, self.state["df"])
+                df = sp1(frequency)
 
             # calculate copper resistivity using conductivity in seimens per meter
             Rs = np.sqrt((2 * np.pi * f_ghz * 1e9 * const.u0) / (2 * const.cu_sigma))
@@ -695,8 +822,10 @@ class Stripline(Line):
 
             # equation 3.30 in pozar
             k_in = (2*np.pi*f_ghz*1e9) * (n / const.c0_in)
-            a_d = (k_in * loss_tan) /2
+            a_d = (k_in * df) /2
 
             # convert total loss to positive valued loss in db per inch
-            self.properties[{"value": "loss"}] = -conv.db20_lin(np.exp(-(a_d+ a_c)))
+            properties[{"value": "loss"}] = -conv.db20_lin(np.exp(-(a_d+ a_c)))
+
+        return properties
 

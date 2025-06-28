@@ -26,7 +26,6 @@ class Component(object):
         passive: bool = True, 
         pnum: int = 2, 
         state: dict = dict(), 
-        name: str = None
     ):
         """
         Parameters
@@ -42,7 +41,6 @@ class Component(object):
         self._pnum = pnum
         self._state = {k: None for k in state.keys()}
         self._tune = dict(frequency=None, args=[], axes=[])
-        self._name = name
 
         self.set_state(**state)
 
@@ -53,10 +51,6 @@ class Component(object):
     @property
     def state(self):
         return self._state
-    
-    @property
-    def name(self):
-        return self._name
 
     def set_state(self, **kwargs):
         
