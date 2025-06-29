@@ -39,7 +39,7 @@ ms50 = rfn.elements.MSLine(
     h=0.030, 
     er=2.55, 
     w=0.08,
-    loss_tan=0.017,
+    df=0.017,
 )
 
 class pa_input(rfn.Network):
