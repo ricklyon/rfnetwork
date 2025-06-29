@@ -3,6 +3,7 @@ import numpy as np
 from typing import Union, List, Tuple
 
 from .component import Component
+from .network import DynamicNetwork, Network
 from .core.units import conv, const
 from .core import core
 from . import utils
@@ -24,43 +25,27 @@ __all__ = (
     "Short",
     "Open",
     "Load",
-    "Junction"
-    "Attenuator"
+    "Attenuator",
+    "LowPassFilter",
+    "HighPassFilter",
+    "BandPassFilter",
+    "BandStopFilter"
 )
 
-class Junction(Component):
-    """
-    N-port lossless junction
-    """
-
-    def __init__(self, N, **kwargs):
-        """
-        Parameters:
-        ----------
-        N (int):
-            number of junction ports
-        """
-        super().__init__(pnum=N, **kwargs)
-        assert N > 0, "N must be positive"
-        self.N = int(N)
-
-    def evaluate_sdata(self, frequency: np.ndarray) -> np.ndarray:
-        return core.junction_sdata(frequency, self.N)
-    
 
 class Load(Component):
     """
-    1-port Load with variable impedance.
+    1-port load with variable impedance.
     """
 
-    def __init__(self, value=50, **kwargs):
+    def __init__(self, value: float = 50):
         """
         Parameters:
         ----------
-        value (float, complex):
+        value: float, default: 50
             real or complex impedance [ohms]. Defaults to 50 ohms
         """
-        super().__init__(pnum=1, state=dict(value=value), **kwargs)
+        super().__init__(pnum=1, state=dict(value=value))
         assert value > 0, "Load must be passive"
     
     def evaluate_sdata(self, frequency: np.ndarray) -> np.ndarray:
@@ -70,8 +55,8 @@ class Open(Component):
     """
     1-port open-circuit load
     """
-    def __init__(self, **kwargs):
-        super().__init__(pnum=1, **kwargs)
+    def __init__(self):
+        super().__init__(pnum=1)
 
     def evaluate_sdata(self, frequency: np.ndarray) -> np.ndarray:
         return np.full((len(frequency), 1, 1), 1, dtype="complex128")
@@ -81,8 +66,8 @@ class Short(Component):
     """
     1-port short-circuit load
     """
-    def __init__(self, **kwargs):
-        super().__init__(pnum=1, **kwargs)
+    def __init__(self):
+        super().__init__(pnum=1)
 
     def evaluate_sdata(self, frequency: np.ndarray):
         return np.full((len(frequency), 1, 1), -1, dtype="complex128")
@@ -92,14 +77,14 @@ class Hybrid90(Component):
     """
     Ideal directional coupler with 90 degree phase delay between the thru and coupled paths.
 
-    Port 1: Input
-    Port 2: Thru
-    Port 3: Coupled
-    Port 4: Isolated
+    - Port 1: Input
+    - Port 2: Thru
+    - Port 3: Coupled
+    - Port 4: Isolated
     """
 
-    def __init__(self, **kwargs):
-        super().__init__(pnum=4, **kwargs)
+    def __init__(self):
+        super().__init__(pnum=4)
 
     def evaluate_sdata(self, frequency: np.ndarray):
         sdata = (-1 / np.sqrt(2)) * np.array([
@@ -115,14 +100,14 @@ class Hybrid180(Component):
     """
     Ideal directional coupler with 180 degree phase delay between the thru and coupled paths.
 
-    Port 1: Input
-    Port 2: Thru
-    Port 3: Coupled
-    Port 4: Isolated
+    - Port 1: Input
+    - Port 2: Thru
+    - Port 3: Coupled
+    - Port 4: Isolated
     """
 
-    def __init__(self, **kwargs):
-        super().__init__(pnum=4, **kwargs)
+    def __init__(self):
+        super().__init__(pnum=4)
 
     def evaluate_sdata(self, frequency: np.ndarray):
         sdata = (-1j / np.sqrt(2)) * np.array([
@@ -141,17 +126,22 @@ class LumpedElement(Component):
     """
     MULTIPLIER = 1
 
-    def __init__(self, value: float = 0, shunt: bool = False, **kwargs):
+    def __init__(self, value: float = 0, shunt: bool = False):
         """
         Parameters
         ----------
         value : float
-            Resistance (Ohms), capacitance (F), or inductance (H) of component.
+            Resistance (Ohms), capacitance (F), or inductance (H) of lumped component.
+        shunt : bool, default: False
+            If True, port 2 is connected to ground and port 1 is transformed into a 2-port component that can be 
+            cascaded with other components.
         """
-        super().__init__(passive=True, shunt=shunt, state=dict(value=value), **kwargs)
+        super().__init__(shunt=shunt, state=dict(value=value))
 
-    def evaluate_sdata_from_z(self, z: np.ndarray):
-
+    def evaluate_sdata_from_z(self, z: np.ndarray) -> np.ndarray:
+        """
+        Compute the s-matrix given the series impedance of the lumped element.
+        """
         # initialize new sdata matrix
         shape = (len(z), 2, 2)
         sdata = np.zeros(shape, dtype="complex128")
@@ -161,7 +151,7 @@ class LumpedElement(Component):
         s11 = z / (2 * z0 + z)
         s21 = (1 + s11) * (z0 / (z + z0))
 
-        # there's probably a more pythonic way to do this:
+        # component is reciprocal and s-matrix is symmetric
         sdata[:, 0, 0] = s11
         sdata[:, 1, 1] = s11
         sdata[:, 0, 1] = s21
@@ -169,7 +159,6 @@ class LumpedElement(Component):
 
         return sdata
              
-
 
 class Resistor(LumpedElement):
     """
@@ -222,20 +211,65 @@ class Inductor_nH(LumpedElement):
 
 
 class Attenuator(Component):
-    def __init__(self, attenuation_db, **kwargs):
+    def __init__(self, attenuation_db: float):
         """
         Parameters:
         ----------
         attenuation_db: float
             positive value attenuation in dB
         """
-        super().__init__(passive=True, state=dict(value=-np.abs(attenuation_db)), **kwargs)
+        super().__init__(passive=True, state=dict(value=-np.abs(attenuation_db)))
 
-    def evaluate_sdata(self, frequency: np.ndarray):
+    def evaluate_sdata(self, frequency: np.ndarray) -> np.ndarray:
 
         s21 = core.conv.lin_db20(self.state["value"])
         sdata = np.array([[1e-6, s21], [s21, 1e-6]], dtype="complex128")
         return np.broadcast_to(sdata, (len(frequency), 2, 2)).copy()
+
+class LC_Series(Network):
+    """
+    Inductor and Capacitor in series.
+    """
+    l1 = Inductor()
+    c2 = Capacitor()
+    cascades = [["P1"] + [l1, c2] + ["P2"]]
+
+    def __init__(self, L: float, C: float, shunt: bool = False):
+        """
+        Parameters
+        ----------
+        L : float
+            inductor value [H]
+        C : float
+            capacitor value [F]
+        """
+        state=dict(l1=L, c2=C)
+        super().__init__(shunt=shunt, state=state, passive=True)
+
+
+class LC_Parallel(Network):
+    """
+    Inductor and Capacitor in parallel.
+    """
+
+    l1 = Inductor()
+    c2 = Capacitor()
+    nodes = [
+        ("P1", l1|1, c2|1),
+        ("P2", l1|2, c2|2),
+    ]
+
+    def __init__(self, L: float, C: float, shunt: bool = False):
+        """
+        Parameters
+        ----------
+        L : float
+            inductor value [H]
+        C : float
+            capacitor value [F]
+        """
+        state=dict(l1=L, c2=C)
+        super().__init__(shunt=shunt, state=state, passive=True)
 
 
 class Line(Component):
@@ -588,7 +622,7 @@ class MSLine(Line):
 
         return lineseg
     
-    def get_properties(self, frequency: float | np.ndarray) -> ldarray:
+    def get_properties(self, frequency: Union[float, np.ndarray]) -> ldarray:
         """
         Returns characteristic impedance and effective dielectric constant over frequency.
         Equations are the same as those Roger's MWI tool [1]. See page 149 of [2] for loss equations.
@@ -750,7 +784,7 @@ class Stripline(Line):
     def get_properties(self, frequency: float | np.ndarray) -> ldarray:
         """
         Returns characteristic impedance and dielectric constant over frequency.
-        See section 3.8 in [2].
+        See section 3.8 in [1].
 
         Parameters
         ----------
@@ -764,8 +798,7 @@ class Stripline(Line):
         
         References
         ----------
-        [1] Design-Data-for-Microstrip-Transmission-Lines-on-RT-duroid-Laminates, Rogers Corporation, 2013
-        [2] Pozar, David M. Microwave Engineering. 4th ed., Wiley, 2011.
+        [1] Pozar, David M. Microwave Engineering. 4th ed., Wiley, 2011.
 
         """
 
@@ -829,3 +862,164 @@ class Stripline(Line):
 
         return properties
 
+
+class LowPassFilter(DynamicNetwork):
+    """ 
+    Lumped component low-pass filter 
+    """
+    def __init__(self, fc: float, n: int, r0: float = 50, ripple: float = 0.5):
+        """
+        Parameters
+        ----------
+        fc : float
+            3 dB cutoff frequency [Hz]
+        n : int
+            Filter order (1-10). Odd n will be matched to 50 ohms, while even n requires an impedance match.
+        r0 : float, default: 50
+            Port impedance. Default is 50 ohms.
+        ripple : float, default: 0.5
+            Pass-band ripple in dB. Supported values are 0.5 and 3.0 dB.
+        """
+        # get n normalized element values, drop the last value which is the resistive load.
+        proto_vals = utils.lp_filter_prototype(n, ripple=ripple)[:-1]
+
+        components = dict()
+        wc = 2 * np.pi * fc
+
+        # build components for each element, scaling the impedance and frequency from the normalized protoype values.
+        for i, g_k in enumerate(proto_vals):
+            if i % 2 == 0: # start with series inductor
+                components[f"L{i+1}"] = Inductor((g_k * r0) / wc)
+            else:
+                components[f"C{i+1}"] = Capacitor(g_k / (r0 * wc), shunt=True)
+        
+        cascades = [["P1"] + list(components.values()) + ["P2"]]
+
+        super().__init__(components, cascades=cascades, passive=True)
+
+
+class HighPassFilter(DynamicNetwork):
+    """ 
+    Lumped component high-pass filter 
+    """
+    
+    def __init__(self, fc: float, n: int, r0: float = 50, ripple: float = 0.5):
+        """
+        Parameters
+        ----------
+        fc : float
+            3 dB cutoff frequency [Hz]
+        n : int
+            Filter order (1-10). Odd n will be matched to 50 ohms, while even n requires an impedance match.
+        r0 : float, default: 50
+            Port impedance. Default is 50 ohms.
+        ripple : float, default: 0.5
+            Pass-band ripple. Supported values are 0.5 and 3.0 dB.
+        """
+        # get n+1 normalized element values. drop the last value which is the resistive load.
+        proto_vals = utils.lp_filter_prototype(n, ripple=ripple)[:-1]
+
+        components = dict()
+        wc = 2 * np.pi * fc
+
+        # build components for each element, inductors are transformed to capacitors in the HP conversion, 
+        # and vice versa
+        for i, g_k in enumerate(proto_vals):
+            if i % 2 == 0: # start with series capacitor
+                components[f"C{i+1}"] = Capacitor(1 / (r0 * wc * g_k))
+            else:
+                components[f"L{i+1}"] = Inductor(r0 / (g_k * wc), shunt=True)
+
+        cascades = [["P1"] + list(components.values()) + ["P2"]]
+
+        super().__init__(components, cascades=cascades, passive=True)
+
+
+class BandPassFilter(DynamicNetwork):
+    """
+    Lumped component band-pass filter
+    """
+
+    def __init__(self, fc1: float, fc2: float, n: int, r0: float = 50, ripple: float = 0.5):
+        """
+        Parameters
+        ----------
+        fc1 : float
+            Lower 3 dB cutoff frequency [Hz]
+        fc2 : float
+            Upper 3 db cutoff frequency [Hz]
+        n : int
+            Filter order (1-10). Odd n will be matched to 50 ohms, while even n requires an impedance match.
+        r0 : float, default: 50
+            Port impedance. Default is 50 ohms.
+        ripple : float, default: 0.5
+            Pass-band ripple. Supported values are 0.5 and 3.0 dB.
+        """
+
+        # band pass 
+        components = dict()
+
+        r0 = 50
+        wc1, wc2 = 2 * np.pi * fc1, 2 * np.pi * fc2
+        w0 = np.sqrt(wc1 * wc2) # geometric mean
+        fb = (wc2 - wc1) / w0 # fractional bandwidth
+
+        proto_vals = utils.lp_filter_prototype(n, ripple=ripple)[:-1]
+
+        for i, g_k in enumerate(proto_vals):
+            if i % 2 == 0:  # start with series element
+                L = (g_k * r0) / (w0 * fb)
+                C = fb / (r0 * w0 * g_k)
+                components[f"S{i+1}"] = LC_Series(L=L, C=C)
+            else:
+                L = (fb * r0) / (w0 * g_k)
+                C = g_k / (w0 * fb * r0)
+                components[f"P{i+1}"] = LC_Parallel(L=L, C=C, shunt=True)
+
+        cascades = [["P1"] + list(components.values()) + ["P2"]]
+        super().__init__(components, cascades=cascades, passive=True)
+
+
+class BandStopFilter(DynamicNetwork):
+    """
+    Lumped component band-stop filter
+    """
+
+    def __init__(self, fc1: float, fc2: float, n: int, r0: float = 50, ripple: float = 0.5):
+        """
+        Parameters
+        ----------
+        fc1 : float
+            Lower 3 dB cutoff frequency [Hz]
+        fc2 : float
+            Upper 3 db cutoff frequency [Hz]
+        n : int
+            Filter order (1-10). Odd n will be matched to 50 ohms, while even n requires an impedance match.
+        r0 : float, default: 50
+            Port impedance. Default is 50 ohms.
+        ripple : float, default: 0.5
+            Pass-band ripple. Supported values are 0.5 and 3.0 dB.
+        """
+
+        # band pass 
+        components = dict()
+
+        r0 = 50
+        wc1, wc2 = 2 * np.pi * fc1, 2 * np.pi * fc2
+        w0 = np.sqrt(wc1 * wc2) # geometric mean
+        fb = (wc2 - wc1) / w0 # fractional bandwidth
+
+        proto_vals = utils.lp_filter_prototype(n, ripple=ripple)[:-1]
+
+        for i, g_k in enumerate(proto_vals):
+            if i % 2 == 0:  # start with series element
+                L = (g_k * r0 * fb) / (w0)
+                C = 1 / (r0 * w0 * g_k * fb)
+                components[f"S{i+1}"] = LC_Parallel(L=L, C=C)
+            else:
+                L = r0 / (w0 * g_k * fb)
+                C = (g_k * fb) / (w0 * r0)
+                components[f"P{i+1}"] = LC_Series(L=L, C=C, shunt=True)
+
+        cascades = [["P1"] + list(components.values()) + ["P2"]]
+        super().__init__(components, cascades=cascades, passive=True)
