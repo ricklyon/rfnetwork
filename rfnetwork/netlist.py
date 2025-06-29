@@ -1,7 +1,49 @@
 from .component import Component
 import numpy as np
-from . import elements
 from . core import core
+
+
+class Junction(Component):
+    """
+    N-port lossless junction
+    """
+
+    def __init__(self, N: int):
+        """
+        Parameters:
+        ----------
+        N: int
+            number of junction ports
+        """
+        super().__init__(pnum=N)
+        assert N > 0, "N must be positive"
+        self.N = int(N)
+
+    def evaluate_sdata(self, frequency: np.ndarray) -> np.ndarray:
+        return core.junction_sdata(frequency, self.N)
+    
+
+class Open(Component):
+    """
+    1-port open-circuit load
+    """
+    def __init__(self):
+        super().__init__(pnum=1)
+
+    def evaluate_sdata(self, frequency: np.ndarray) -> np.ndarray:
+        return np.full((len(frequency), 1, 1), 1, dtype="complex128")
+
+
+class Short(Component):
+    """
+    1-port short-circuit load
+    """
+    def __init__(self):
+        super().__init__(pnum=1)
+
+    def evaluate_sdata(self, frequency: np.ndarray):
+        return np.full((len(frequency), 1, 1), -1, dtype="complex128")
+    
 
 def cascade_to_nodes(cascades):
     """
@@ -278,9 +320,9 @@ def connect_node(
         # generate sdata for a short (node == 0) or an open load (node == -1)
         
         if node == 0:
-            load = elements.Short().evaluate(frequency, noise=noise) 
+            load = Short().evaluate(frequency, noise=noise) 
         else:
-            load = elements.Open().evaluate(frequency, noise=noise)
+            load = Open().evaluate(frequency, noise=noise)
 
         # connect a 1-port load to each port in this node
         for i, (c, ports) in enumerate(node_ports.items()):
@@ -353,7 +395,7 @@ def connect_node(
         c1 = list(node_ports.keys())[0]
 
         nfreq = comp_data[c1]["s"].shape[-3]
-        s0 = elements.Junction(N).evaluate(np.zeros(nfreq), noise=noise)
+        s0 = Junction(N).evaluate(np.zeros(nfreq), noise=noise)
         
         s0_netlist = [node] * N
         s0_probe_netlist = [None] * N

@@ -17,6 +17,25 @@ from . import plots
 
 from typing import Tuple
 
+def network_assemble(components: dict, nodes: list = list(), cascades: list = list(), probes: dict = dict()):
+    # compile netlist and network port name to node mapping
+    netlist, ports = nlist.build_netlist(nodes, cascades, components)
+
+    # compile a probe map of all valid nodes in the network if probes is set to True
+    if probes is True:
+        probes = dict()
+        for c, nodes in netlist.items():
+            for i, n in enumerate(nodes):
+                # exclude ground, open and port nodes
+                if n not in [0, -1] and n not in ports.values():
+                    probes[f"{c}|{i+1}"] = components[c]|(i + 1)
+
+    # similar to the normal netlist, but each value is either None for no probe, or a probe name in the
+    # index for the port it's assigned to. Probes the voltage wave leaving the port.
+    probe_netlist, probe_names = nlist.build_probe_netlist(components, probes, netlist)
+
+    return ports, netlist, probe_netlist, probe_names
+
 
 class NetworkMeta(type):
     
@@ -41,21 +60,7 @@ class NetworkMeta(type):
             if key in classdict.keys():
                 classdict.pop(key)
 
-        # compile netlist and network port name to node mapping
-        netlist, ports = nlist.build_netlist(nodes, cascades, components)
-
-        # compile a probe map of all valid nodes in the network if probes is set to True
-        if probes is True:
-            probes = dict()
-            for c, nodes in netlist.items():
-                for i, n in enumerate(nodes):
-                    # exclude ground, open and port nodes
-                    if n not in [0, -1] and n not in ports.values():
-                        probes[f"{c}|{i+1}"] = components[c]|(i + 1)
-
-        # similar to the normal netlist, but each value is either None for no probe, or a probe name in the
-        # index for the port it's assigned to. Probes the voltage wave leaving the port.
-        probe_netlist, probe_names = nlist.build_probe_netlist(components, probes, netlist)
+        ports, netlist, probe_netlist, probe_names = network_assemble(components, nodes, cascades, probes)
 
         # add _cls_blocks and declared_ports as a class member and call type.__new__
         classdict["cls_components"] = components
@@ -71,7 +76,7 @@ class NetworkMeta(type):
 
 class Network(Component, metaclass=NetworkMeta):
 
-    def __init__(self, shunt: bool = False, passive: bool = False, name: str = None, state: dict = dict()):
+    def __init__(self, shunt: bool = False, passive: bool = False, state: dict = dict()):
         nports = len(self.ports.keys())
 
         self.components = dict()
@@ -80,9 +85,8 @@ class Network(Component, metaclass=NetworkMeta):
             # make a copy of all network components so multiple instances of the network
             # can have different states
             self.components[k] = deepcopy(v)
-            self.components[k].set_name(k)
 
-        super().__init__(passive=passive, shunt=shunt, pnum=nports, name=name)
+        super().__init__(passive=passive, shunt=shunt, pnum=nports)
 
         self.set_state(**state)
     
@@ -256,7 +260,40 @@ class Network(Component, metaclass=NetworkMeta):
 
         # return the square matrix sdata (excluding probes), and the noise data
         return sdata, ndata
-        
 
+
+class DynamicNetwork(Network):
+    """
+    Network that allows the netlist to be defined at runtime instead of statically declared.
+    """
+    def __init__(self, 
+        components: dict, 
+        nodes: list = list(), 
+        cascades: list = list(), 
+        probes: dict = dict(),
+        shunt: bool = False, 
+        passive: bool = False, 
+        state: dict = dict()
+    ):
+        """
+        Parameters
+        ----------
+        components : dict
+            dictionary of Component objects where the keys are the reference designators.
+        nodes : list
+            list of tuples, where each tuple is a group of component ports that are connected into a single node.
+        cascades : list
+            list of tuples, where each tuple is a group of components that are connected end to end, port 2 to port 1.
+        """
+        ports, netlist, probe_netlist, probe_names = network_assemble(components, nodes, cascades, probes)
+
+        self.ports = ports
+        self.netlist = netlist
+        self.probe_netlist = probe_netlist
+        self.probe_names = probe_names
+        self.cls_components = components
+        self.probes = probes
+        
+        super().__init__(shunt=shunt, passive=passive, state=state)
 
     
