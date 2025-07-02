@@ -736,10 +736,10 @@ class Stripline(Line):
         frequency: List = 0,
         length: float = None,
         shunt: bool = False
-        ):
+    ):
         """
-        Parameters:
-        ------------
+        Parameters
+        ----------
         w : float
             width of stripline trace in inches
         b : float

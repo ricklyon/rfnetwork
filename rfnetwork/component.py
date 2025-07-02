@@ -13,13 +13,15 @@ import matplotlib.pyplot as plt
 from PySide6.QtWidgets import (QApplication)
 import sys
 
-from . import touchstone, const, utils
+from . import touchstone, utils
 from . core import core
 from . import plots
 from . tuning import TunerGroup
 
 class Component(object):
-    
+    """
+    Base class for Network Components.
+    """
     def __init__(
         self, 
         shunt: bool = False, 
@@ -35,6 +37,13 @@ class Component(object):
         passive : bool, default: True
             if True, ``evaluate`` calls ``evaluate_sdata`` instead of ``evaluate_data`` and noise correlation
             matrix is computed passively.
+        pnum : int, default: 2
+            number of component ports
+        state : dict, optional
+            dictionary of state variables specific to the sub-class (i.e. line width, switch state etc...).
+            The state values can be read with the ``state`` property and changed later with `set_state()`. Attempting
+            to set the state of variables that were not included in the initial dictionary will raise an error.
+
         """
         self._shunt = shunt
         self._passive = passive
@@ -45,31 +54,44 @@ class Component(object):
         self.set_state(**state)
 
     @property
-    def pnum(self):
+    def pnum(self) -> int:
+        """
+        Number of ports of the component
+        """
         return self._pnum
 
     @property
-    def state(self):
+    def state(self) -> dict:
+        """
+        Dictionary of state values
+        """
         return self._state
 
     def set_state(self, **kwargs):
-        
+        """
+        Change the state variables. Keys are required to have been included in the initial state dictionary passed in
+        to the Component constructor.
+        """
         for k, v in kwargs.items():
             if k not in self.state.keys():
                 raise KeyError(f"Invalid state key, {k}.")
             
             self._state[k] = deepcopy(v)
-
-    def set_name(self, name):
-        self._name = name
         
     def __or__(self, other):
-        """ Allows port to be indexed with the syntax: block|2 """
+        """ 
+        Allows port to be indexed with the syntax: component|2 
+        """
         return (self, int(other))
     
-    def equals(self, other):
+    def equals(self, other) -> bool:
         """
         Returns True if the s-matrix data from other is equivalent to this object.
+
+        Parameters
+        ----------
+        other : Component
+            Component object to check equality against this object.
         """
         if self.__class__.__name__ != other.__class__.__name__:
             return False
@@ -89,18 +111,44 @@ class Component(object):
     @abstractmethod
     def evaluate_data(self, frequency: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
         """
-        Returns s-matrix and noise correlation matrix
+        Returns s-matrix and noise correlation matrix of the component.
+
+        Parameters
+        ----------
+        frequency: np.ndarray
+            vector of frequency values to evaluate data over, in Hz.
+
+        Returns
+        -------
+        sdata : np.ndarray
+            MxNxN s-matrix where F is the number of frequency values and N is the number of ports. 
+        ndata : np.ndarray
+            MxNxN noise correlation matrix where F is the number of frequency values and N is the number of ports. 
         """
         raise NotImplementedError()
     
     @abstractmethod
     def evaluate_sdata(self, frequency: np.ndarray) -> np.ndarray:
         """
-        Returns s-matrix data of the component.
+        Returns s-matrix of the component.
+
+        Parameters
+        ----------
+        frequency: np.ndarray
+            vector of frequency values to evaluate data over, in Hz.
+
+        Returns
+        -------
+        sdata : np.ndarray
+            MxNxN s-matrix where F is the number of frequency values and N is the number of ports. 
         """
+
         raise NotImplementedError()
+    
     def __call__(self, **kwargs):
-        # simple syntax for duplicating components in Network declarations
+        """
+        Returns a copy of the component that is optionally configured to a new state.
+        """
         nobj = deepcopy(self)
         nobj.set_state(**kwargs)
         return nobj
