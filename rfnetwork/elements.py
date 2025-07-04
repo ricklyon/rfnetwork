@@ -26,6 +26,7 @@ __all__ = (
     "Open",
     "Load",
     "Attenuator",
+    "PiAttenuator",
     "LowPassFilter",
     "HighPassFilter",
     "BandPassFilter",
@@ -216,7 +217,7 @@ class Attenuator(Component):
         Parameters:
         ----------
         attenuation_db: float
-            positive value attenuation in dB
+            attenuation in dB
         """
         super().__init__(passive=True, state=dict(value=-np.abs(attenuation_db)))
 
@@ -225,6 +226,36 @@ class Attenuator(Component):
         s21 = core.conv.lin_db20(self.state["value"])
         sdata = np.array([[1e-6, s21], [s21, 1e-6]], dtype="complex128")
         return np.broadcast_to(sdata, (len(frequency), 2, 2)).copy()
+
+
+
+
+class PiAttenuator(Network):
+    """
+    Resistive attenuator in pi configuration
+    """
+    r1 = Resistor(shunt=True)
+    r2 = Resistor()
+    r3 = Resistor(shunt=True)
+
+    cascades = [("P1", r1, r2, r3, "P2")]
+
+    def __init__(self, attenuation_db: float, r0: float = 50):
+        """
+        Parameters:
+        ----------
+        attenuation_db: float
+            attenuation in dB
+        """
+        A = conv.lin_db20(-np.abs(attenuation_db))
+        state = dict(
+            r1=r0 * (A + 1) / (1 - A), 
+            r2=r0 * (1 - A**2) / (2 * A),
+            r3=r0 * (A + 1) / (1 - A)
+        )
+        super().__init__(passive=True, state=state)
+
+
 
 class LC_Series(Network):
     """
