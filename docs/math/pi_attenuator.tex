@@ -2,6 +2,7 @@
 
 % required package for inserting figures
 \usepackage{graphicx}
+\usepackage{xcolor}
 
 \setlength{\parindent}{0pt}
 
@@ -88,39 +89,19 @@ Using the quadratic formula to solve for \(R_1\),
 
 A is less than 1 (since attenuator is passive), so the denominator is always positive. For \(R_1\) to be non-negative, we must take the \(A +1\)
 solution,
-\[R_1 = R_0{ A +  1 \over 1 - A} \]
+\[
+\colorbox{yellow!30}{$\displaystyle R_1 = R_0{ A +  1 \over 1 - A} $}
+\]
 
 Using this in the equation for \(R_2\),
 \[R_2 = {{R_1 R_0}(1 - A) \over A(R_1 + R_0)}\]
 \[R_2 = {R_0{{ A +  1 \over 1 - A}  R_0}(1 - A) \over A(R_0{ A +  1 \over 1 - A}  + R_0)}\]
 \[R_2 = {R_0 (A + 1)\over A({ A +  1 \over 1 - A}  + 1)}\]
 \[R_2 = R_0{ (A + 1)(1 - A)\over A({ A +  1 }  + (1 - A))}\]
-\[R_2 = {R_0 } { 1 - A^2 \over  2A}\]
 
-% \[R_1 = {-{ 2R_0} \pm 2\sqrt{  R_0^2 - (1 - L^2)} \over 2(1 - L)} \]
-% \[R_1 = {-{ R_0} \pm \sqrt{  R_0^2 + L^2 -1 } \over 1 - L} \]
-
-
-% Use the equation for \(R_2\) in the equation for \(A\), and using \(L = {1 \over A}\)
-
-% \[-{ 2R_1 R_0^2 \over R_0^2 - R_1^2 } (R_1 + R_0)+ {R_1 R_0} = {{R_1 R_0} L} \]
-
-% \[-{ 2R_1 R_0^2 } (R_1 + R_0)+ {R_1 R_0}({R_0^2 - R_1^2 }) = {{R_1 R_0} L} (R_0^2 - R_1^2 )\]
-
-% Divide by \(R_1\) and \(R_0\),
-% \[-{ 2R_1 R_0} - 2R_0^2 + R_0^2 - R_1^2 = L{R_0^2} - L{R_1^2}\]
-
-% Negate both sides,
-% \[{ 2R_1 R_0} + R_0^2 + R_1^2 = -L{R_0^2} + L{R_1^2}\]
-
-% Group like terms,
-% \[R_1^2(1 - L)  + R_1({2R_0}) +  R_0^2(1 + L)  = 0\]
-
-% Using the quadratic formula to solve for \(R_1\),
-% \[R_1 = {-{ 2 R_0} \pm \sqrt{  4R_0^2 - 4 (1 - L) (1 + L)} \over 2(1 - L)} \]
-% \[R_1 = {-{ 2R_0} \pm 2\sqrt{  R_0^2 - (1 - L^2)} \over 2(1 - L)} \]
-% \[R_1 = {-{ R_0} \pm \sqrt{  R_0^2 + L^2 -1 } \over 1 - L} \]
-
+\[
+\colorbox{yellow!30}{$\displaystyle  R_2 = {R_0 } { 1 - A^2 \over  2A}$}
+\]
 
 
 
