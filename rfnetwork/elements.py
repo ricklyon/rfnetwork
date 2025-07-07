@@ -46,7 +46,7 @@ class Load(Component):
         value: float, default: 50
             real or complex impedance [ohms]. Defaults to 50 ohms
         """
-        super().__init__(pnum=1, state=dict(value=value))
+        super().__init__(n_ports=1, state=dict(value=value))
         assert value > 0, "Load must be passive"
     
     def evaluate_sdata(self, frequency: np.ndarray) -> np.ndarray:
@@ -57,7 +57,7 @@ class Open(Component):
     1-port open-circuit load
     """
     def __init__(self):
-        super().__init__(pnum=1)
+        super().__init__(n_ports=1)
 
     def evaluate_sdata(self, frequency: np.ndarray) -> np.ndarray:
         return np.full((len(frequency), 1, 1), 1, dtype="complex128")
@@ -68,7 +68,7 @@ class Short(Component):
     1-port short-circuit load
     """
     def __init__(self):
-        super().__init__(pnum=1)
+        super().__init__(n_ports=1)
 
     def evaluate_sdata(self, frequency: np.ndarray):
         return np.full((len(frequency), 1, 1), -1, dtype="complex128")
@@ -85,7 +85,7 @@ class Hybrid90(Component):
     """
 
     def __init__(self):
-        super().__init__(pnum=4)
+        super().__init__(n_ports=4)
 
     def evaluate_sdata(self, frequency: np.ndarray):
         sdata = (-1 / np.sqrt(2)) * np.array([
@@ -108,7 +108,7 @@ class Hybrid180(Component):
     """
 
     def __init__(self):
-        super().__init__(pnum=4)
+        super().__init__(n_ports=4)
 
     def evaluate_sdata(self, frequency: np.ndarray):
         sdata = (-1j / np.sqrt(2)) * np.array([
@@ -753,7 +753,7 @@ class MSLine(Line):
 
 class Stripline(Line):
     """
-    Simple stripline with homogenous media.
+    Stripline with balanced substrate.
     """
 
     def __init__(

@@ -96,10 +96,6 @@ class TestCore(unittest.TestCase):
 
         frequency = np.arange(100, 1e4, 10) * 1e6
 
-        ax = plt.axes()
-        sline.plot(ax, frequency, 21, fmt="db")
-        ref_sline.plot(ax, frequency, 21, fmt="db")
-
         test_data = sline.evaluate(frequency)["s"]
         ref_data = ref_sline.evaluate(frequency)["s"]
 

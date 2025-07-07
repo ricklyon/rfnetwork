@@ -15,7 +15,7 @@ class Junction(Component):
         N: int
             number of junction ports
         """
-        super().__init__(pnum=N)
+        super().__init__(n_ports=N)
         assert N > 0, "N must be positive"
         self.N = int(N)
 
@@ -28,7 +28,7 @@ class Open(Component):
     1-port open-circuit load
     """
     def __init__(self):
-        super().__init__(pnum=1)
+        super().__init__(n_ports=1)
 
     def evaluate_sdata(self, frequency: np.ndarray) -> np.ndarray:
         return np.full((len(frequency), 1, 1), 1, dtype="complex128")
@@ -39,7 +39,7 @@ class Short(Component):
     1-port short-circuit load
     """
     def __init__(self):
-        super().__init__(pnum=1)
+        super().__init__(n_ports=1)
 
     def evaluate_sdata(self, frequency: np.ndarray):
         return np.full((len(frequency), 1, 1), -1, dtype="complex128")
@@ -205,7 +205,7 @@ def build_netlist(nodes: list, cascades: list, components: dict) -> dict:
     # initialize netlist with -1 for all ports of each component
     netlist = {}
     for k, v in components.items():
-        netlist[k] = [-1] * v.pnum
+        netlist[k] = [-1] * v.n_ports
 
     # list of node names corresponding to each node number
     ports = dict()

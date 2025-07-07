@@ -2,7 +2,7 @@ import re
 from pathlib import Path
 import numpy as np
 
-def get_pnum_from_snp(path: str | Path) -> int:
+def n_ports_from_snp(path: str | Path) -> int:
     """
     Get the number of ports from a .snp file extension.
     """

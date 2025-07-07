@@ -101,18 +101,19 @@ class DoubleSlider(QSlider):
 class FloatTuner(QWidget):
     def __init__(
         self, 
-        key: str,
+        variable: str,
         label: str, 
         lower: float, 
         upper: float, 
         initial: float, 
         callback: Callable, 
-        processor: QtCore.QThread
+        processor: QtCore.QThread,
+        component: str = None,
     ):
         super(FloatTuner, self).__init__()
         name = QLabel(label)
 
-        self.key = key
+        self.variable = variable
 
         self.processor = processor
         
@@ -174,7 +175,7 @@ class FloatTuner(QWidget):
 
         if np.abs(value - prev_value) > (self.step / 2):
             self.value.setText(str(value))
-            self.callback(**{self.key : value})
+            self.callback(**{self.variable : value})
             self.processor.push()
 
     def set_scale(self):
@@ -187,16 +188,16 @@ class FloatTuner(QWidget):
         self.slider.setBounds(min_, max_, self.step)
 
 class TunerGroup(QWidget):
-    def __init__(self, tuners, plot):
+    def __init__(self, tuners: list, plot_callback: Callable):
         super(TunerGroup,self).__init__()
 
-        self.processor = TunerThread(plot)
+        self.processor = TunerThread(plot_callback)
         self.processor.start()
 
         mainLayout = QVBoxLayout()
         self.tuners = []
-        for i, (k, v) in enumerate(tuners.items()):
-            self.tuners.append(FloatTuner(**v, processor=self.processor))
+        for i, config in enumerate(tuners):
+            self.tuners.append(FloatTuner(**config, processor=self.processor))
             mainLayout.addWidget(self.tuners[i], i)
 
         mainLayout.setSpacing(1)
