@@ -1,11 +1,3 @@
-"""
-
-find the connection that results in the smallest number of output ports. Do those first. Once a component is connected,
-replace them with the subnetwork block and it's new port mapping to the remaining nodes.
-
-continue until only one subnetwork block remains.
-
-"""
 from .component import Component, Component_Data, Component_SnP
 from .core import core
 import numpy as np
@@ -82,7 +74,46 @@ class NetworkMeta(type):
 
 class Network(Component, metaclass=NetworkMeta):
     """
-    Network of multiple components.
+    Network of multiple components. 
+
+    Parameters
+    ----------
+    components : dict
+        components of the network can either be declared as class variables, or in a class dictionary named
+        "components".
+    nodes : list
+        list of tuples, where each tuple is a group of component ports that are connected into a single node.
+        External network ports are defined by placing "P1" in the node, where "1" should be replaced with the 
+        network port number.
+    cascades : list
+        list of tuples, where each tuple is a group of components that are connected end to end, port 2 to port 1.
+        External network ports are defined by placing "P1" at either or both ends of the cascade list, where "1" should
+        be replaced with the network port number.
+    probes: dict
+        dictionary of probe names to the component port they attach to. Probe voltage waves are defined as the 
+        wave leaving the component from the specified port. For example, `dict(probe1=c1|1)`, would attach a probe
+        to port 1 of the "c1" component. Probe names will appear in the coords of the "b" dimension of the s-matrix
+        data returned by evaluate. 
+    
+    Examples
+    --------
+    >>> import rfnetwork as rfn
+
+    >>> class Wilkinson(rfn.Network):
+    ...    
+    ...     upper = rfn.elements.Line(z0=70.7, length=0.4)
+    ...     lower = rfn.elements.Line(z0=70.7, length=0.4)
+    ... 
+    ...     r1 = rfn.elements.Resistor(100)
+    ... 
+    ...     nodes = [
+    ...         ("P1", upper|1, lower|1), # port 1 node
+    ...         (upper|2, r1|1, "P2"),  # port 2 node
+    ...         (lower|2, r1|2, "P3")  # port 3 noode
+    ...     ]
+
+    ... w = Wilkinson()
+
     """
     def __init__(self, shunt: bool = False, passive: bool = False, state: dict = dict()):
         """
@@ -195,8 +226,8 @@ class Network(Component, metaclass=NetworkMeta):
         *paths : tuple | int
             Probe paths to plot. Each path must be a 2-tuple of probe name or network ports. 
             Valid probe names of the network can be found by calling ``evaluate`` and looking at the coords of the "b" 
-            dimension. The plotted data is the voltage wave leaving the first probe, referenced to the wave leaving the
-            second probe (or network port). For example, "ms2|1, c2|2" would plot the ratio of the voltage wave 
+            dimension. The voltage wave leaving the first probe is referenced to the wave leaving the
+            second probe (or network port). For example, ("ms2|1", "c2|2") would plot the ratio of the voltage wave 
             leaving port 1 of `ms2` to the voltage wave leaving port 2 of `c2`. 
         input_port : int, default: 1
             Sets which network ports is excited for all paths.
@@ -450,6 +481,21 @@ class DynamicNetwork(Network):
             list of tuples, where each tuple is a group of component ports that are connected into a single node.
         cascades : list
             list of tuples, where each tuple is a group of components that are connected end to end, port 2 to port 1.
+        probes: dict
+            dictionary of probe names to the component port they attach to. Probe voltage waves are defined as the 
+            wave leaving the component from the specified port. For example, `dict(probe1=c1|1)`, would attach a probe
+            to port 1 of the "c1" component. Probe names will appear in the coords of the "b" dimension of s-matrix
+            data returned by evaluate. 
+        shunt : bool, default: False
+            If True, port 2 is connected to ground and port 1 is transformed into a 2-port component that can be 
+            cascaded with other components.
+        passive : bool, default: True
+            if True, ``evaluate`` calls ``evaluate_sdata`` instead of ``evaluate_data`` and noise correlation
+            matrix is computed passively.
+        state : dict, optional
+            dictionary of state variables specific to each component. Keys must be component designators.
+            The state values can be read with the ``state`` property and changed later with `set_state()`. Attempting
+            to set the state of variables that were not included in the initial dictionary will raise an error.
         """
         ports, netlist, probe_netlist, probe_names = network_assemble(components, nodes, cascades, probes)
 

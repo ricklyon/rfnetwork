@@ -52,7 +52,7 @@ fmt_prefix = {
 }
 
 
-def smithchart_marker(ax, frequency, fc: float):
+def smithchart_marker(ax: plt.Axes, frequency: np.ndarray, fc: float):
     """ place a smith chart marker by frequency rather than x/y position """
     
     f_idx = np.argmin(np.abs(frequency - fc))
@@ -95,42 +95,6 @@ def smith_circles(values: list, line_type: str, npoints = 5001, gamma_clip: floa
     # the transpose can be directly plotted: ax.plot(np.real(circles), np.imag(circles))
     return circles.T
 
-
-def draw_smithchart(axes: plt.Axes, values=None, line_kwargs=dict(linewidth=0.25, color="k")):
-
-    if values is None:
-        values = [10 , 5, 2, 1, 0.5, 0.2, 0]
-
-    axes.set_aspect('equal')
-    axes.set_axis_off()
-    axes.axis([-1.1, 1.1, -1.1, 1.1])
-
-    r = smith_circles(values, "r")
-    xp = smith_circles(values, "x")
-    xn = smith_circles(-np.array(values), "x")
-
-    g = smith_circles(values, "g")
-    sp = smith_circles(values, "s")
-    sn = smith_circles(-np.array(values), "s")
-
-    sm_lines = axes.plot(r.real, r.imag, **line_kwargs)
-    sm_lines += axes.plot(xp.real, xp.imag, **line_kwargs)
-    sm_lines += axes.plot(xn.real, xn.imag, **line_kwargs)
-
-    admittance_kwargs = dict(color="m", alpha=0.4, linewidth=0.2)
-
-    sm_lines += axes.plot(g.real, g.imag, **admittance_kwargs)
-    sm_lines += axes.plot(sp.real, sp.imag, **admittance_kwargs)
-    sm_lines += axes.plot(sn.real, sn.imag, **admittance_kwargs)
-
-    # draw x axis line
-    sm_lines += axes.plot([-1, 1], [0, 0], **line_kwargs)
-
-    mplm.disable_lines(sm_lines, axes=axes)
-
-    # add a flag that this axes has been formatted for a smithchart already
-    axes._smithchart = True
-
 def plot_stability_circles(axes: plt.Axes, sdata: ldarray, f0: float, load_kwargs=dict(), source_kwargs=dict()):
     """
     Plot source and load stability circles at f0. 
@@ -165,6 +129,64 @@ def plot_stability_circles(axes: plt.Axes, sdata: ldarray, f0: float, load_kwarg
     s_line = axes.plot(s_circ.real, s_circ.imag, label=r"$\Gamma_S$ Stability", **source_kwargs)
 
     return s_line[0], l_line[0]
+
+
+def draw_smithchart(
+    axes: plt.Axes, 
+    impedance_values: list = None, 
+    admittance_values: list = None, 
+    impedance_kwargs: dict = dict(linewidth=0.25, color="k"),
+    admittance_kwargs: dict = dict(color="m", alpha=0.4, linewidth=0.2)
+):
+    """
+    Draws Smith chart lines onto the axes
+
+    Parameters
+    ----------
+    axes: plt.Axes
+        Axes object
+    impedance_values : list, optional
+        normalized impedance line values, applies to both resistance and reactance lines.
+    admittance_values : list, optional
+        normalized admittance line values, applies to both conductance and susceptance lines.
+    """
+
+    if impedance_values is None:
+        impedance_values = [10 , 5, 2, 1, 0.5, 0.2, 0]
+
+    if admittance_values is None:
+        admittance_values = [10 , 5, 2, 1, 0.5, 0.2, 0]
+
+    axes.set_aspect('equal')
+    axes.set_axis_off()
+    axes.axis([-1.1, 1.1, -1.1, 1.1])
+
+    if isinstance(impedance_kwargs, dict) and len(impedance_values):
+
+        r = smith_circles(impedance_values, "r")
+        xp = smith_circles(impedance_values, "x")
+        xn = smith_circles(-np.array(impedance_values), "x")
+
+        sm_lines = axes.plot(r.real, r.imag, **impedance_kwargs)
+        sm_lines += axes.plot(xp.real, xp.imag, **impedance_kwargs)
+        sm_lines += axes.plot(xn.real, xn.imag, **impedance_kwargs)
+        # draw x axis line
+        sm_lines += axes.plot([-1, 1], [0, 0], **impedance_kwargs)
+
+    if isinstance(admittance_kwargs, dict) and len(admittance_values):
+        g = smith_circles(admittance_values, "g")
+        sp = smith_circles(admittance_values, "s")
+        sn = smith_circles(-np.array(admittance_values), "s")
+
+        sm_lines += axes.plot(g.real, g.imag, **admittance_kwargs)
+        sm_lines += axes.plot(sp.real, sp.imag, **admittance_kwargs)
+        sm_lines += axes.plot(sn.real, sn.imag, **admittance_kwargs)
+
+    # prevent markers from attaching to smith chart lines
+    mplm.disable_lines(sm_lines, axes=axes)
+
+    # add a flag that this axes has been formatted for a smith chart already
+    axes._smithchart = True
 
 def plot(
     axes: plt.Axes,
