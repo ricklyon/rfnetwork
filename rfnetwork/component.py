@@ -127,7 +127,7 @@ class Component(object):
         Parameters
         ----------
         frequency : np.ndarray
-            vector of frequency values to evaluate data over, in Hz.
+            vector of frequency values to evaluate data for, in Hz.
 
         Returns
         -------
@@ -146,7 +146,7 @@ class Component(object):
         Parameters
         ----------
         frequency : np.ndarray
-            vector of frequency values to evaluate data over, in Hz.
+            vector of frequency values to evaluate data for, in Hz.
 
         Returns
         -------

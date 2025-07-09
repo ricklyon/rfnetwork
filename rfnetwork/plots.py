@@ -60,12 +60,32 @@ def smithchart_marker(ax: plt.Axes, frequency: np.ndarray, fc: float):
         idx=f_idx, axes=ax, xline=False, yformatter=lambda x, y, idx: f"{frequency[idx]/1e6:.0f}MHz"
     )
 
-def smith_circles(values: list, line_type: str, npoints = 5001, gamma_clip: float = 1):
+def smith_circles(values: list, line_type: str, n_points = 5001, gamma_clip: float = 1) -> np.ndarray:
     """
     Generate smith chart impedance/admittance circles
 
-    line_type: {'r', 'x', 'g', 's', 'gamma', 'vswr'}
-        real, reactance, conductance, susceptance
+    Parameters
+    ----------
+    values : list
+        normalized values of circles 
+    line_type : {'r', 'x', 'g', 's', 'gamma', 'vswr'}
+        Line type. Support values are,
+        - "r": real
+        - "x": reactance, conductance ("g"), susceptance ("s")
+        - "g": conductance,
+        - "s": susceptance,
+        - "gamma": gamma circle with constant radius (0-1) from origin
+        - "vswr": VSWR circle
+    n_points : float, default: 5001
+        resolution of circles
+    gamma_clip : float, default: 1
+        maximum gamma value before circles are clipped. Allows active smith charts if >1.
+    
+    Returns
+    -------
+    circles : np.ndarray
+        complex-valued circle data. Plot onto an axis with
+        ``ax.plot(np.real(circles), np.imag(circles))``
     """
 
     values = np.atleast_1d(values)
@@ -85,7 +105,7 @@ def smith_circles(values: list, line_type: str, npoints = 5001, gamma_clip: floa
     
     # generate lines
     x0, y0, r = line_xyr[line_type]
-    ang = np.linspace(0, 2 * np.pi, npoints, endpoint=True)
+    ang = np.linspace(0, 2 * np.pi, n_points, endpoint=True)
     circles = r[..., None] * np.exp(1j * ang)[None] + (x0 + 1j * y0)[..., None]
     # clip circles beyond gamma=1 (or whatever the user specified)
     circles = np.where(np.abs(circles) > gamma_clip * (1 + 1e-6), np.nan, circles)
@@ -200,7 +220,7 @@ def plot(
     label_mode: str = "prefix",
     lines: List[Line2D] = None,
     **kwargs
-) -> plt.Axes:
+) -> List[Line2D]:
     """
     Plots s-matrix or noise figure data over frequency.
 
