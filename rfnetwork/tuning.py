@@ -1,19 +1,22 @@
 
 
 import numpy as np
-import sys
 
 from PySide6 import QtCore
 import sys
 from typing import Callable
-from PySide6.QtWidgets import (QApplication, QWidget, QLineEdit, QSlider, QGridLayout, QLabel, QVBoxLayout)
-import threading
+from PySide6.QtWidgets import (QWidget, QLineEdit, QSlider, QGridLayout, QLabel, QVBoxLayout)
 
 def round_to_multiple(value, multiple=1):
-    """ Rounds value to nearest multiple. Multiple can be greater or less than 1.
-        Example:
-            round_to_float(7.77777, 1e-3) --> 7.778
-            round_to_float(7.77777, 3)    --> 9.0    
+    """ 
+    Rounds value to nearest multiple. Multiple can be greater or less than 1.
+        
+    Examples
+    --------
+    >>> round_to_float(7.77777, 1e-3)
+    7.778
+    >>> round_to_float(7.77777, 3)
+    9.0    
     """
 
     invmul = 1/multiple
@@ -31,8 +34,17 @@ def round_to_multiple(value, multiple=1):
 
 
 class TunerThread(QtCore.QThread):
+    """
+    Thread that runs a callback function every time a plot update is issued.
+    """
 
     def __init__(self, plot: Callable):
+        """
+        Parameters
+        ----------
+        plot : () -> None
+            plot callback function
+        """
 
         self._wait = QtCore.QWaitCondition()
         self.mutex = QtCore.QMutex()
@@ -42,6 +54,9 @@ class TunerThread(QtCore.QThread):
 
     @QtCore.Slot(str)
     def push(self):
+        """
+        Request a plot update
+        """
 
         self._wait.wakeAll()
 
@@ -99,6 +114,10 @@ class DoubleSlider(QSlider):
 
 
 class FloatTuner(QWidget):
+    """
+    Floating point slider with synchronized entry box. Callback function is invoked whenever a change is made to the
+    slider or entry box.
+    """
     def __init__(
         self, 
         variable: str,
@@ -175,7 +194,9 @@ class FloatTuner(QWidget):
 
         if np.abs(value - prev_value) > (self.step / 2):
             self.value.setText(str(value))
+            # notify the calling method that the variable has changed
             self.callback(**{self.variable : value})
+            # issue a plot update
             self.processor.push()
 
     def set_scale(self):
@@ -187,10 +208,15 @@ class FloatTuner(QWidget):
         self.step = (max_ - min_) / 100
         self.slider.setBounds(min_, max_, self.step)
 
+
 class TunerGroup(QWidget):
+    """
+    Container for multiple tuners that share a common plot function.
+    """
     def __init__(self, tuners: list, plot_callback: Callable):
         super(TunerGroup,self).__init__()
 
+        # background thread that runs the plotting function, waits until a push() call is sent.
         self.processor = TunerThread(plot_callback)
         self.processor.start()
 

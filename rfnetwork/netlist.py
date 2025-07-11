@@ -1,5 +1,6 @@
 from .component import Component
 import numpy as np
+from typing import Tuple
 from . core import core
 
 
@@ -45,7 +46,7 @@ class Short(Component):
         return np.full((len(frequency), 1, 1), -1, dtype="complex128")
     
 
-def cascade_to_nodes(cascades):
+def cascade_to_nodes(cascades: list) -> list:
     """
     Converts a list of cascaded components to a list of connected nodes.
     """
@@ -73,15 +74,12 @@ def cascade_to_nodes(cascades):
 
     return nodes
 
-def convert_to_refdes(
-    nodes,
-    components
-):
+def convert_to_refdes(nodes: list, components: dict) -> Tuple[list, dict]:
     """
     Parses a list of nodes and returns a dictionary of reference designators with the associated component object,
-    and a new list of nodes that uses the reference designators instead of object values.
+    and a new list of nodes that uses the reference designators instead of object pointers.
 
-    If a component is not found in components, automatically assigns a designator.
+    If a component pointer is not found in the component dictionary, it automatically assigns a designator.
     """
 
     # counter for designators assigned automatically
@@ -130,7 +128,7 @@ def convert_to_refdes(
     return nodes_refdes, refdes
 
 
-def build_probe_netlist(components: dict, probes: dict, netlist: dict):
+def build_probe_netlist(components: dict, probes: dict, netlist: dict) -> Tuple[dict, list]:
     """
     Builds a netlist of probe names that are attached to each component port. If no probe is assigned to a port,
     the port value is None.
