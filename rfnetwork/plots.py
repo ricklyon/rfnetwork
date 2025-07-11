@@ -115,15 +115,35 @@ def smith_circles(values: list, line_type: str, n_points = 5001, gamma_clip: flo
     # the transpose can be directly plotted: ax.plot(np.real(circles), np.imag(circles))
     return circles.T
 
-def plot_stability_circles(axes: plt.Axes, sdata: ldarray, f0: float, load_kwargs=dict(), source_kwargs=dict()):
+def stability_circles(sdata: ldarray):
     """
-    Plot source and load stability circles at f0. 
+    Get source and load stability circles.
+    For the typical case where S(11) and S(22) are less than 1, the unstable region is enclosed by the circle if it 
+    does not contain the origin, otherwise the unstable region is outside the circle.
+
+    Parameters
+    ----------
+    sdata : np.ndarray
+        s-matrix data at a single frequency
+    
+    Returns
+    -------
+    source_data : np.ndarray
+        complex-valued source stability data. Plot onto an axis with
+        ``ax.plot(np.real(circles), np.imag(circles))``
+
+    load_data : np.ndarray
+        complex-valued circle data. Plot onto an axis with
+        ``ax.plot(np.real(circles), np.imag(circles))``
     """
 
-    s11 = sdata.sel(frequency=f0, b=1, a=1)
-    s22 = sdata.sel(frequency=f0, b=2, a=2)
-    s21 = sdata.sel(frequency=f0, b=2, a=1)
-    s12 = sdata.sel(frequency=f0, b=1, a=2)
+    # remove unitary frequency data
+    sdata = sdata.squeeze()
+
+    s11 = sdata[0, 0]
+    s22 = sdata[1, 1]
+    s21 = sdata[1, 0]
+    s12 = sdata[0, 1]
 
     def stability_circle_output(s11, s12, s21, s22):
         del_ = s11*s22 - (s12*s21)
@@ -145,10 +165,7 @@ def plot_stability_circles(axes: plt.Axes, sdata: ldarray, f0: float, load_kwarg
     s_circ = rs*np.exp(1j * xdat) + cs
     l_circ = rl*np.exp(1j * xdat) + cl
 
-    l_line = axes.plot(l_circ.real, l_circ.imag, label=r"$\Gamma_L$ Stability", **load_kwargs)
-    s_line = axes.plot(s_circ.real, s_circ.imag, label=r"$\Gamma_S$ Stability", **source_kwargs)
-
-    return s_line[0], l_line[0]
+    return s_circ, l_circ
 
 
 def draw_smithchart(
