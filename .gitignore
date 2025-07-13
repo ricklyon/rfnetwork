@@ -10,3 +10,5 @@ __pycache__/
 /docs/scripts
 archive/
 *.so
+build/
+*.gz

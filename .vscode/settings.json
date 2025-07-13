@@ -11,4 +11,10 @@
 
     "terminal.integrated.defaultProfile.windows": "Command Prompt",
     "jupyter.askForKernelRestart": false,
+    "files.associations": {
+        "format": "cpp"
+    },
+    "cSpell.words": [
+        "microstrip"
+    ],
 }

@@ -6,7 +6,7 @@ from time import time
 from parameterized import parameterized
 
 
-class TestCore(unittest.TestCase):
+class TestCascadeNoise(unittest.TestCase):
 
     @parameterized.expand([[1, 3], [3, 1], [2, 2], [5, 3], [3, 5]])
     def test_cascade_noise_data(self, m1_a, m2_a):

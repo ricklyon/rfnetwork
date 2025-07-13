@@ -1,9 +1,52 @@
 from .component import Component
 import numpy as np
-from . import elements
+from typing import Tuple
 from . core import core
 
-def cascade_to_nodes(cascades):
+
+class Junction(Component):
+    """
+    N-port lossless junction
+    """
+
+    def __init__(self, N: int):
+        """
+        Parameters:
+        ----------
+        N: int
+            number of junction ports
+        """
+        super().__init__(n_ports=N)
+        assert N > 0, "N must be positive"
+        self.N = int(N)
+
+    def evaluate_sdata(self, frequency: np.ndarray) -> np.ndarray:
+        return core.junction_sdata(frequency, self.N)
+    
+
+class Open(Component):
+    """
+    1-port open-circuit load
+    """
+    def __init__(self):
+        super().__init__(n_ports=1)
+
+    def evaluate_sdata(self, frequency: np.ndarray) -> np.ndarray:
+        return np.full((len(frequency), 1, 1), 1, dtype="complex128")
+
+
+class Short(Component):
+    """
+    1-port short-circuit load
+    """
+    def __init__(self):
+        super().__init__(n_ports=1)
+
+    def evaluate_sdata(self, frequency: np.ndarray):
+        return np.full((len(frequency), 1, 1), -1, dtype="complex128")
+    
+
+def cascade_to_nodes(cascades: list) -> list:
     """
     Converts a list of cascaded components to a list of connected nodes.
     """
@@ -31,15 +74,12 @@ def cascade_to_nodes(cascades):
 
     return nodes
 
-def convert_to_refdes(
-    nodes,
-    components
-):
+def convert_to_refdes(nodes: list, components: dict) -> Tuple[list, dict]:
     """
     Parses a list of nodes and returns a dictionary of reference designators with the associated component object,
-    and a new list of nodes that uses the reference designators instead of object values.
+    and a new list of nodes that uses the reference designators instead of object pointers.
 
-    If a component is not found in components, automatically assigns a designator.
+    If a component pointer is not found in the component dictionary, it automatically assigns a designator.
     """
 
     # counter for designators assigned automatically
@@ -88,7 +128,7 @@ def convert_to_refdes(
     return nodes_refdes, refdes
 
 
-def build_probe_netlist(components: dict, probes: dict, netlist: dict):
+def build_probe_netlist(components: dict, probes: dict, netlist: dict) -> Tuple[dict, list]:
     """
     Builds a netlist of probe names that are attached to each component port. If no probe is assigned to a port,
     the port value is None.
@@ -163,7 +203,7 @@ def build_netlist(nodes: list, cascades: list, components: dict) -> dict:
     # initialize netlist with -1 for all ports of each component
     netlist = {}
     for k, v in components.items():
-        netlist[k] = [-1] * v.pnum
+        netlist[k] = [-1] * v.n_ports
 
     # list of node names corresponding to each node number
     ports = dict()
@@ -278,9 +318,9 @@ def connect_node(
         # generate sdata for a short (node == 0) or an open load (node == -1)
         
         if node == 0:
-            load = elements.Short().evaluate(frequency, noise=noise) 
+            load = Short().evaluate(frequency, noise=noise) 
         else:
-            load = elements.Open().evaluate(frequency, noise=noise)
+            load = Open().evaluate(frequency, noise=noise)
 
         # connect a 1-port load to each port in this node
         for i, (c, ports) in enumerate(node_ports.items()):
@@ -353,7 +393,7 @@ def connect_node(
         c1 = list(node_ports.keys())[0]
 
         nfreq = comp_data[c1]["s"].shape[-3]
-        s0 = elements.Junction(N).evaluate(np.zeros(nfreq), noise=noise)
+        s0 = Junction(N).evaluate(np.zeros(nfreq), noise=noise)
         
         s0_netlist = [node] * N
         s0_probe_netlist = [None] * N

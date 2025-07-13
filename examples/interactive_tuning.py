@@ -39,7 +39,7 @@ ms50 = rfn.elements.MSLine(
     h=0.030, 
     er=2.55, 
     w=0.08,
-    loss_tan=0.017,
+    df=0.017,
 )
 
 class pa_input(rfn.Network):
@@ -102,33 +102,30 @@ rfn.plots.draw_smithchart(axes["s11"])
 rfn.plots.draw_smithchart(axes["s22"])
 
 lines1 = n.plot_probe(
-    axes["s11"],
-    frequency,
     ("u1|1", "m_in|2"),
     ("m_in.r1|1", "m_in.ms2|2"),
     ("m_in.ms2|1", "m_in.c2|2"),
     ("m_in.c2|1", "m_in.ms1|2"),
     ("m_in.ms1|1", "m_in.c1|2"),
-    input_port=1, fmt="smith", tune=True
+    input_port=1, fmt="smith", tune=True, axes=axes["s11"], frequency=frequency
 )
 
-ln_s11 = n.plot(axes["s11"], frequency, 11, fmt="smith", tune=True)
+
+ln_s11 = n.plot(11, fmt="smith", tune=True, axes=axes["s11"], frequency=frequency)
 axes["s11"].legend(fontsize=8)
 
 smithchart_marker(axes["s11"], f0, lines=lines1, ylabel=False)
 smithchart_marker(axes["s11"], f0, lines=ln_s11)
 
 lines2 = n.plot_probe(
-    axes["s22"],
-    frequency,
     ("u1|2", "m_out|1"),
     ("m_out.ms3|2", "m_out.c3|1"),
     ("m_out.c3|2", "m_out.ms4|1"),
     ("m_out.ms4|2", "m_out.c4|1"),
-    input_port=2, fmt="smith", tune=True
+    input_port=2, fmt="smith", tune=True, axes=axes["s22"], frequency=frequency
 )
 
-ln_s22 = n.plot(axes["s22"], frequency, 22, fmt="smith", tune=True)
+ln_s22 = n.plot(22, fmt="smith", tune=True, axes=axes["s22"], frequency=frequency) 
 axes["s22"].legend(fontsize=8)
 
 smithchart_marker(axes["s22"], f0, lines=lines2, ylabel=False)
@@ -150,17 +147,17 @@ fig.tight_layout()
 # mplm.line_marker(x=f0/1e9)
 
 
-tuners = {
-    "m_in.c1": dict(key="value", lower=1, upper=30, label="C1 [pF]"),
-    "m_in.ms1": dict(key="length", lower=0.1, upper=2, label="MS1 [in]"),
-    "m_in.c2": dict(key="value", lower=10, upper=80, label="C2 [pF]"),
-    "m_in.ms2": dict(key="length", lower=0.1, upper=1, label="MS2 [in]"),
-    "m_in.r1": dict(key="value", lower=0.1, upper=5, label="R1 [ohms]"),
-    "m_out.ms3": dict(key="length", lower=0.1, upper=1, label="MS3 [in]"),
-    "m_out.c3": dict(key="value", lower=10, upper=100, label="C3 [pF]"),
-    "m_out.ms4": dict(key="length", lower=0.1, upper=2, label="MS2 [in]"),
-    "m_out.c4": dict(key="value", lower=5, upper=30, label="C4 [pF]"),
-}
+tuners = [
+    dict(component="m_in.c1", variable="value", lower=1, upper=30, label="C1 [pF]"),
+    dict(component="m_in.ms1", variable="length", lower=0.1, upper=2, label="MS1 [in]"),
+    dict(component="m_in.c2", variable="value", lower=10, upper=80, label="C2 [pF]"),
+    dict(component="m_in.ms2", variable="length", lower=0.1, upper=1, label="MS2 [in]"),
+    dict(component="m_in.r1", variable="value", lower=0.1, upper=5, label="R1 [ohms]"),
+    dict(component="m_out.ms3", variable="length", lower=0.1, upper=1, label="MS3 [in]"),
+    dict(component="m_out.c4", variable="value", lower=10, upper=100, label="C3 [pF]"),
+    dict(component="m_out.ms4", variable="length", lower=0.1, upper=2, label="MS2 [in]"),
+    dict(component="m_out.c4", variable="value", lower=5, upper=30, label="C4 [pF]"),
+]
 
 # plt.show()
 

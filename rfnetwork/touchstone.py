@@ -1,29 +1,34 @@
 import numpy as np
 from pathlib import Path
 import re
-from typing import Tuple
+from typing import Tuple, Union
 from np_struct import ldarray
 
-def read_snp(filepath: Path | str) -> Tuple[ldarray, ldarray, list]:
+def read_snp(filepath: Union[Path, str]) -> Tuple[ldarray, ldarray, list]:
     """
-    Reads a touchstone file and returns the s-matrix data, as well as the noise parameters if they are found in the file.
+    Reads a touchstone file and returns the s-matrix data, as well as the noise parameters if they are found in the 
+    file.
 
-    The three noise parameters are returned in a Fx3 labeled array:
-        nf_min: minimum noise figure (linear)
-        gamma_opt: complex valued source reflection coefficient for optimum noise figure.
-        rn: noise resistance, normalized to reference impedance
-    Note that the frequency vectors for the s-matrix and the noise parameters may be different.
+    The frequency vectors for the s-matrix and the noise parameters may be different.
     If noise parameters are not found in the file, None is returned. 
 
-    Parameters:
-    -----------
+    Parameters
+    ----------
     filepath: (Path | str)
-        path to .sNp touchstone file, where N in the extension (i.e. *.s2p is N=2) must match the number of ports 
-        in the data file.
+        path to .sNp touchstone file, where N is the number of ports.
 
-    Returns:
-    --------
-        smatrix (FxNxN), noise parameters (Fx3), and list of comments
+    Returns
+    -------
+    s-matrix : ldarray
+        labeled array with dimensions (frequency, b, a)
+    noise_parameters : ldarray
+        Fx3 labeled array with dimensions (frequency, noise_param). 
+        The noise param dimension has three values,
+        - "nf_min" : minimum noise figure (linear)
+        - "gamma_opt" : complex valued source reflection coefficient for optimum noise figure.
+        - "rn" : noise resistance, normalized to reference impedance
+    comments: list
+        list of comment strings found in the file
     """
     # list of comments found in the file
     comments = []

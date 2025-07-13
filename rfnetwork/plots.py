@@ -5,6 +5,7 @@ from .core.units import conv
 from . core import core
 import mpl_markers as mplm
 from np_struct import ldarray
+from typing import List, Tuple
 
 # conversion functions for supported formats
 fmt_func = {
@@ -51,7 +52,7 @@ fmt_prefix = {
 }
 
 
-def smithchart_marker(ax, frequency, fc: float):
+def smithchart_marker(ax: plt.Axes, frequency: np.ndarray, fc: float):
     """ place a smith chart marker by frequency rather than x/y position """
     
     f_idx = np.argmin(np.abs(frequency - fc))
@@ -59,12 +60,32 @@ def smithchart_marker(ax, frequency, fc: float):
         idx=f_idx, axes=ax, xline=False, yformatter=lambda x, y, idx: f"{frequency[idx]/1e6:.0f}MHz"
     )
 
-def smith_circles(values: list, line_type: str, npoints = 5001, gamma_clip: float = 1):
+def smith_circles(values: list, line_type: str, n_points = 5001, gamma_clip: float = 1) -> np.ndarray:
     """
     Generate smith chart impedance/admittance circles
 
-    line_type: {'r', 'x', 'g', 's', 'gamma', 'vswr'}
-        real, reactance, conductance, susceptance
+    Parameters
+    ----------
+    values : list
+        normalized values of circles 
+    line_type : {'r', 'x', 'g', 's', 'gamma', 'vswr'}
+        Line type. Support values are,
+        - "r": real
+        - "x": reactance, conductance ("g"), susceptance ("s")
+        - "g": conductance,
+        - "s": susceptance,
+        - "gamma": gamma circle with constant radius (0-1) from origin
+        - "vswr": VSWR circle
+    n_points : float, default: 5001
+        resolution of circles
+    gamma_clip : float, default: 1
+        maximum gamma value before circles are clipped. Allows active smith charts if >1.
+    
+    Returns
+    -------
+    circles : np.ndarray
+        complex-valued circle data. Plot onto an axis with
+        ``ax.plot(np.real(circles), np.imag(circles))``
     """
 
     values = np.atleast_1d(values)
@@ -84,7 +105,7 @@ def smith_circles(values: list, line_type: str, npoints = 5001, gamma_clip: floa
     
     # generate lines
     x0, y0, r = line_xyr[line_type]
-    ang = np.linspace(0, 2 * np.pi, npoints, endpoint=True)
+    ang = np.linspace(0, 2 * np.pi, n_points, endpoint=True)
     circles = r[..., None] * np.exp(1j * ang)[None] + (x0 + 1j * y0)[..., None]
     # clip circles beyond gamma=1 (or whatever the user specified)
     circles = np.where(np.abs(circles) > gamma_clip * (1 + 1e-6), np.nan, circles)
@@ -94,51 +115,35 @@ def smith_circles(values: list, line_type: str, npoints = 5001, gamma_clip: floa
     # the transpose can be directly plotted: ax.plot(np.real(circles), np.imag(circles))
     return circles.T
 
-
-def draw_smithchart(axes: plt.Axes, values=None, line_kwargs=dict(linewidth=0.25, color="k")):
-
-    if values is None:
-        values = [10 , 5, 2, 1, 0.5, 0.2, 0]
-
-    axes.set_aspect('equal')
-    axes.set_axis_off()
-    axes.axis([-1.1, 1.1, -1.1, 1.1])
-
-    r = smith_circles(values, "r")
-    xp = smith_circles(values, "x")
-    xn = smith_circles(-np.array(values), "x")
-
-    g = smith_circles(values, "g")
-    sp = smith_circles(values, "s")
-    sn = smith_circles(-np.array(values), "s")
-
-    sm_lines = axes.plot(r.real, r.imag, **line_kwargs)
-    sm_lines += axes.plot(xp.real, xp.imag, **line_kwargs)
-    sm_lines += axes.plot(xn.real, xn.imag, **line_kwargs)
-
-    admittance_kwargs = dict(color="m", alpha=0.4, linewidth=0.2)
-
-    sm_lines += axes.plot(g.real, g.imag, **admittance_kwargs)
-    sm_lines += axes.plot(sp.real, sp.imag, **admittance_kwargs)
-    sm_lines += axes.plot(sn.real, sn.imag, **admittance_kwargs)
-
-    # draw x axis line
-    sm_lines += axes.plot([-1, 1], [0, 0], **line_kwargs)
-
-    mplm.disable_lines(sm_lines, axes=axes)
-
-    # add a flag that this axes has been formatted for a smithchart already
-    axes._smithchart = True
-
-def plot_stability_circles(axes: plt.Axes, sdata: ldarray, f0: float, load_kwargs=dict(), source_kwargs=dict()):
+def stability_circles(sdata: ldarray):
     """
-    Plot source and load stability circles at f0. 
+    Get source and load stability circles.
+    For the typical case where S(11) and S(22) are less than 1, the unstable region is enclosed by the circle if it 
+    does not contain the origin, otherwise the unstable region is outside the circle.
+
+    Parameters
+    ----------
+    sdata : np.ndarray
+        s-matrix data at a single frequency
+    
+    Returns
+    -------
+    source_data : np.ndarray
+        complex-valued source stability data. Plot onto an axis with
+        ``ax.plot(np.real(circles), np.imag(circles))``
+
+    load_data : np.ndarray
+        complex-valued circle data. Plot onto an axis with
+        ``ax.plot(np.real(circles), np.imag(circles))``
     """
 
-    s11 = sdata.sel(frequency=f0, b=1, a=1)
-    s22 = sdata.sel(frequency=f0, b=2, a=2)
-    s21 = sdata.sel(frequency=f0, b=2, a=1)
-    s12 = sdata.sel(frequency=f0, b=1, a=2)
+    # remove unitary frequency data
+    sdata = sdata.squeeze()
+
+    s11 = sdata[0, 0]
+    s22 = sdata[1, 1]
+    s21 = sdata[1, 0]
+    s12 = sdata[0, 1]
 
     def stability_circle_output(s11, s12, s21, s22):
         del_ = s11*s22 - (s12*s21)
@@ -160,72 +165,138 @@ def plot_stability_circles(axes: plt.Axes, sdata: ldarray, f0: float, load_kwarg
     s_circ = rs*np.exp(1j * xdat) + cs
     l_circ = rl*np.exp(1j * xdat) + cl
 
-    l_line = axes.plot(l_circ.real, l_circ.imag, label=r"$\Gamma_L$ Stability", **load_kwargs)
-    s_line = axes.plot(s_circ.real, s_circ.imag, label=r"$\Gamma_S$ Stability", **source_kwargs)
+    return s_circ, l_circ
 
-    return s_line[0], l_line[0]
+
+def draw_smithchart(
+    axes: plt.Axes, 
+    impedance_values: list = None, 
+    admittance_values: list = None, 
+    impedance_kwargs: dict = dict(linewidth=0.25, color="k"),
+    admittance_kwargs: dict = dict(color="m", alpha=0.4, linewidth=0.2)
+):
+    """
+    Draws Smith chart lines onto the axes
+
+    Parameters
+    ----------
+    axes: plt.Axes
+        Axes object
+    impedance_values : list, optional
+        normalized impedance line values, applies to both resistance and reactance lines.
+    admittance_values : list, optional
+        normalized admittance line values, applies to both conductance and susceptance lines.
+    """
+
+    if impedance_values is None:
+        impedance_values = [10 , 5, 2, 1, 0.5, 0.2, 0]
+
+    if admittance_values is None:
+        admittance_values = [10 , 5, 2, 1, 0.5, 0.2, 0]
+
+    axes.set_aspect('equal')
+    axes.set_axis_off()
+    axes.axis([-1.1, 1.1, -1.1, 1.1])
+
+    if isinstance(impedance_kwargs, dict) and len(impedance_values):
+
+        r = smith_circles(impedance_values, "r")
+        xp = smith_circles(impedance_values, "x")
+        xn = smith_circles(-np.array(impedance_values), "x")
+
+        sm_lines = axes.plot(r.real, r.imag, **impedance_kwargs)
+        sm_lines += axes.plot(xp.real, xp.imag, **impedance_kwargs)
+        sm_lines += axes.plot(xn.real, xn.imag, **impedance_kwargs)
+        # draw x axis line
+        sm_lines += axes.plot([-1, 1], [0, 0], **impedance_kwargs)
+
+    if isinstance(admittance_kwargs, dict) and len(admittance_values):
+        g = smith_circles(admittance_values, "g")
+        sp = smith_circles(admittance_values, "s")
+        sn = smith_circles(-np.array(admittance_values), "s")
+
+        sm_lines += axes.plot(g.real, g.imag, **admittance_kwargs)
+        sm_lines += axes.plot(sp.real, sp.imag, **admittance_kwargs)
+        sm_lines += axes.plot(sn.real, sn.imag, **admittance_kwargs)
+
+    # prevent markers from attaching to smith chart lines
+    mplm.disable_lines(sm_lines, axes=axes)
+
+    # add a flag that this axes has been formatted for a smith chart already
+    axes._smithchart = True
 
 def plot(
     axes: plt.Axes,
     sdata: ldarray,
-    *paths,
+    *paths : Tuple[int],
     ndata: ldarray = None,
     fmt: str = "db",
     freq_unit: str = "ghz",
     ref: tuple = None,
-    label: str = None,
+    label: str = "",
     label_mode: str = "prefix",
-    lines=None,
+    lines: List[Line2D] = None,
     **kwargs
-) -> plt.Axes:
+) -> List[Line2D]:
     """
-    Plots s-matrix data for each path over the primary axis. Matplotlib supports plotting over 2 dimensions, so
-    the Sparam can only have 1 dimension above the frequency axis.
+    Plots s-matrix or noise figure data over frequency.
 
-    Parameters:
-    ------------
-    paths (tuple, list):
-        list of port paths to plot. (e.g. 21 would plot S21). Each path can be an integer or a tuple of port numbers
-        or Port objects. If no arguments are given every possible path will be plotted.
-    fmt (string):
-        format for y axis data. Accepts the following values. Defaults to db.
-            mag
-            db
-            ang
-            ang_unwrap
-            vswr
-            real
-            imag
-            realz
-            imagz
+    Parameters
+    ----------
+    axes : plt.Axes
+        matplotlib axes object
+    sdata : ldarray
+        Labeled numpy array of s-matrix data with dimensions, (frequency, b, a). 
+    *paths : tuple | int
+        Port paths to plot. Each path can be an integer or a tuple of port numbers. For example, 21 is equivalent
+        to (2, 1) and plots S21. If no arguments are given every possible path will be plotted.
+    ndata : ldarray
+        Labeled numpy array of noise correlation matrix with dimensions (frequency, b, a). Used only if fmt is "nf".
+    fmt : str, default: "db"
+        data format for y-axis data. Accepts the following values
+        - "mag": Magnitude
+        - "db" : 20log of magnitude 
+        - "ang" Phase angle
+        - "ang_unwrap": Unwrapped phase angle
+        - "vswr" : Voltage standing wave ratio
+        - "real" : Real part of the complex s-matrix data
+        - "imag" : Imaginary part of the complex s-matrix data
+        - "realz" : Real part of the port input impedance
+        - "imagz" : Imaginary part of the port input impedance
+        - "nf" : Noise figure
+    freq_unit : {"Hz", "kHz", "MHz", "GHz"}, default: "GHz"
+        Unit for frequency axis. 
+    ref : tuple | int
+        Normalizes all plotted paths to this path. For example, to plot the phase difference between S21 and S31,
+        ``.plot(21, ref=31, fmt="ang")``. Supports a list of tuples or integers the same length as the number of paths,
+        where each path is normalized to a different reference path.
+    label : str | list, default: ""
+        Legend labels for plotted lines. Supports either a string to add a common label for all lines,
+        or a list of strings for each line. 
+    label_mode : {"prefix", "suffix", "override"}, default: "prefix"
+        Controls the placement of the line labels relative to the default label of "S(b,a)". By default, 
+        labels are a "prefix" to the default label. "override" replaces the default label.
+    lines : list[Line2D], optional
+        Line2D objects for each path. If provided, updates the existing lines instead of drawing new ones on the plot.
+    **kwargs
+        parameters passed into :meth:`matplotlib.axes.plot`.
 
-    ref (tuple, int):
-        Normalizes all paths to this path. For example, to plot the phase difference between S21 and S31:
-            .plot(21, refpath=31, fmt='ang')
-    axes (Axes):
-        Uses the given axes to plot on, will create new Axes if not given.
-    xaxis (string):
-        Dimension label to use as the independent variable, defaults to 'freq'.
-    figsize (tuple):
-        figure size to use if axes is not provided. Defaults to (10, 5)
-    excitation (np.ndarray):
-        voltages incident at each port. If provided, the traces will be active measurements and the paths
-        will be referenced to the input voltages.
-
-    Returns:
-    ---------
-    axes
+    Returns
+    -------
+    lines : list[Line2D]
+        list of line objects that were created for each path. If ``lines`` parameter was used, returned lines
+        are the same as the ``lines`` parameter.
 
     """
 
 
-    pnum = sdata.shape[-1]
+    n_ports = sdata.shape[-1]
     # plot all possible paths if not given
     if not len(paths) and fmt != 'smith':
-        paths = [(i, j) for i in range(1, pnum + 1) for j in range(1, pnum + 1)]
+        paths = [(i, j) for i in range(1, n_ports + 1) for j in range(1, n_ports + 1)]
     elif not len(paths):
         # show only the input return paths if plotting a smith chart
-        paths = [(i, i) for i in range(1, pnum + 1)]
+        paths = [(i, i) for i in range(1, n_ports + 1)]
 
     # generate a list of tuples of port numbers for each path
     if isinstance(paths[0], int):
@@ -239,7 +310,7 @@ def plot(
         if fmt in ["nf"]:
             raise ValueError("Plotting against a reference path is not supported for noise figure plots.")
         
-        # require that ref be a list the same length as paths. Single values are broadcast to the length of paths
+        # broadcast single valued reference paths to the length of paths
         if not isinstance(ref, list):
             ref = [ref] * len(paths)
 
@@ -250,24 +321,26 @@ def plot(
         if len(ref) != len(paths):
             raise ValueError(f"Reference paths must be the same length as paths. Got {len(ref)}, expected {len(paths)}")
 
-
-    # get xaxis vector
-    f_multiplier = dict(hz=1, khz=1e3, mhz=1e6, ghz=1e9)[freq_unit]
-    f_label = dict(hz="Hz", khz="kHz", mhz="MHz", ghz="GHz")[freq_unit]
+    # create frequency vector and x-axis label
+    f_multiplier = dict(hz=1, khz=1e3, mhz=1e6, ghz=1e9)[freq_unit.lower()]
+    f_label = dict(hz="Hz", khz="kHz", mhz="MHz", ghz="GHz")[freq_unit.lower()]
     xdata = sdata.coords["frequency"] / f_multiplier
 
-    custom_label = None
-    prefix_label = ""
-    suffix_label = ""
-    # default line label
+    # broadcast label(s) across all paths
+    labels = np.broadcast_to(label, len(paths)).copy()
+    # assign custom legend labels to either a suffix or prefix, or to completely replace the default label.
+    prefix_label = [""] * len(paths)
+    suffix_label = [""] * len(paths)
+    override_label = None
+    
     if label_mode == "override":
-        # broadcast label(s) across all paths
-        custom_label = np.broadcast_to(label, len(paths)).copy()
+        override_label = labels
     elif label_mode == "prefix":
-        prefix_label = "" if label is None else label + " "
-    elif label_mode == "suffix": #append
-        suffix_label = "" if label is None else " " + label
+        prefix_label = labels
+    elif label_mode == "suffix":
+        suffix_label = labels
 
+    # set up axes
     if fmt == "smith" and not hasattr(axes, "_smithchart"):
         draw_smithchart(axes)
     elif lines is None:
@@ -298,17 +371,19 @@ def plot(
         # transform xdata to the real part of the ydata if plotting for a smithchart
         xdata_s = fmt_func["real"](path_data) if fmt == "smith" else xdata
 
+        # if line is already created and passed in, update the existing line.
         if len(lines) > i:
             lines[i].set_data(xdata_s, ydata)
 
         # plot like normal if lines were not provided
         else:
-            if custom_label is None:
+            # create default label of "S(b,a)", i.e. S(2,1).
+            if override_label is None:
                 # escape underscores in port names
                 p1_name = r"\mathrm{" + str(p1).replace("_", "\\_") + "}"
                 p2_name = r"\mathrm{" + str(p2).replace("_", "\\_") + "}"
 
-                label = prefix_label
+                label = prefix_label[i]
                 # build legend label for line, e.g S(2,1)
                 label += r"{}$({{ {},{} }})$".format(fmt_prefix[fmt], p1_name, p2_name)
 
@@ -318,10 +393,12 @@ def plot(
                     r2_name = r"\mathrm{" + str(r2).replace("_", "\\_") + "}"
                     label += r" / {}$({{ {},{} }})$".format(fmt_prefix[fmt], r1_name, r2_name)
 
-                label += suffix_label
+                label += suffix_label[i]
+            # use custom label and skip default
             else:
-                label = custom_label[i]
+                label = override_label[i]
 
+            # create line and add to list of newly created line objects
             lines += axes.plot(xdata_s, ydata, label=label, **kwargs)
 
     return lines

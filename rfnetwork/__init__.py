@@ -4,5 +4,4 @@ from . network import Network
 from . core import core
 from . import elements
 from . import plots
-from . import filters
 from . tuning import TunerGroup
