@@ -380,7 +380,7 @@ class Line(Component):
         # assign electrical length if given
         if f0 is not None:
             # get er at center frequency
-            er = self.get_properties(f0).sel(value="er")
+            er = self.get_properties(f0).sel(value="er").item()
             # wavelength in inches at center frequency
             vp_in = const.c0_in / np.sqrt(er)
             lmbda_in = vp_in / f0
