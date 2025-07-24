@@ -17,6 +17,7 @@ int connection_matrix(
     char * m1,
     char * m2,
     char * row_order,
+    int * n_row,
     int f_len, int s1_b, int s1_a, int s2_b, int s2_a, int n_connections
 );
 

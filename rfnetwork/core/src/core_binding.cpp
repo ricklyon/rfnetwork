@@ -82,6 +82,7 @@ static PyObject * connection_matrix_bind(PyObject *self, PyObject *args)
 
     PyArrayObject* row_order_array = (PyArrayObject*) row_order;
 
+    int n_row;
     int f_len = s1_shape[0];
 
     int s1_b = s1_shape[1];
@@ -132,7 +133,7 @@ static PyObject * connection_matrix_bind(PyObject *self, PyObject *args)
         (char * ) PyArray_DATA(m1_array),
         (char * ) PyArray_DATA(m2_array),
         (char * ) PyArray_DATA(row_order_array),
-        f_len, s1_b, s1_a, s2_b, s2_a, n_connections
+        &n_row, f_len, s1_b, s1_a, s2_b, s2_a, n_connections
     );
 
     return PyLong_FromLong(0);

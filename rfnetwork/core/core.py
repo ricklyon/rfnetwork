@@ -39,11 +39,12 @@ def connection_matrix(s1: np.ndarray, s2: np.ndarray, connections: list, probes:
     m1 = np.zeros(m1_shape, dtype="complex128")
     m2 = np.zeros(m2_shape, dtype="complex128")
 
-    row_order = np.zeros(b_len, dtype=np.int64)
+    row_order = np.zeros(b_len, dtype=np.int32, order="C")
 
     core_func.connection_matrix(s1, s2, connections, probes, m1, m2, row_order)
 
-    return m1, m2, row_order
+    n_rows = np.argmax(row_order == -1) if -1 in row_order else len(row_order)
+    return m1[:, :n_rows], m2, row_order[:n_rows]
 
 def connection_matrix_py(s1: np.ndarray, s2: np.ndarray, connections: np.ndarray, probes: np.ndarray = None):
     """
@@ -119,7 +120,7 @@ def connection_matrix_py(s1: np.ndarray, s2: np.ndarray, connections: np.ndarray
     # row indices of the cascaded matrix in the desired order. S1 ports, S2 ports, followed by probe ports.
     row_order = np.concatenate([s1_ext, s2_ext, s1_probes, s2_probes])
 
-    return m1_inv, m2, row_order
+    return m1_inv[:, row_order], m2, row_order
 
     
 def connect(s1: dict, s2: dict, connections: list, probes: list = None, noise: bool = False):

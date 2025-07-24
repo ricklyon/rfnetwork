@@ -20,6 +20,45 @@ typedef Eigen::Map<Eigen::Matrix<std::complex<double>, Eigen::Dynamic, Eigen::Dy
 
 typedef Eigen::Map<Eigen::Matrix<int, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> MatrixIntType;
 
+
+// int cascade_sdata(
+//     char * s1,
+//     char * s2,
+//     char * connections,
+//     char * probes,
+//     char * m1,
+//     char * m2,
+//     char * row_order,
+//     int * n_row,
+//     int f_len, int s1_b, int s1_a, int s2_b, int s2_a, int n_connections
+// )
+// {
+//     connection_matrix(
+//         s1, s2, connections, probes, m1, m2, row_order, n_row, f_len, s1_b, s1_a, s2_b, s2_a, n_connections
+// );
+
+//     int m_b = s1_b + s2_b;
+//     int m2_a = s1_a + s2_a - (2 * n_connections);
+
+//     int itemsize = sizeof(std::complex<double>);
+//     // size of each frequency matrix in m1
+//     int m1_size = (m_b * m_b * itemsize);
+//     // size of each frequency matrix in m2
+//     int m2_size = (m_b * m2_a * itemsize);
+
+//     // size of each frequency matrix in s1
+//     int s1_size = (s1_b * s1_a * itemsize);
+//     // size of each frequency matrix in s2
+//     int s2_size = (s2_b * s2_a * itemsize);
+
+//     for (int f = 0; f < f_len; f++)
+//     {
+//         MatrixType M1 ((std::complex<double> *) (m1 + (f * m1_size)), *n_row, m_b);
+//         MatrixType M2 ((std::complex<double> *) (m2 + (f * m2_size)), m_b, m2_a);
+        
+//     }
+// }
+
 int connection_matrix(
     char * s1,
     char * s2,
@@ -28,6 +67,7 @@ int connection_matrix(
     char * m1,
     char * m2,
     char * row_order,
+    int * n_row,
     int f_len, int s1_b, int s1_a, int s2_b, int s2_a, int n_connections
 )
 {
@@ -45,11 +85,107 @@ int connection_matrix(
     // size of each frequency matrix in s2
     int s2_size = (s2_b * s2_a * itemsize);
 
+    // number of existing probes on component data
+    int s1_probe_n = s1_b - s1_a;
+    int s2_probe_n = s2_b - s2_a;
+
     int p1, p2;
 
     MatrixIntType CONN ((int *) connections, n_connections, 2);
-    std::cout << CONN << "\n";
+    MatrixIntType PROBES ((int *) probes, n_connections, 2);
+    MatrixIntType ROW_ORDER ((int *) row_order, 1, m_b);
 
+    ROW_ORDER.setConstant(-1);
+
+    // Walk through each row of the first component and place unconnected rows that are external ports
+    int ext_r = 0;
+    for (int r = 0; r < s1_a; r++)
+    {
+        // row is an external port (not a connected port)
+        if ((CONN.col(0).array() != (r + 1)).all())
+        {
+            ROW_ORDER(0, ext_r) = r;
+            ext_r++;
+        }
+    }
+
+    // Walk through each row of the second component and place unconnected rows
+    for (int r = 0; r < s2_a; r++)
+    {
+        // row is an external port (not a connected port)
+        if ((CONN.col(1).array() != (r + 1)).all())
+        {
+            ROW_ORDER(0, ext_r) = r + s1_b;
+            ext_r++;
+        }
+    }
+
+    // Put the existing probes after the external port rows.
+    int pb_r = 0;
+    for (int r = s1_a; r < s1_b; r++)
+    {
+        ROW_ORDER(0, m2_a + pb_r) = r;
+        pb_r++;
+    }
+    // place probes for the second component after the first component
+    for (int r = s2_a; r < s2_b; r++)
+    {
+        ROW_ORDER(0, m2_a + pb_r) = r + s1_b;
+        pb_r++;
+    }
+
+    // place connected rows that are assigned as probes from the first component
+    for (int n = 0; n < n_connections; n++)
+    {
+        p1 = CONN(n, 0);
+
+        // if p1 or p2 are greater than the external number of ports, they are internal ports that cannot be 
+        // connected.
+        if (p1 > s1_a)
+        {
+            throw std::runtime_error("Connection ports must be less than the number of external ports of s1.");
+        }
+
+        // connection from component 1 is assigned as a probe, add to the row assignment list.
+        if (PROBES(n, 0))
+        {
+            ROW_ORDER(0, m2_a + pb_r) = p1 - 1;
+            pb_r++;
+        }
+    
+    }
+
+    // place connected rows that are assigned as probes from the second component
+    for (int n = 0; n < n_connections; n++)
+    {
+        p2 = CONN(n, 1);
+    
+        // if p1 or p2 are greater than the external number of ports, they are internal ports that cannot be 
+        // connected.
+        if (p2 > s2_a)
+        {
+            throw std::runtime_error("Connection ports must be less than the number of external ports of s2.");
+        }
+        
+        // connection from component 2 is assigned as a probe, add to the row assignment list.
+        if (PROBES(n, 1))
+        {   
+            ROW_ORDER(0, m2_a + pb_r) = s1_b + (p2 - 1);
+            pb_r++;
+        }
+    }
+
+    // get the number of rows in the output matrix
+    *n_row = pb_r + ext_r;
+    // create permutation matrix that will reorder the rows of M1 after taking its inverse
+    Eigen::Matrix<std::complex<double>, Eigen::Dynamic, Eigen::Dynamic> P(pb_r + ext_r, m_b);
+    P.setConstant(0);
+    for (int r = 0; r < *n_row; r++)
+    {
+        P(r, ROW_ORDER(0, r)) = 1;
+    }
+
+    // create M1 and M2 matrices
     for (int f = 0; f < f_len; f++)
     {
         MatrixType M1 ((std::complex<double> *) (m1 + (f * m1_size)), m_b, m_b);
@@ -67,22 +203,15 @@ int connection_matrix(
             p1 = CONN(n, 0);
             p2 = CONN(n, 1);
 
-            // if p1 or p2 are greater than the external number of ports, they are internal ports that cannot be 
-            // connected.
-            if ((p1 > s1_a) || (p2 > s2_a))
-            {
-                throw std::runtime_error("Connection ports must be less than the number of external ports of s1, s2.");
-            }
-
             // populate connected columns from s1/s2 into M1
             M1.col(s1_b + p2 - 1).segment(0, s1_b) = -S1.col(p1 - 1);
             M1.col(p1 - 1).segment(s1_b, s2_b) = -S2.col(p2 - 1);
-
-            // take the inverse
-            M1 = M1.inverse();
         }
-        
-        
+
+        // take the inverse
+        M1 = M1.inverse();
+        M1 = P * M1;
+    
         // populate columns in M2 with the unconnected columns from S1
         int m2_col = 0;
         for (int i = 0; i < s1_a; i++)
@@ -96,7 +225,6 @@ int connection_matrix(
             }
         }
         
-        std::cout<< "S2 " << CONN.col(1) << "\n";
         // populate columns in M2 with the unconnected columns from S2
         for (int i = 0; i < s2_a; i++)
         {
