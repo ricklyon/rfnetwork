@@ -59,31 +59,15 @@ typedef Eigen::Map<Eigen::Matrix<int, Eigen::Dynamic, Eigen::Dynamic, Eigen::Row
 //     }
 // }
 
-int connection_matrix(
-    char * s1,
-    char * s2,
+int cascaded_row_order(
     char * connections,
     char * probes,
-    char * m1,
-    char * m2,
     char * row_order,
-    int * n_row,
-    int f_len, int s1_b, int s1_a, int s2_b, int s2_a, int n_connections
+    int s1_b, int s1_a, int s2_b, int s2_a, int n_connections
 )
 {
     int m_b = s1_b + s2_b;
     int m2_a = s1_a + s2_a - (2 * n_connections);
-
-    int itemsize = sizeof(std::complex<double>);
-    // size of each frequency matrix in m1
-    int m1_size = (m_b * m_b * itemsize);
-    // size of each frequency matrix in m2
-    int m2_size = (m_b * m2_a * itemsize);
-
-    // size of each frequency matrix in s1
-    int s1_size = (s1_b * s1_a * itemsize);
-    // size of each frequency matrix in s2
-    int s2_size = (s2_b * s2_a * itemsize);
 
     // number of existing probes on component data
     int s1_probe_n = s1_b - s1_a;
@@ -175,24 +159,73 @@ int connection_matrix(
         }
     }
 
-    // get the number of rows in the output matrix
-    *n_row = pb_r + ext_r;
+    return pb_r + ext_r;
+}
+
+int cascade_data(
+    char * s1,
+    char * s2,
+    char * c1,
+    char * c2,
+    char * connections,
+    char * probes,
+    char * row_order,
+    char * cas_s,
+    char * cas_n,
+    int n_row, int f_len, int s1_b, int s1_a, int s2_b, int s2_a, int n_connections
+)
+{
+
+    int m_b = s1_b + s2_b;
+    int m2_a = s1_a + s2_a - (2 * n_connections);
+
+    int itemsize = sizeof(std::complex<double>);
+
+    // size of each frequency matrix in s1
+    int s1_size = (s1_b * s1_a * itemsize);
+    // size of each frequency matrix in s2
+    int s2_size = (s2_b * s2_a * itemsize);
+    // size of each frequency matrix in cascaded sdata
+    int cas_s_size = (n_row * m2_a * itemsize);
+    int cas_n_size = (m2_a * m2_a * itemsize);
+
+    // size of c1, c2 frequency matrix
+    int c1_size = (s1_a * s1_a * itemsize);
+    int c2_size = (s2_a * s2_a * itemsize);
+
+    // number of existing probes on component data
+    int s1_probe_n = s1_b - s1_a;
+    int s2_probe_n = s2_b - s2_a;
+
+    int p1, p2;
+
+    MatrixIntType CONN ((int *) connections, n_connections, 2);
+    MatrixIntType PROBES ((int *) probes, n_connections, 2);
+    MatrixIntType ROW_ORDER ((int *) row_order, 1, n_row);
+
+    Eigen::Matrix<std::complex<double>, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> M1(m_b, m_b);
+    Eigen::Matrix<std::complex<double>, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> M2(m_b, m2_a);
+
     // create permutation matrix that will reorder the rows of M1 after taking its inverse
-    Eigen::Matrix<std::complex<double>, Eigen::Dynamic, Eigen::Dynamic> P(pb_r + ext_r, m_b);
+    Eigen::Matrix<std::complex<double>, Eigen::Dynamic, Eigen::Dynamic> P(n_row, m_b);
+    // M matrix with probe rows and columns removed, and row-ordered
+    Eigen::Matrix<std::complex<double>, Eigen::Dynamic, Eigen::Dynamic> M_EXT(m2_a, m2_a);
+
+    std::complex<double> t1;
+    std::complex<double> t2;
+
+
     P.setConstant(0);
-    for (int r = 0; r < *n_row; r++)
+    for (int r = 0; r < n_row; r++)
     {
         P(r, ROW_ORDER(0, r)) = 1;
     }
 
-    // create M1 and M2 matrices
     for (int f = 0; f < f_len; f++)
-    {
-        MatrixType M1 ((std::complex<double> *) (m1 + (f * m1_size)), m_b, m_b);
-        MatrixType M2 ((std::complex<double> *) (m2 + (f * m2_size)), m_b, m2_a);
-        
+    {   
         MatrixType S1 ((std::complex<double> *) (s1 + (f * s1_size)), s1_b, s1_a);
         MatrixType S2 ((std::complex<double> *) (s2 + (f * s2_size)), s2_b, s2_a);
+        MatrixType CAS_SDATA ((std::complex<double> *) (cas_s + (f * cas_s_size)), n_row, m2_a);
 
         // create first matrix, starts with just the identity matrix
         M1.setIdentity(); 
@@ -210,7 +243,6 @@ int connection_matrix(
 
         // take the inverse
         M1 = M1.inverse();
-        M1 = P * M1;
     
         // populate columns in M2 with the unconnected columns from S1
         int m2_col = 0;
@@ -236,8 +268,59 @@ int connection_matrix(
                 m2_col++;
             }
         }
-    }
+        
+        CAS_SDATA = P * M1 * M2;
 
+        int m_b = s1_a + s2_a;
+
+        if (cas_n != NULL)
+        {
+            MatrixType C1 ((std::complex<double> *) (c1 + (f * c1_size)), s1_a, s1_a);
+            MatrixType C2 ((std::complex<double> *) (c2 + (f * c2_size)), s2_a, s2_a);
+            MatrixType CAS_NDATA ((std::complex<double> *) (cas_n + (f * cas_n_size)), m2_a, m2_a);
+
+            M_EXT = P * M1;
+
+            // after row-ordering, the M_EXT matrix will have the rows for external ports placed first, followed
+            // by the probes. Noise cascades do not support probes, so only build the cascade matrix for the external
+            // ports.
+            for (int i = 0; i < m2_a; i++)
+            {
+                for (int j = 0; j < m2_a; j++)
+                {
+                    t1 = (M_EXT.row(i).segment(0, s1_a).transpose() * M_EXT.row(j).segment(0, s1_a).conjugate()).cwiseProduct(C1).sum();
+                    t2 = (M_EXT.row(i).segment(s1_b, s2_a).transpose() * M_EXT.row(j).segment(s1_b, s2_a).conjugate()).cwiseProduct(C2).sum();
+
+                    CAS_NDATA(i, j) = t1 + t2;
+                }
+            }
+
+
+            // for (int i = 0; i < m_b; i++)
+            // {
+            //     for (int j = 0; j < m_b; j++)
+            //     {
+            //         t1 = (M_EXT.row(i).segment(0, s1_a).transpose() * M_EXT.row(j).segment(s1_a, s1_a).conjugate()).cwiseProduct(C1).sum();
+            //         t2 = (M_EXT.row(i).segment(s1_b, s2_a).transpose() * M_EXT.row(j).segment(s1_b, s2_a).conjugate()).cwiseProduct(C2).sum();
+
+            //         CAS_NDATA(i, j) = t1 + t2;
+            //     }
+            // }
+
+    // #     # get the columns/rows of the square m1_inv matrix that correspond to external ports (drop probes)
+    // #     rows_ext = np.concatenate([np.arange(s1_a), s1_b + np.arange(s2_a)])
+    // #     m1_ext = m1_inv[:, rows_ext, :]
+    // #     m1_ext = m1_ext[:, :, rows_ext]
+    // #     # split columns between the first and second component
+    // #     m1_1 = np.array(m1_ext[..., :s1_a], order="C")
+    // #     m1_2 = np.array(m1_ext[..., s1_a:], order="C")
+
+    //     # delete the connected rows/columns
+    //     cas_ndata = np.delete(cas_ndata, cnx_col, axis=-1)
+    //     cas_ndata = np.delete(cas_ndata, cnx_col, axis=-2)
+
+        }
+    }
     return 0;
 }
 
