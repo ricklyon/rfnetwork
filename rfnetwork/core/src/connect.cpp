@@ -216,6 +216,7 @@ int cascade_data(
 
 
     P.setConstant(0);
+    
     for (int r = 0; r < n_row; r++)
     {
         P(r, ROW_ORDER(0, r)) = 1;
@@ -229,6 +230,7 @@ int cascade_data(
 
         // create first matrix, starts with just the identity matrix
         M1.setIdentity(); 
+        M2.setConstant(0);
 
         // move columns from s1 and s2 to m1 based on the connections
         for (int n = 0; n < n_connections; n++)
@@ -268,7 +270,7 @@ int cascade_data(
                 m2_col++;
             }
         }
-        
+
         CAS_SDATA = P * M1 * M2;
 
         int m_b = s1_a + s2_a;

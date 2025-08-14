@@ -94,9 +94,28 @@ static PyObject * cascade_data_bind(PyObject *self, PyObject *args)
     int a_len = s1_a + s2_a;
 
     // noise data
-    if (cas_n == Py_None) 
-    {
-        std::cout<<"No Noise Data\n";
+    char * c1_data = NULL;
+    char * c2_data = NULL;
+    char * cas_n_data = NULL;
+
+    if (cas_n != Py_None) 
+    {   
+        std::cout << "Noise Data\n";
+        int c1_shape[DATA_NDIM];
+        int c2_shape[DATA_NDIM];
+        int cas_n_shape[DATA_NDIM];
+
+        PyArrayObject* c1_array = (PyArrayObject*) c1;
+        array_data_shape(c1_array, c1_shape);
+        c1_data = (char * ) PyArray_DATA(c1_array);
+
+        PyArrayObject* c2_array = (PyArrayObject*) c2;
+        array_data_shape(c2_array, c2_shape);
+        c2_data = (char * ) PyArray_DATA(c2_array);
+
+        PyArrayObject* cas_n_array = (PyArrayObject*) cas_n;
+        array_data_shape(cas_n_array, cas_n_shape);
+        cas_n_data = (char * ) PyArray_DATA(cas_n_array);
     }
 
     // error checking
@@ -109,13 +128,13 @@ static PyObject * cascade_data_bind(PyObject *self, PyObject *args)
     cascade_data(
         (char * ) PyArray_DATA(s1_array),
         (char * ) PyArray_DATA(s2_array),
-        NULL,
-        NULL,
+        c1_data,
+        c2_data,
         (char * ) PyArray_DATA(connections_array),
         (char * ) PyArray_DATA(probes_array),
         (char * ) PyArray_DATA(row_order_array),
         (char * ) PyArray_DATA(cas_s_array),
-        NULL,
+        cas_n_data,
         n_row, f_len, s1_b, s1_a, s2_b, s2_a, n_connections
     );
 

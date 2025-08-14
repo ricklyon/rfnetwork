@@ -2,6 +2,8 @@ import numpy as np
 from pathlib import Path
 from np_struct import ldarray
 
+import numpy as np
+
 from scipy.interpolate import CubicSpline
 from . units import const, conv
 from . import core_func
@@ -197,35 +199,33 @@ def connect(s1: dict, s2: dict, connections: list, probes: list = None, noise: b
     # row indices of the cascaded matrix in the desired order. S1 ports, S2 ports, followed by probe ports.
     row_order = np.concatenate([s1_ext, s2_ext, s1_probes, s2_probes])
 
-    return m1_inv, m2, row_order
+    cas_data = dict(s=np.einsum("...ij,...jk->...ik", m1_inv[:, row_order], m2, optimize="greedy"))
 
-    # cas_data = dict(s=np.einsum("...ij,...jk->...ik", m1_inv[:, row_order], m2, optimize="greedy"))
+    if noise:
+        # get the columns/rows of the square m1_inv matrix that correspond to external ports (drop probes)
+        rows_ext = np.concatenate([np.arange(s1_a), s1_b + np.arange(s2_a)])
+        m1_ext = m1_inv[:, rows_ext, :]
+        m1_ext = m1_ext[:, :, rows_ext]
+        # split columns between the first and second component
+        m1_1 = np.array(m1_ext[..., :s1_a], order="C")
+        m1_2 = np.array(m1_ext[..., s1_a:], order="C")
 
-    # if noise:
-    #     # get the columns/rows of the square m1_inv matrix that correspond to external ports (drop probes)
-    #     rows_ext = np.concatenate([np.arange(s1_a), s1_b + np.arange(s2_a)])
-    #     m1_ext = m1_inv[:, rows_ext, :]
-    #     m1_ext = m1_ext[:, :, rows_ext]
-    #     # split columns between the first and second component
-    #     m1_1 = np.array(m1_ext[..., :s1_a], order="C")
-    #     m1_2 = np.array(m1_ext[..., s1_a:], order="C")
+        # get the correlation matrices for each component
+        c1, c2 = np.array(s1["n"], order="C"), np.array(s2["n"], order="C")
 
-    #     # get the correlation matrices for each component
-    #     c1, c2 = np.array(s1["n"], order="C"), np.array(s2["n"], order="C")
+        f_len = s1["s"].shape[0] # number of frequencies
+        # run extension function to compute cascaded data, result is written to cas_ndata
+        cas_ndata = np.zeros((f_len, a_len, a_len), dtype="complex128")
+        core_func.cascade_ndata(m1_1, m1_2, c1, c2, cas_ndata)
 
-    #     f_len = s1["s"].shape[0] # number of frequencies
-    #     # run extension function to compute cascaded data, result is written to cas_ndata
-    #     cas_ndata = np.zeros((f_len, a_len, a_len), dtype="complex128")
-    #     core_func.cascade_noise_data(m1_1, m1_2, c1, c2, cas_ndata)
+        # delete the connected rows/columns
+        cas_ndata = np.delete(cas_ndata, cnx_col, axis=-1)
+        cas_ndata = np.delete(cas_ndata, cnx_col, axis=-2)
 
-    #     # delete the connected rows/columns
-    #     cas_ndata = np.delete(cas_ndata, cnx_col, axis=-1)
-    #     cas_ndata = np.delete(cas_ndata, cnx_col, axis=-2)
+        # save result to output dictionary
+        cas_data["n"] = cas_ndata
 
-    #     # save result to output dictionary
-    #     cas_data["n"] = cas_ndata
-
-    # return row_order, cas_data
+    return row_order, cas_data
 
 def connect_self(s1: dict, p1: int, p2: int, probes: list = None, noise: bool = False):
     """
