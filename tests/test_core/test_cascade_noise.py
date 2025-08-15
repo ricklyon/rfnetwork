@@ -22,7 +22,7 @@ class TestCascadeNoise(unittest.TestCase):
         out = np.zeros((flen, m_b, m_b), dtype="complex128")
 
         stime = time()
-        core_func.cascade_noise_data(m1, m2, c1, c2, out)
+        core_func.cascade_ndata(m1, m2, c1, c2, out)
         elapsed = time() - stime
 
         out_np = np.zeros((flen, m_b, m_b), dtype="complex128")
@@ -46,7 +46,7 @@ class TestCascadeNoise(unittest.TestCase):
         out = np.zeros((flen, m_b, m_b), dtype="complex128")
 
         stime = time()
-        core_func.cascade_self_noise_data(m1, c1, out)
+        core_func.cascade_self_ndata(m1, c1, out)
         elapsed = time() - stime
 
         out_np = np.zeros((flen, m_b, m_b), dtype="complex128")

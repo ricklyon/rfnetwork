@@ -517,7 +517,7 @@ int self_cascaded_row_order(
     for (int n = 0; n < n_connections; n++)
     {
         p1 = CONN(n, 0);
-        p2 = CONN(n, 0);
+        p2 = CONN(n, 1);
 
         // if p1 or p2 are greater than the external number of ports, they are internal ports that cannot be 
         // connected.
