@@ -492,7 +492,6 @@ int self_cascaded_row_order(
     MatrixIntType PROBES ((int *) probes, n_connections, 2);
     MatrixIntType ROW_ORDER ((int *) row_order, 1, n_row);
 
-    ROW_ORDER.setConstant(-1);
 
     // Walk through each row of the first component and place unconnected rows that are external ports
     int ext_r = 0;
