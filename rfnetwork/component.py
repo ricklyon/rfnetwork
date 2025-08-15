@@ -393,11 +393,11 @@ class Component(object):
             assert sdata.shape[-1] == 2, "must be 2-port"
 
             short = np.full((len(frequency), 1, 1), -1, dtype="complex128")
-            _, shunt_data = core.connect(dict(s=sdata), dict(s=short), (2, 1), noise=False)
+            _, shunt_data = core.connect(dict(s=sdata), dict(s=short), (2, 1))
 
             # connect port 1 to a junction so the open port can be connected to 2 other components
             node = core.junction_sdata(frequency, 3)
-            _, shunt_data = core.connect(shunt_data, dict(s=node), (1, 1), noise=False)
+            _, shunt_data = core.connect(shunt_data, dict(s=node), (1, 1))
             sdata = shunt_data["s"]
 
             # invalidate noise data, shunting active components is not supported.

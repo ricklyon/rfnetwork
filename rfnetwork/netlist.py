@@ -325,7 +325,7 @@ def connect_node(
         # connect a 1-port load to each port in this node
         for i, (c, ports) in enumerate(node_ports.items()):
             for p in ports:
-                _, comp_data[c] = core.connect(comp_data[c], load, (p, 1), noise=noise)
+                _, comp_data[c] = core.connect(comp_data[c], load, (p, 1))
                 # remove the connected port from this component's port list
                 netlist[c].pop(p - 1)
                 # component has one less port now, decrement the internal probe numbers attached to this component.
@@ -347,7 +347,7 @@ def connect_node(
         # put the cascaded smatrix into c1. c2 is absorbed into c1.
         is_p1_probe = probe_netlist[c1][p1 - 1] is not None
         is_p2_probe = probe_netlist[c2][p2 - 1] is not None
-        row_order, cas_data = core.connect(s1, s2, (p1, p2), probes=(is_p1_probe, is_p2_probe), noise=noise)
+        row_order, cas_data = core.connect(s1, s2, (p1, p2), probes=(is_p1_probe, is_p2_probe))
         # update the component smatrix
         comp_data[c1] = cas_data
         comp_data.pop(c2)
@@ -374,7 +374,7 @@ def connect_node(
 
         is_p1_probe = probe_netlist[c1][p1 - 1] is not None
         is_p2_probe = probe_netlist[c1][p2 - 1] is not None
-        row_order, cas_data = core.connect_self(s1, p1, p2, probes=(is_p1_probe, is_p2_probe), noise=noise)
+        row_order, cas_data = core.connect_self(s1, (p1, p2), probes=(is_p1_probe, is_p2_probe))
         # update the component smatrix
         comp_data[c1] = cas_data
 
@@ -410,7 +410,7 @@ def connect_node(
             is_probe = [probe_netlist[c][p - 1] is not None for p in ports]
             probes = np.column_stack([np.zeros(len(ports)), is_probe])
 
-            row_order, s0 = core.connect(s0, comp_data[c], connections, probes=probes, noise=noise)
+            row_order, s0 = core.connect(s0, comp_data[c], connections, probes=probes)
 
             # update s0 netlist, remove the connected ports from s0 (first N), and add the remaining unconnected
             # ports from the component.

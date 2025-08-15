@@ -2,6 +2,8 @@ import numpy as np
 from pathlib import Path
 from np_struct import ldarray
 
+import numpy as np
+
 from scipy.interpolate import CubicSpline
 from . units import const, conv
 from . import core_func
@@ -13,182 +15,94 @@ def junction_sdata(frequency: np.ndarray, N: int) -> np.ndarray:
     return np.broadcast_to(sdata, (len(frequency), N, N)).copy()
     
 
-def connect(s1: dict, s2: dict, connections: list, probes: list = None, noise: bool = False):
+def connect(c1: dict, c2: dict, connections: list, probes: list = None):
     """
     Connect multiple ports between two components s1 and s2.
     Connections is of the form [(s1 port, s2 port), (s1 port, s2 port), ...].
     """
-    connections = np.atleast_2d(connections)
 
-    if probes is None:
-        probes = np.zeros(connections.shape)
+    connections = np.array(np.atleast_2d(connections), dtype=np.int32, order="C")
+
+    if probes is not None:
+        probes = np.array(np.atleast_2d(probes), dtype=np.int32, order="C")
     else:
-        probes = np.atleast_2d(probes)
+        probes = np.zeros_like(connections, dtype=np.int32, order="C")
 
-    s1_b, s1_a = s1["s"].shape[-2:]
-    s2_b, s2_a = s2["s"].shape[-2:]
+    n_connections = len(connections)
 
+    noise = "n" in c1.keys()
+    
+    f_len, s1_b, s1_a = c1["s"].shape
+    f_len, s2_b, s2_a = c2["s"].shape
+
+    a_len = s1_a + s2_a - (2 * n_connections)
     b_len = s1_b + s2_b
-    a_len = s1_a + s2_a
-    m1_shape = (s1["s"].shape[-3], b_len, b_len)
-    m2_shape = (s2["s"].shape[-3], b_len, a_len)
+    n_row = b_len - (2 * n_connections) + np.count_nonzero(probes)
 
-    # create first matrix, starts with just the identity matrix
-    m1 = np.identity(b_len, dtype="complex128")
-    m1 = np.broadcast_to(m1, m1_shape).copy()
+    row_order = np.zeros(n_row, dtype=np.int32, order="C")
 
-    # create second matrix, this is a "block" diagonal matrix with S1, S2 down the diagonal
-    m2 = np.zeros(m2_shape, dtype="complex128")
-    m2[..., :s1_b, :s1_a] = s1["s"]
-    m2[..., s1_b:, s1_a:] = s2["s"]
+    cas_s = np.zeros((f_len, n_row, a_len), dtype="complex128")
+    cas_n, n1, n2 = None, None, None
 
-    cnx_col = []
-
-    cas_rows = np.arange(s1_b + s2_b)
-    # probe row indices should always be located at the bottom of each s-matrix block
-    s1_probes = cas_rows[s1_a: s1_b]
-    s2_probes = cas_rows[s1_b + s2_a: s1_b + s2_b]
-    # external rows indices
-    s1_ext = cas_rows[: s1_a]
-    s2_ext = cas_rows[s1_b: s1_b + s2_a]
-    
-    # move columns from m2 to m1 based on the connections
-    for i, (p1, p2) in enumerate(connections):
-        # if p1 or p2 are greater than the external number of ports, they are internal ports that cannot be 
-        # connected.
-        if p1 > s1_a or p2 > s2_a:
-            raise ValueError(
-                f"Cannot connect internal port numbers {p1}, {p2} with shapes: {s1.shape}, {s2.shape}"
-            )
-
-        # list of connected columns in the second matrix, these will be zero columns after the connection
-        cnx_col += [p1-1, s1_a + p2-1]
-
-        # move connected columns from m2 into m1
-        m1[..., :s1_b, s1_b + p2-1] = -m2[..., :s1_b, p1-1]
-        m1[..., s1_b:, p1-1] = -m2[..., s1_b:, s1_a + p2-1]
-
-        # if p1 or p2 is a probe port, move the row index of the connected port to the probe list
-        if probes[i][0]:
-            s1_probes = np.append(s1_probes, s1_ext[p1 - 1])
-        if probes[i][1]:
-            s2_probes = np.append(s2_probes, s2_ext[p2 - 1])
-
-    # remove the connected row indices from the external port section
-    s1_ext = np.delete(s1_ext, connections[:, 0] - 1)
-    s2_ext = np.delete(s2_ext, connections[:, 1] - 1)
-
-    # matrix inversion on square matrix m1
-    m1_inv = np.linalg.inv(m1)
-
-    # remove the columns of all connected ports
-    m2 = np.delete(m2, cnx_col, -1)
-
-    # row indices of the cascaded matrix in the desired order. S1 ports, S2 ports, followed by probe ports.
-    row_order = np.concatenate([s1_ext, s2_ext, s1_probes, s2_probes])
-
-    cas_data = dict(s=np.einsum("...ij,...jk->...ik", m1_inv[:, row_order], m2, optimize="greedy"))
+    s1, s2 = np.ascontiguousarray(c1["s"]), np.ascontiguousarray(c2["s"]) 
 
     if noise:
-        # get the columns/rows of the square m1_inv matrix that correspond to external ports (drop probes)
-        rows_ext = np.concatenate([np.arange(s1_a), s1_b + np.arange(s2_a)])
-        m1_ext = m1_inv[:, rows_ext, :]
-        m1_ext = m1_ext[:, :, rows_ext]
-        # split columns between the first and second component
-        m1_1 = np.array(m1_ext[..., :s1_a], order="C")
-        m1_2 = np.array(m1_ext[..., s1_a:], order="C")
+        cas_n = np.zeros((f_len, a_len, a_len), dtype="complex128")
+        n1 = np.ascontiguousarray(c1["n"])
+        n2 = np.ascontiguousarray(c2["n"])
 
-        # get the correlation matrices for each component
-        c1, c2 = np.array(s1["n"], order="C"), np.array(s2["n"], order="C")
+    core_func.connect_other(s1, s2, n1, n2, connections, probes, row_order, cas_s, cas_n)
 
-        f_len = s1["s"].shape[0] # number of frequencies
-        # run extension function to compute cascaded data, result is written to cas_ndata
-        cas_ndata = np.zeros((f_len, a_len, a_len), dtype="complex128")
-        core_func.cascade_noise_data(m1_1, m1_2, c1, c2, cas_ndata)
+    cas = dict(s=cas_s)
 
-        # delete the connected rows/columns
-        cas_ndata = np.delete(cas_ndata, cnx_col, axis=-1)
-        cas_ndata = np.delete(cas_ndata, cnx_col, axis=-2)
+    if noise:
+        cas["n"] = cas_n
 
-        # save result to output dictionary
-        cas_data["n"] = cas_ndata
+    return row_order, cas
 
-    return row_order, cas_data
 
-def connect_self(s1: dict, p1: int, p2: int, probes: list = None, noise: bool = False):
+def connect_self(c1: dict, connections: list, probes: list = None):
     """
-    Connect two ports between the same component.
+    Connect multiple ports between two components s1 and s2.
+    Connections is of the form [(s1 port, s2 port), (s1 port, s2 port), ...].
     """
 
-    if probes is None:
-        probes = np.zeros(2)
+    connections = np.array(np.atleast_2d(connections), dtype=np.int32, order="C")
+
+    if probes is not None:
+        probes = np.array(np.atleast_2d(probes), dtype=np.int32, order="C")
     else:
-        probes = np.atleast_1d(probes)
+        probes = np.zeros_like(connections, dtype=np.int32, order="C")
 
-    s1_b, s1_a = s1["s"].shape[-2:]
-    m1_shape = (s1["s"].shape[-3], s1_b, s1_b)
+    n_connections = len(connections)
 
-    # if p1 or p2 are greater than the external number of ports, they are internal probes that cannot be 
-    # connected.
-    if p1 > s1_a or p2 > s1_a:
-        raise ValueError(
-            f"Cannot connect internal port numbers {p1}, {p2} with shape: {s1.shape}"
-        )
-
-    # create first matrix, starts with just the identity matrix
-    m1 = np.identity(s1_b, dtype="complex128")
-    m1 = np.broadcast_to(m1, m1_shape).copy()
-
-    # create second matrix
-    m2 = np.array(s1["s"])
-    # move columns from m2 to m1 based on the connections
-    m1[..., p2-1] = m1[..., :, p2-1] - m2[..., :s1_b, p1-1]
-    m1[..., p1-1] = m1[..., :, p1-1] - m2[..., :s1_b, p2-1]
-
-    m1_inv = np.linalg.inv(m1)
-
-    # remove the columns of all connected ports
-    cnx_col = [p1 - 1, p2 - 1]
-    m2 = np.delete(m2, cnx_col, -1)
+    noise = "n" in c1.keys()
     
-    cas_rows = np.arange(s1_b)
-    # probe row indices should always be located at the bottom of each s-matrix block
-    s1_ext = cas_rows[: s1_a]
-    s1_probes = cas_rows[s1_a: s1_b]
+    f_len, s1_b, s1_a = c1["s"].shape
 
-    # if p1 or p2 is a probe port, move the row index of the connected port to the probe list
-    if probes[0]:
-        s1_probes = np.append(s1_probes, s1_ext[p1 - 1])
-    if probes[1]:
-        s1_probes = np.append(s1_probes, s1_ext[p2 - 1])
+    a_len = s1_a - (2 * n_connections)
+    b_len = s1_b
 
-    # delete the connected ports from the external rows
-    s1_ext = np.delete(s1_ext, [(p1 - 1), (p2 -1)])
+    n_row = b_len - (2 * n_connections) + np.count_nonzero(probes)
+    row_order = np.zeros(n_row, dtype=np.int32, order="C")
 
-    # append the probe rows to the end of the external rows
-    row_order = np.concatenate([s1_ext, s1_probes])
-
-    cas_data = dict(s=np.einsum("...ij,...jk->...ik", m1_inv[:, row_order], m2, optimize="greedy"))
+    cas_s = np.zeros((f_len, n_row, a_len), dtype="complex128")
+    cas_n, n1 = None, None
 
     if noise:
-        # get rows corresponding to the external ports
-        m1_1 = np.array(m1_inv[:, :s1_a], order="C")
-        # get the correlation matrices for the component
-        c1 = np.array(s1["n"], order="C")
+        cas_n = np.zeros((f_len, a_len, a_len), dtype="complex128")
+        n1 = np.ascontiguousarray(c1["n"])
 
-        f_len = s1["s"].shape[-3] # number of frequencies
-        # run extension function to compute cascaded data, result is written to cas_ndata
-        cas_ndata = np.zeros((f_len, s1_a, s1_a), dtype="complex128")
-        core_func.cascade_self_noise_data(m1_1, c1, cas_ndata)
+    s1 = np.ascontiguousarray(c1["s"])
 
-        # remove connected rows/columns
-        cas_ndata = np.delete(cas_ndata, [(p1 - 1), (p2 -1)], axis=-1)
-        cas_ndata = np.delete(cas_ndata, [(p1 - 1), (p2 -1)], axis=-2)
+    core_func.connect_self(s1, n1, connections, probes, row_order, cas_s, cas_n)
 
-        # save result to output dictionary
-        cas_data["n"] = cas_ndata
+    cas = dict(s=cas_s)
 
-    return row_order, cas_data
+    if noise:
+        cas["n"] = cas_n
+
+    return row_order, cas
 
 
 def noise_params_to_ndata(np_data: np.ndarray, sdata: np.ndarray):
