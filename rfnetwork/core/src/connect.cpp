@@ -148,6 +148,7 @@ int connect_other(
             MatrixType C2 ((std::complex<double> *) (c2 + (f * c2_size)), s2_a, s2_a);
             MatrixType CAS_NDATA ((std::complex<double> *) (cas_n + (f * cas_n_size)), m2_a, m2_a);
 
+            // put the probe rows last, noise cascades only use the external rows, up to m2_a.
             M_EXT = P * M1;
 
             // after row-ordering, the M_EXT matrix will have the rows for external ports placed first, followed

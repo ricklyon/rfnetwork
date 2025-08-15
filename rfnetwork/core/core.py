@@ -49,7 +49,7 @@ def connect(c1: dict, c2: dict, connections: list, probes: list = None):
     if noise:
         cas_n = np.zeros((f_len, a_len, a_len), dtype="complex128")
         n1 = np.ascontiguousarray(c1["n"])
-        n2 = np.ascontiguousarray(c1["n"])
+        n2 = np.ascontiguousarray(c2["n"])
 
     core_func.connect_other(s1, s2, n1, n2, connections, probes, row_order, cas_s, cas_n)
 
