@@ -21,148 +21,9 @@ typedef Eigen::Map<Eigen::Matrix<std::complex<double>, Eigen::Dynamic, Eigen::Dy
 typedef Eigen::Map<Eigen::Matrix<int, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> MatrixIntType;
 
 
-// int cascade_sdata(
-//     char * s1,
-//     char * s2,
-//     char * connections,
-//     char * probes,
-//     char * m1,
-//     char * m2,
-//     char * row_order,
-//     int * n_row,
-//     int f_len, int s1_b, int s1_a, int s2_b, int s2_a, int n_connections
-// )
-// {
-//     connection_matrix(
-//         s1, s2, connections, probes, m1, m2, row_order, n_row, f_len, s1_b, s1_a, s2_b, s2_a, n_connections
-// );
 
-//     int m_b = s1_b + s2_b;
-//     int m2_a = s1_a + s2_a - (2 * n_connections);
 
-//     int itemsize = sizeof(std::complex<double>);
-//     // size of each frequency matrix in m1
-//     int m1_size = (m_b * m_b * itemsize);
-//     // size of each frequency matrix in m2
-//     int m2_size = (m_b * m2_a * itemsize);
-
-//     // size of each frequency matrix in s1
-//     int s1_size = (s1_b * s1_a * itemsize);
-//     // size of each frequency matrix in s2
-//     int s2_size = (s2_b * s2_a * itemsize);
-
-//     for (int f = 0; f < f_len; f++)
-//     {
-//         MatrixType M1 ((std::complex<double> *) (m1 + (f * m1_size)), *n_row, m_b);
-//         MatrixType M2 ((std::complex<double> *) (m2 + (f * m2_size)), m_b, m2_a);
-        
-//     }
-// }
-
-int cascaded_row_order(
-    char * connections,
-    char * probes,
-    char * row_order,
-    int s1_b, int s1_a, int s2_b, int s2_a, int n_connections
-)
-{
-    int m_b = s1_b + s2_b;
-    int m2_a = s1_a + s2_a - (2 * n_connections);
-
-    // number of existing probes on component data
-    int s1_probe_n = s1_b - s1_a;
-    int s2_probe_n = s2_b - s2_a;
-
-    int p1, p2;
-
-    MatrixIntType CONN ((int *) connections, n_connections, 2);
-    MatrixIntType PROBES ((int *) probes, n_connections, 2);
-    MatrixIntType ROW_ORDER ((int *) row_order, 1, m_b);
-
-    ROW_ORDER.setConstant(-1);
-
-    // Walk through each row of the first component and place unconnected rows that are external ports
-    int ext_r = 0;
-    for (int r = 0; r < s1_a; r++)
-    {
-        // row is an external port (not a connected port)
-        if ((CONN.col(0).array() != (r + 1)).all())
-        {
-            ROW_ORDER(0, ext_r) = r;
-            ext_r++;
-        }
-    }
-
-    // Walk through each row of the second component and place unconnected rows
-    for (int r = 0; r < s2_a; r++)
-    {
-        // row is an external port (not a connected port)
-        if ((CONN.col(1).array() != (r + 1)).all())
-        {
-            ROW_ORDER(0, ext_r) = r + s1_b;
-            ext_r++;
-        }
-    }
-
-    // Put the existing probes after the external port rows.
-    int pb_r = 0;
-    for (int r = s1_a; r < s1_b; r++)
-    {
-        ROW_ORDER(0, m2_a + pb_r) = r;
-        pb_r++;
-    }
-    // place probes for the second component after the first component
-    for (int r = s2_a; r < s2_b; r++)
-    {
-        ROW_ORDER(0, m2_a + pb_r) = r + s1_b;
-        pb_r++;
-    }
-
-    // place connected rows that are assigned as probes from the first component
-    for (int n = 0; n < n_connections; n++)
-    {
-        p1 = CONN(n, 0);
-
-        // if p1 or p2 are greater than the external number of ports, they are internal ports that cannot be 
-        // connected.
-        if (p1 > s1_a)
-        {
-            throw std::runtime_error("Connection ports must be less than the number of external ports of s1.");
-        }
-
-        // connection from component 1 is assigned as a probe, add to the row assignment list.
-        if (PROBES(n, 0))
-        {
-            ROW_ORDER(0, m2_a + pb_r) = p1 - 1;
-            pb_r++;
-        }
-    
-    }
-
-    // place connected rows that are assigned as probes from the second component
-    for (int n = 0; n < n_connections; n++)
-    {
-        p2 = CONN(n, 1);
-    
-        // if p1 or p2 are greater than the external number of ports, they are internal ports that cannot be 
-        // connected.
-        if (p2 > s2_a)
-        {
-            throw std::runtime_error("Connection ports must be less than the number of external ports of s2.");
-        }
-        
-        // connection from component 2 is assigned as a probe, add to the row assignment list.
-        if (PROBES(n, 1))
-        {   
-            ROW_ORDER(0, m2_a + pb_r) = s1_b + (p2 - 1);
-            pb_r++;
-        }
-    }
-
-    return pb_r + ext_r;
-}
-
-int cascade_data(
+int connect_other(
     char * s1,
     char * s2,
     char * c1,
@@ -296,35 +157,131 @@ int cascade_data(
                     CAS_NDATA(i, j) = t1 + t2;
                 }
             }
-
-
-            // for (int i = 0; i < m_b; i++)
-            // {
-            //     for (int j = 0; j < m_b; j++)
-            //     {
-            //         t1 = (M_EXT.row(i).segment(0, s1_a).transpose() * M_EXT.row(j).segment(s1_a, s1_a).conjugate()).cwiseProduct(C1).sum();
-            //         t2 = (M_EXT.row(i).segment(s1_b, s2_a).transpose() * M_EXT.row(j).segment(s1_b, s2_a).conjugate()).cwiseProduct(C2).sum();
-
-            //         CAS_NDATA(i, j) = t1 + t2;
-            //     }
-            // }
-
-    // #     # get the columns/rows of the square m1_inv matrix that correspond to external ports (drop probes)
-    // #     rows_ext = np.concatenate([np.arange(s1_a), s1_b + np.arange(s2_a)])
-    // #     m1_ext = m1_inv[:, rows_ext, :]
-    // #     m1_ext = m1_ext[:, :, rows_ext]
-    // #     # split columns between the first and second component
-    // #     m1_1 = np.array(m1_ext[..., :s1_a], order="C")
-    // #     m1_2 = np.array(m1_ext[..., s1_a:], order="C")
-
-    //     # delete the connected rows/columns
-    //     cas_ndata = np.delete(cas_ndata, cnx_col, axis=-1)
-    //     cas_ndata = np.delete(cas_ndata, cnx_col, axis=-2)
-
         }
     }
+
     return 0;
 }
+
+int connect_self(
+    char * s1,
+    char * c1,
+    char * connections,
+    char * probes,
+    char * row_order,
+    char * cas_s,
+    char * cas_n,
+    int n_row, int f_len, int s1_b, int s1_a, int n_connections
+)
+{
+
+    int m2_a = s1_a - (2 * n_connections);
+
+    int itemsize = sizeof(std::complex<double>);
+
+    // size of each frequency matrix in s1
+    int s1_size = (s1_b * s1_a * itemsize);
+
+    // size of each frequency matrix in cascaded sdata
+    int cas_s_size = (n_row * m2_a * itemsize);
+    int cas_n_size = (m2_a * m2_a * itemsize);
+
+    // size of c1, c2 frequency matrix
+    int c1_size = (s1_a * s1_a * itemsize);
+
+    // number of existing probes on component data
+    int s1_probe_n = s1_b - s1_a;
+
+    int p1, p2;
+
+    MatrixIntType CONN ((int *) connections, n_connections, 2);
+    MatrixIntType PROBES ((int *) probes, n_connections, 2);
+    MatrixIntType ROW_ORDER ((int *) row_order, 1, n_row);
+
+    Eigen::Matrix<std::complex<double>, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> M1(s1_b, s1_b);
+    Eigen::Matrix<std::complex<double>, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> M2(s1_b, m2_a);
+
+    // create permutation matrix that will reorder the rows of M1 after taking its inverse
+    Eigen::Matrix<std::complex<double>, Eigen::Dynamic, Eigen::Dynamic> P(n_row, s1_b);
+    // M matrix with probe rows and columns removed, and row-ordered
+    Eigen::Matrix<std::complex<double>, Eigen::Dynamic, Eigen::Dynamic> M_EXT(m2_a, m2_a);
+
+    std::complex<double> t1;
+    std::complex<double> t2;
+
+
+    P.setConstant(0);
+    
+    for (int r = 0; r < n_row; r++)
+    {
+        P(r, ROW_ORDER(0, r)) = 1;
+    }
+
+    for (int f = 0; f < f_len; f++)
+    {   
+        MatrixType S1 ((std::complex<double> *) (s1 + (f * s1_size)), s1_b, s1_a);
+        MatrixType CAS_SDATA ((std::complex<double> *) (cas_s + (f * cas_s_size)), n_row, m2_a);
+
+        // create first matrix, starts with just the identity matrix
+        M1.setIdentity(); 
+        M2.setConstant(0);
+
+        // move columns from s1 and s2 to m1 based on the connections
+        // # move columns from m2 to m1 based on the connections
+        // m1[..., p2-1] = m1[..., :, p2-1] - m2[..., :s1_b, p1-1]
+        // m1[..., p1-1] = m1[..., :, p1-1] - m2[..., :s1_b, p2-1]
+
+        for (int n = 0; n < n_connections; n++)
+        {
+            p1 = CONN(n, 0);
+            p2 = CONN(n, 1);
+
+            // populate connected columns from s1/s2 into M1
+            M1.col(p2 - 1) -= S1.col(p1 - 1);
+            M1.col(p1 - 1) -= S1.col(p2 - 1);
+        }
+
+        // take the inverse
+        M1 = M1.inverse();
+    
+        // populate columns in M2 with the unconnected columns from S1
+        int m2_col = 0;
+        for (int i = 0; i < s1_a; i++)
+        {   
+            // if port number does not appear in the connections matrix for component 1, add the S1 column
+            // to M2.
+            if (((CONN.col(0).array() != (i + 1)).all()) && ((CONN.col(1).array() != (i + 1)).all()) )
+            {
+                M2.col(m2_col) = S1.col(i);
+                m2_col++;
+            }
+        }
+
+        CAS_SDATA = P * M1 * M2;
+
+        if (cas_n != NULL)
+        {
+            MatrixType C1 ((std::complex<double> *) (c1 + (f * c1_size)), s1_a, s1_a);
+            MatrixType CAS_NDATA ((std::complex<double> *) (cas_n + (f * cas_n_size)), m2_a, m2_a);
+
+            M_EXT = P * M1;
+
+            // after row-ordering, the M_EXT matrix will have the rows for external ports placed first, followed
+            // by the probes. Noise cascades do not support probes, so only build the cascade matrix for the external
+            // ports.
+            for (int i = 0; i < m2_a; i++)
+            {
+                for (int j = 0; j < m2_a; j++)
+                {
+                    CAS_NDATA(i, j)  = (M_EXT.row(i).segment(0, s1_a).transpose() * M_EXT.row(j).segment(0, s1_a).conjugate()).cwiseProduct(C1).sum();
+                }
+            }
+        }
+    }
+
+    return 0;
+}
+
 
 int cascade_ndata(
     char * m1, char * m2, char * c1, char * c2, char * out, int f_len, int m1_a, int m2_a
@@ -394,4 +351,108 @@ int cascade_self_ndata(
     }
 
     return 0;
+}
+
+
+int cascaded_row_order(
+    char * connections,
+    char * probes,
+    char * row_order,
+    int s1_b, int s1_a, int s2_b, int s2_a, int n_connections
+)
+{
+    int m_b = s1_b + s2_b;
+    int m2_a = s1_a + s2_a - (2 * n_connections);
+
+    // number of existing probes on component data
+    int s1_probe_n = s1_b - s1_a;
+    int s2_probe_n = s2_b - s2_a;
+
+    int p1, p2;
+
+    MatrixIntType CONN ((int *) connections, n_connections, 2);
+    MatrixIntType PROBES ((int *) probes, n_connections, 2);
+    MatrixIntType ROW_ORDER ((int *) row_order, 1, m_b);
+
+    ROW_ORDER.setConstant(-1);
+
+    // Walk through each row of the first component and place unconnected rows that are external ports
+    int ext_r = 0;
+    for (int r = 0; r < s1_a; r++)
+    {
+        // row is an external port (not a connected port)
+        if ((CONN.col(0).array() != (r + 1)).all())
+        {
+            ROW_ORDER(0, ext_r) = r;
+            ext_r++;
+        }
+    }
+
+    // Walk through each row of the second component and place unconnected rows
+    for (int r = 0; r < s2_a; r++)
+    {
+        // row is an external port (not a connected port)
+        if ((CONN.col(1).array() != (r + 1)).all())
+        {
+            ROW_ORDER(0, ext_r) = r + s1_b;
+            ext_r++;
+        }
+    }
+
+    // Put the existing probes after the external port rows.
+    int pb_r = 0;
+    for (int r = s1_a; r < s1_b; r++)
+    {
+        ROW_ORDER(0, m2_a + pb_r) = r;
+        pb_r++;
+    }
+    // place probes for the second component after the first component
+    for (int r = s2_a; r < s2_b; r++)
+    {
+        ROW_ORDER(0, m2_a + pb_r) = r + s1_b;
+        pb_r++;
+    }
+
+    // place connected rows that are assigned as probes from the first component
+    for (int n = 0; n < n_connections; n++)
+    {
+        p1 = CONN(n, 0);
+
+        // if p1 or p2 are greater than the external number of ports, they are internal ports that cannot be 
+        // connected.
+        if (p1 > s1_a)
+        {
+            throw std::runtime_error("Connection ports must be less than the number of external ports of s1.");
+        }
+
+        // connection from component 1 is assigned as a probe, add to the row assignment list.
+        if (PROBES(n, 0))
+        {
+            ROW_ORDER(0, m2_a + pb_r) = p1 - 1;
+            pb_r++;
+        }
+    
+    }
+
+    // place connected rows that are assigned as probes from the second component
+    for (int n = 0; n < n_connections; n++)
+    {
+        p2 = CONN(n, 1);
+    
+        // if p1 or p2 are greater than the external number of ports, they are internal ports that cannot be 
+        // connected.
+        if (p2 > s2_a)
+        {
+            throw std::runtime_error("Connection ports must be less than the number of external ports of s2.");
+        }
+        
+        // connection from component 2 is assigned as a probe, add to the row assignment list.
+        if (PROBES(n, 1))
+        {   
+            ROW_ORDER(0, m2_a + pb_r) = s1_b + (p2 - 1);
+            pb_r++;
+        }
+    }
+
+    return pb_r + ext_r;
 }

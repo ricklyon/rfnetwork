@@ -43,7 +43,7 @@ void array_data_shape(PyArrayObject* array, int * shape)
 
 }
 
-static PyObject * cascade_data_bind(PyObject *self, PyObject *args)
+static PyObject * connect_other_bind(PyObject *self, PyObject *args)
 {
     PyObject * s1;
     PyObject * s2;
@@ -125,7 +125,7 @@ static PyObject * cascade_data_bind(PyObject *self, PyObject *args)
         throw std::runtime_error("Invalid data array. Unequal sizes in first dimension.");
     }
 
-    cascade_data(
+    connect_other(
         (char * ) PyArray_DATA(s1_array),
         (char * ) PyArray_DATA(s2_array),
         c1_data,
@@ -136,6 +136,84 @@ static PyObject * cascade_data_bind(PyObject *self, PyObject *args)
         (char * ) PyArray_DATA(cas_s_array),
         cas_n_data,
         n_row, f_len, s1_b, s1_a, s2_b, s2_a, n_connections
+    );
+
+    return PyLong_FromLong(0);
+}
+
+static PyObject * connect_self_bind(PyObject *self, PyObject *args)
+{
+    PyObject * s1;
+    PyObject * c1;
+    PyObject * connections;
+    PyObject * probes;
+    PyObject * row_order;
+    PyObject * cas_s;
+    PyObject * cas_n;
+
+    if (!PyArg_ParseTuple(args, "OOOOOOO", &s1, &c1, &connections, &probes, &row_order, &cas_s, &cas_n))
+        return PyLong_FromLong(1);
+
+    int s1_shape[DATA_NDIM];
+    int cas_s_shape[DATA_NDIM];
+
+    int n_connections;
+    int n_row;
+
+    PyArrayObject* s1_array = (PyArrayObject*) s1;
+    array_data_shape(s1_array, s1_shape);
+
+    PyArrayObject* cas_s_array = (PyArrayObject*) cas_s;
+    array_data_shape(cas_s_array, cas_s_shape);
+
+    PyArrayObject* connections_array = (PyArrayObject*) connections;
+    n_connections = (int) PyArray_SHAPE(connections_array)[0];
+
+    PyArrayObject* row_order_array = (PyArrayObject*) row_order;
+    n_row = (int) PyArray_SHAPE(row_order_array)[0];
+
+    PyArrayObject* probes_array = (PyArrayObject*) probes;
+
+    int f_len = s1_shape[0];
+
+    int s1_b = s1_shape[1];
+    int s1_a = s1_shape[2];
+
+    // noise data
+    char * c1_data = NULL;
+    char * cas_n_data = NULL;
+
+    if (cas_n != Py_None) 
+    {   
+        std::cout << "Noise Data Self\n";
+        int c1_shape[DATA_NDIM];
+        int cas_n_shape[DATA_NDIM];
+
+        PyArrayObject* c1_array = (PyArrayObject*) c1;
+        array_data_shape(c1_array, c1_shape);
+        c1_data = (char * ) PyArray_DATA(c1_array);
+
+        PyArrayObject* cas_n_array = (PyArrayObject*) cas_n;
+        array_data_shape(cas_n_array, cas_n_shape);
+        cas_n_data = (char * ) PyArray_DATA(cas_n_array);
+    }
+
+    // error checking
+    // first dimension (frequency) must all be the same size
+    if ((cas_s_shape[0] != f_len))
+    {
+        throw std::runtime_error("Invalid data array. Unequal sizes in first dimension.");
+    }
+
+    connect_self(
+        (char * ) PyArray_DATA(s1_array),
+        c1_data,
+        (char * ) PyArray_DATA(connections_array),
+        (char * ) PyArray_DATA(probes_array),
+        (char * ) PyArray_DATA(row_order_array),
+        (char * ) PyArray_DATA(cas_s_array),
+        cas_n_data,
+        n_row, f_len, s1_b, s1_a, n_connections
     );
 
     return PyLong_FromLong(0);
@@ -360,7 +438,8 @@ static PyObject * cascade_self_ndata_bind(PyObject *self, PyObject *args)
 
 
 static PyMethodDef moduleMethods[] = {
-    {"cascade_data",  cascade_data_bind, METH_VARARGS, ""},
+    {"connect_other",  connect_other_bind, METH_VARARGS, ""},
+    {"connect_self",  connect_self_bind, METH_VARARGS, ""},
     {"cascade_ndata",  cascade_ndata_bind, METH_VARARGS, ""},
     {"cascade_self_ndata",  cascade_self_ndata_bind, METH_VARARGS, ""},
     {NULL, NULL, 0, NULL}        /* Sentinel */

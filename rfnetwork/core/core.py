@@ -125,7 +125,7 @@ def connection_matrix_py(s1: np.ndarray, s2: np.ndarray, connections: np.ndarray
     return m1_inv[:, row_order], m2, row_order
 
     
-def connect(s1: dict, s2: dict, connections: list, probes: list = None, noise: bool = False):
+def connect_py(s1: dict, s2: dict, connections: list, probes: list = None, noise: bool = False):
     """
     Connect multiple ports between two components s1 and s2.
     Connections is of the form [(s1 port, s2 port), (s1 port, s2 port), ...].
@@ -227,7 +227,7 @@ def connect(s1: dict, s2: dict, connections: list, probes: list = None, noise: b
 
     return row_order, cas_data
 
-def connect_self(s1: dict, p1: int, p2: int, probes: list = None, noise: bool = False):
+def connect_self_py(s1: dict, p1: int, p2: int, probes: list = None, noise: bool = False):
     """
     Connect two ports between the same component.
     """
@@ -282,23 +282,23 @@ def connect_self(s1: dict, p1: int, p2: int, probes: list = None, noise: bool = 
 
     cas_data = dict(s=np.einsum("...ij,...jk->...ik", m1_inv[:, row_order], m2, optimize="greedy"))
 
-    # if noise:
-    #     # get rows corresponding to the external ports
-    #     m1_1 = np.array(m1_inv[:, :s1_a], order="C")
-    #     # get the correlation matrices for the component
-    #     c1 = np.array(s1["n"], order="C")
+    if noise:
+        # get rows corresponding to the external ports
+        m1_1 = np.array(m1_inv[:, :s1_a], order="C")
+        # get the correlation matrices for the component
+        c1 = np.array(s1["n"], order="C")
 
-    #     f_len = s1["s"].shape[-3] # number of frequencies
-    #     # run extension function to compute cascaded data, result is written to cas_ndata
-    #     cas_ndata = np.zeros((f_len, s1_a, s1_a), dtype="complex128")
-    #     core_func.cascade_self_noise_data(m1_1, c1, cas_ndata)
+        f_len = s1["s"].shape[-3] # number of frequencies
+        # run extension function to compute cascaded data, result is written to cas_ndata
+        cas_ndata = np.zeros((f_len, s1_a, s1_a), dtype="complex128")
+        core_func.cascade_self_ndata(m1_1, c1, cas_ndata)
 
-    #     # remove connected rows/columns
-    #     cas_ndata = np.delete(cas_ndata, [(p1 - 1), (p2 -1)], axis=-1)
-    #     cas_ndata = np.delete(cas_ndata, [(p1 - 1), (p2 -1)], axis=-2)
+        # remove connected rows/columns
+        cas_ndata = np.delete(cas_ndata, [(p1 - 1), (p2 -1)], axis=-1)
+        cas_ndata = np.delete(cas_ndata, [(p1 - 1), (p2 -1)], axis=-2)
 
-    #     # save result to output dictionary
-    #     cas_data["n"] = cas_ndata
+        # save result to output dictionary
+        cas_data["n"] = cas_ndata
 
     return row_order, cas_data
 

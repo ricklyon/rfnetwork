@@ -9,7 +9,7 @@ int cascade_self_ndata(
     char * m1, char * c1, char * out, int flen, int m1_len
 );
 
-int cascade_data(
+int connect_other(
     char * s1,
     char * s2,
     char * c1,
@@ -20,6 +20,17 @@ int cascade_data(
     char * cas_sdata,
     char * cas_ndata,
     int n_row, int f_len, int s1_b, int s1_a, int s2_b, int s2_a, int n_connections
+);
+
+int connect_self(
+    char * s1,
+    char * c1,
+    char * connections,
+    char * probes,
+    char * row_order,
+    char * cas_s,
+    char * cas_n,
+    int n_row, int f_len, int s1_b, int s1_a, int n_connections
 );
 
 #endif /* CONNECT_H */
