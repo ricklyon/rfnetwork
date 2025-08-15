@@ -492,13 +492,12 @@ int self_cascaded_row_order(
     MatrixIntType PROBES ((int *) probes, n_connections, 2);
     MatrixIntType ROW_ORDER ((int *) row_order, 1, n_row);
 
-
     // Walk through each row of the first component and place unconnected rows that are external ports
     int ext_r = 0;
     for (int r = 0; r < s1_a; r++)
     {
         // row is an external port (not a connected port)
-        if ((CONN.col(0).array() != (r + 1)).all())
+        if (((CONN.col(0).array() != (r + 1)).all()) && ((CONN.col(1).array() != (r + 1)).all()) )
         {
             ROW_ORDER(0, ext_r) = r;
             ext_r++;
@@ -517,10 +516,11 @@ int self_cascaded_row_order(
     for (int n = 0; n < n_connections; n++)
     {
         p1 = CONN(n, 0);
+        p2 = CONN(n, 0);
 
         // if p1 or p2 are greater than the external number of ports, they are internal ports that cannot be 
         // connected.
-        if (p1 > s1_a)
+        if ((p1 > s1_a) || ( p2 > s1_a))
         {
             throw std::runtime_error("Connection ports must be less than the number of external ports of s1.");
         }
@@ -529,6 +529,12 @@ int self_cascaded_row_order(
         if (PROBES(n, 0))
         {
             ROW_ORDER(0, m2_a + pb_r) = p1 - 1;
+            pb_r++;
+        }
+
+        if (PROBES(n, 1))
+        {
+            ROW_ORDER(0, m2_a + pb_r) = p2 - 1;
             pb_r++;
         }
     
