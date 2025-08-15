@@ -36,7 +36,6 @@ int connect_other(
     int n_row, int f_len, int s1_b, int s1_a, int s2_b, int s2_a, int n_connections
 )
 {
-
     int m_b = s1_b + s2_b;
     int m2_a = s1_a + s2_a - (2 * n_connections);
 
@@ -80,7 +79,7 @@ int connect_other(
         connections,
         probes,
         row_order,
-        s1_b, s1_a, s2_b, s2_a, n_connections
+        n_row, s1_b, s1_a, s2_b, s2_a, n_connections
     );
 
     P.setConstant(0);
@@ -220,7 +219,7 @@ int connect_self(
         connections,
         probes,
         row_order,
-        s1_b, s1_a, n_connections
+        n_row, s1_b, s1_a, n_connections
     );
 
     P.setConstant(0);
@@ -371,7 +370,7 @@ int cascaded_row_order(
     char * connections,
     char * probes,
     char * row_order,
-    int s1_b, int s1_a, int s2_b, int s2_a, int n_connections
+    int n_row, int s1_b, int s1_a, int s2_b, int s2_a, int n_connections
 )
 {
     int m_b = s1_b + s2_b;
@@ -385,9 +384,7 @@ int cascaded_row_order(
 
     MatrixIntType CONN ((int *) connections, n_connections, 2);
     MatrixIntType PROBES ((int *) probes, n_connections, 2);
-    MatrixIntType ROW_ORDER ((int *) row_order, 1, m_b);
-
-    ROW_ORDER.setConstant(-1);
+    MatrixIntType ROW_ORDER ((int *) row_order, 1, n_row);
 
     // Walk through each row of the first component and place unconnected rows that are external ports
     int ext_r = 0;
@@ -467,7 +464,12 @@ int cascaded_row_order(
         }
     }
 
-    return pb_r + ext_r;
+    if ((pb_r + ext_r) != n_row)
+    {
+        throw std::runtime_error("cascaded_row_order: Row order vector has invalid number of rows.");
+    }
+
+    return 0;
 }
 
 
@@ -475,7 +477,7 @@ int self_cascaded_row_order(
     char * connections,
     char * probes,
     char * row_order,
-    int s1_b, int s1_a, int n_connections
+    int n_row, int s1_b, int s1_a, int n_connections
 )
 {
     int m_b = s1_b;
@@ -488,7 +490,7 @@ int self_cascaded_row_order(
 
     MatrixIntType CONN ((int *) connections, n_connections, 2);
     MatrixIntType PROBES ((int *) probes, n_connections, 2);
-    MatrixIntType ROW_ORDER ((int *) row_order, 1, m_b);
+    MatrixIntType ROW_ORDER ((int *) row_order, 1, n_row);
 
     ROW_ORDER.setConstant(-1);
 
@@ -533,5 +535,10 @@ int self_cascaded_row_order(
     
     }
 
-    return pb_r + ext_r;
+    if ((pb_r + ext_r) != n_row)
+    {
+        throw std::runtime_error("self_cascaded_row_order: Row order vector has invalid number of rows.");
+    }
+
+    return 0;
 }

@@ -100,7 +100,6 @@ static PyObject * connect_other_bind(PyObject *self, PyObject *args)
 
     if (cas_n != Py_None) 
     {   
-        std::cout << "Noise Data\n";
         int c1_shape[DATA_NDIM];
         int c2_shape[DATA_NDIM];
         int cas_n_shape[DATA_NDIM];
