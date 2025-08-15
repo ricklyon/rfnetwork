@@ -76,6 +76,13 @@ int connect_other(
     std::complex<double> t2;
 
 
+    cascaded_row_order(
+        connections,
+        probes,
+        row_order,
+        s1_b, s1_a, s2_b, s2_a, n_connections
+    );
+
     P.setConstant(0);
     
     for (int r = 0; r < n_row; r++)
@@ -208,7 +215,13 @@ int connect_self(
 
     std::complex<double> t1;
     std::complex<double> t2;
-
+        
+    self_cascaded_row_order(
+        connections,
+        probes,
+        row_order,
+        s1_b, s1_a, n_connections
+    );
 
     P.setConstant(0);
     
@@ -452,6 +465,72 @@ int cascaded_row_order(
             ROW_ORDER(0, m2_a + pb_r) = s1_b + (p2 - 1);
             pb_r++;
         }
+    }
+
+    return pb_r + ext_r;
+}
+
+
+int self_cascaded_row_order(
+    char * connections,
+    char * probes,
+    char * row_order,
+    int s1_b, int s1_a, int n_connections
+)
+{
+    int m_b = s1_b;
+    int m2_a = s1_a - (2 * n_connections);
+
+    // number of existing probes on component data
+    int s1_probe_n = s1_b - s1_a;
+
+    int p1, p2;
+
+    MatrixIntType CONN ((int *) connections, n_connections, 2);
+    MatrixIntType PROBES ((int *) probes, n_connections, 2);
+    MatrixIntType ROW_ORDER ((int *) row_order, 1, m_b);
+
+    ROW_ORDER.setConstant(-1);
+
+    // Walk through each row of the first component and place unconnected rows that are external ports
+    int ext_r = 0;
+    for (int r = 0; r < s1_a; r++)
+    {
+        // row is an external port (not a connected port)
+        if ((CONN.col(0).array() != (r + 1)).all())
+        {
+            ROW_ORDER(0, ext_r) = r;
+            ext_r++;
+        }
+    }
+
+    // Put the existing probes after the external port rows.
+    int pb_r = 0;
+    for (int r = s1_a; r < s1_b; r++)
+    {
+        ROW_ORDER(0, m2_a + pb_r) = r;
+        pb_r++;
+    }
+
+    // place connected rows that are assigned as probes from the first component
+    for (int n = 0; n < n_connections; n++)
+    {
+        p1 = CONN(n, 0);
+
+        // if p1 or p2 are greater than the external number of ports, they are internal ports that cannot be 
+        // connected.
+        if (p1 > s1_a)
+        {
+            throw std::runtime_error("Connection ports must be less than the number of external ports of s1.");
+        }
+
+        // connection from component 1 is assigned as a probe, add to the row assignment list.
+        if (PROBES(n, 0))
+        {
+            ROW_ORDER(0, m2_a + pb_r) = p1 - 1;
+            pb_r++;
+        }
+    
     }
 
     return pb_r + ext_r;

@@ -33,4 +33,18 @@ int connect_self(
     int n_row, int f_len, int s1_b, int s1_a, int n_connections
 );
 
+int cascaded_row_order(
+    char * connections,
+    char * probes,
+    char * row_order,
+    int s1_b, int s1_a, int s2_b, int s2_a, int n_connections
+);
+
+int self_cascaded_row_order(
+    char * connections,
+    char * probes,
+    char * row_order,
+    int s1_b, int s1_a, int n_connections
+);
+
 #endif /* CONNECT_H */
