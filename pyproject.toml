@@ -16,7 +16,7 @@ classifiers = [
 ]
 keywords = ["rf", "microwave", "network", "noise"]
 dependencies = [
-    "numpy>=2.0.0", "matplotlib", "scipy", "np-struct>=0.0.2", "mpl-markers"
+    "numpy>=2.0.0", "matplotlib", "scipy", "np-struct>=0.0.2", "mpl-markers", "pyside6"
 ]
 requires-python = ">=3.9"
 
@@ -27,7 +27,12 @@ dev = [
     "parameterized", 
     "ipykernel", 
     "schemdraw",
-    "sphinx-autodoc-typehints",
+]
+
+docs = [
+    "sphinx",
+    "sphinx-rtd-theme==3.0.2",
+    "sphinx-autodoc-typehints==3.2.0",
     "sphinx-gallery==0.19.0"
 ]
 

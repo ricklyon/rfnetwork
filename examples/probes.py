@@ -1,5 +1,5 @@
 """
-Volgate Probes
+Network Probes
 ==============
 
 This examples demonstrates how internal probes can be used to tune an amplifier. The amplifier used is a 8W UHF FET 
