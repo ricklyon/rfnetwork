@@ -27,6 +27,6 @@ Features
 Documentation
 =============
 
-Documentation is hosted at `_docs`_.
+Documentation can be found here,
 
-.. _docs: https://rfnetwork.readthedocs.io/en/latest/
+https://rfnetwork.readthedocs.io/en/latest/

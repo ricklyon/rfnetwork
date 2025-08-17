@@ -41,6 +41,7 @@ sphinx_gallery_conf = {
     'ignore_pattern': r'interactive_.*\.py',
     'example_extensions': {'.py'},
     'download_all_examples': False,
+    'line_numbers': True
 }
 
 # Make autosummary generate stub pages
