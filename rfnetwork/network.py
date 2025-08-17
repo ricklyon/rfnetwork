@@ -226,8 +226,8 @@ class Network(Component, metaclass=NetworkMeta):
             Probe paths to plot. Each path must be a 2-tuple of probe name or network ports. 
             Valid probe names of the network can be found by calling ``evaluate`` and looking at the coords of the "b" 
             dimension. The voltage wave leaving the first probe is referenced to the wave leaving the
-            second probe (or network port). For example, ("ms2|1", "c2|2") would plot the ratio of the voltage wave 
-            leaving port 1 of `ms2` to the voltage wave leaving port 2 of `c2`. 
+            second probe (or network port). For example, ``("ms2|1", "c2|2")`` would plot the ratio of the voltage wave 
+            leaving port 1 of ``ms2`` to the voltage wave leaving port 2 of `c2`. 
         input_port : int, default: 1
             Sets which network ports is excited for all paths.
             Probes measure a different voltage wave depending on which port of the network is excited with a signal.

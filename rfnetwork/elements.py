@@ -41,7 +41,7 @@ class Load(Component):
 
     def __init__(self, value: float = 50):
         """
-        Parameters:
+        Parameters
         ----------
         value: float, default: 50
             real or complex impedance [ohms]. Defaults to 50 ohms
@@ -214,7 +214,7 @@ class Inductor_nH(LumpedElement):
 class Attenuator(Component):
     def __init__(self, attenuation_db: float):
         """
-        Parameters:
+        Parameters
         ----------
         attenuation_db: float
             attenuation in dB
@@ -242,7 +242,7 @@ class PiAttenuator(Network):
 
     def __init__(self, attenuation_db: float, r0: float = 50):
         """
-        Parameters:
+        Parameters
         ----------
         attenuation_db: float
             attenuation in dB

@@ -13,6 +13,7 @@ import matplotlib.pyplot as plt
 # %%
 # Bandstop Filter
 # ----------------
+# sphinx_gallery_thumbnail_number = -1
 #
 
 bpf = rfn.elements.BandStopFilter(fc1=70e6, fc2=150e6, n=3)
