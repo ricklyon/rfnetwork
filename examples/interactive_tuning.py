@@ -1,8 +1,8 @@
 """
-"This" is my example-script
-===========================
+Interactive Tuning
+============
 
-This example doesn't do much, it just makes a simple plot
+Setup an interactive tuner for the amplifier matching network.
 """
 
 import rfnetwork as rfn
@@ -10,14 +10,10 @@ from pathlib import Path
 import numpy as np
 import matplotlib.pyplot as plt
 import mpl_markers as mplm
-import sys
-from time import time
-
-from PySide6.QtWidgets import (QApplication, QWidget, QLineEdit, QSlider, QGridLayout, QLabel, QVBoxLayout)
 
 np.set_printoptions(suppress=True, threshold=12)
 
-dir_ = Path().cwd()
+dir_ = Path().cwd()# / 'examples'
 DATA_DIR = dir_ / "data/PD55008E_S_parameter"
 
 # frequency range for plots
@@ -31,7 +27,6 @@ def smithchart_marker(ax, fc: float, **properties):
     return mplm.line_marker(
         idx=f_idx, axes=ax, xline=False, yformatter=lambda x, y, idx: f"{frequency[idx]/1e6:.0f}MHz", **properties
     )
-
 
 pa_8w = rfn.Component_SnP(
     file={
@@ -48,6 +43,9 @@ ms50 = rfn.elements.MSLine(
     w=0.08,
     df=0.017,
 )
+
+# %%
+# sphinx_gallery_thumbnail_path = '_static/img/tuning_window.png'
 
 class pa_input(rfn.Network):
     """
@@ -108,6 +106,7 @@ fig, axes = plt.subplot_mosaic(
 rfn.plots.draw_smithchart(axes["s11"])
 rfn.plots.draw_smithchart(axes["s22"])
 
+# use tune=True to link this plot with a tuner
 lines1 = n.plot_probe(
     ("u1|1", "m_in|2"),
     ("m_in.r1|1", "m_in.ms2|2"),
@@ -146,13 +145,10 @@ axes["im"].set_axis_off()
 
 fig.tight_layout()
 
-# # plot S21
-# fig, ax = plt.subplots()
-# ln = n.plot(ax, frequency, 11, 22, 21, fmt="db", tune=True)
-# ax.legend()
-# ax.set_ylim([-20, 20])
-# mplm.line_marker(x=f0/1e9)
-
+# %%
+# Setup the tuner
+# ---------------
+#
 
 tuners = [
     dict(component="m_in.c1", variable="value", lower=1, upper=30, label="C1 [pF]"),
@@ -166,7 +162,11 @@ tuners = [
     dict(component="m_out.c4", variable="value", lower=5, upper=30, label="C4 [pF]"),
 ]
 
-# plt.show()
+# start the tuner (this is disabled for the readthedocs runner)
+# n.tune(tuners)
 
-n.tune(tuners)
+# %%
+# .. image:: ../_static/img/tuning_window.png
+#
+
 

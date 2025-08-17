@@ -57,6 +57,8 @@ pa_8w.plot();
 # ----------------
 # 
 # Build a matching network, with the input and output networks contained in their own ``Component`` class.
+#
+# sphinx_gallery_thumbnail_number = -3
 
 
 # 50 ohm microstrip model, substrate is from the amplifier evaluation board.
