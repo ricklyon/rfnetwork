@@ -76,8 +76,8 @@ class Network(Component, metaclass=NetworkMeta):
     """
     Network of multiple components. 
 
-    Parameters
-    ----------
+    Class Attributes
+    ----------------
     components : dict
         components of the network can either be declared as class variables, or in a class dictionary named
         "components".
@@ -94,25 +94,6 @@ class Network(Component, metaclass=NetworkMeta):
         wave leaving the component from the specified port. For example, `dict(probe1=c1|1)`, would attach a probe
         to port 1 of the "c1" component. Probe names will appear in the coords of the "b" dimension of the s-matrix
         data returned by evaluate. 
-    
-    Examples
-    --------
-    >>> import rfnetwork as rfn
-
-    >>> class Wilkinson(rfn.Network):
-    ...    
-    ...     upper = rfn.elements.Line(z0=70.7, length=0.4)
-    ...     lower = rfn.elements.Line(z0=70.7, length=0.4)
-    ... 
-    ...     r1 = rfn.elements.Resistor(100)
-    ... 
-    ...     nodes = [
-    ...         ("P1", upper|1, lower|1), # port 1 node
-    ...         (upper|2, r1|1, "P2"),  # port 2 node
-    ...         (lower|2, r1|2, "P3")  # port 3 noode
-    ...     ]
-
-    ... w = Wilkinson()
 
     """
     def __init__(self, shunt: bool = False, passive: bool = False, state: dict = dict()):
@@ -130,6 +111,24 @@ class Network(Component, metaclass=NetworkMeta):
             The state values can be read with the ``state`` property and changed later with `set_state()`. Attempting
             to set the state of variables that were not included in the initial dictionary will raise an error.
 
+        Examples
+        --------
+        >>> import rfnetwork as rfn
+
+        >>> class Wilkinson(rfn.Network):
+        ...    
+        ...     upper = rfn.elements.Line(z0=70.7, length=0.4)
+        ...     lower = rfn.elements.Line(z0=70.7, length=0.4)
+        ... 
+        ...     r1 = rfn.elements.Resistor(100)
+        ... 
+        ...     nodes = [
+        ...         ("P1", upper|1, lower|1), # port 1 node
+        ...         (upper|2, r1|1, "P2"),  # port 2 node
+        ...         (lower|2, r1|2, "P3")  # port 3 noode
+        ...     ]
+
+        >>> w = Wilkinson()
         """
         n_ports = len(self.ports.keys())
 

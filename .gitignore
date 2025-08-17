@@ -12,3 +12,5 @@ archive/
 *.so
 build/
 *.gz
+_autosummary/
+auto_examples/

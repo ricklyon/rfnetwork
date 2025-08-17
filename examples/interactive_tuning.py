@@ -1,3 +1,10 @@
+"""
+"This" is my example-script
+===========================
+
+This example doesn't do much, it just makes a simple plot
+"""
+
 import rfnetwork as rfn
 from pathlib import Path
 import numpy as np
@@ -10,7 +17,7 @@ from PySide6.QtWidgets import (QApplication, QWidget, QLineEdit, QSlider, QGridL
 
 np.set_printoptions(suppress=True, threshold=12)
 
-dir_ = Path(__file__).parent
+dir_ = Path().cwd()
 DATA_DIR = dir_ / "data/PD55008E_S_parameter"
 
 # frequency range for plots

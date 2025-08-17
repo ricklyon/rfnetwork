@@ -321,6 +321,7 @@ class Line(Component):
         """
         Parameters
         ----------
+        
         z0 : float | list, default: 50
             Characteristic impedance of line.
         er : float | list, default: 1
