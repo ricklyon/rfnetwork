@@ -32,12 +32,17 @@ exclude_patterns = [
     "debug",
 ]
 
+html_show_sourcelink = False
+
 sphinx_gallery_conf = {
      'examples_dirs': '../examples',   # path to your example scripts
      'gallery_dirs': 'auto_examples',  # path to where to save gallery generated output
     'filename_pattern': '/',
-    'ignore_pattern': r'interactive_.*\.py',
-    'example_extensions': {'.py'}
+    # 'ignore_pattern': r'interactive_.*\.py',
+    'example_extensions': {'.py'},
+    'download_all_examples': False,
+    'capture_repr': (),
+    'remove_config_comments': True
 }
 
 # Make autosummary generate stub pages

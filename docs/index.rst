@@ -1,8 +1,8 @@
-
+=========
 rfnetwork
 =========
 
-Efficient linear circuit solver for large networks of RF components, including hierarchical networks.
+Efficient linear circuit solver for complex networks of RF components.
 
 Installation
 ============
@@ -17,8 +17,10 @@ Installation
 Features
 ========
 
+* Quickly connect RF/microwave components into larger networks. 
+* Manage complex RF systems with hierarchical building blocks.
 * Compute noise figure of multi-port networks using noise-wave analysis.
-* Easily adjust variable components within a network (e.g. switches, phase shifters). 
+* Easily change variable components within a network (e.g. switches, phase shifters). 
 * Probe internal voltage waves inside a network. 
 * Interactive tuning.
 

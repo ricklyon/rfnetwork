@@ -5,8 +5,8 @@ Network Probes
 This examples demonstrates how internal probes can be used to tune an amplifier. The amplifier used is a 8W UHF FET 
 manufactured by STM. 
 
-Network probes allow the reflection coefficients at the amplifier, $\Gamma_{in}$ and $\Gamma_{out}$, to be plotted 
-while the amplifier is connected to matching networks. For the purposes of this example, the amplifier is 
+Network probes allow the reflection coefficients at the amplifier, :math:`\Gamma_{in}` and :math:`\Gamma_{out}`, 
+to be plotted while the amplifier is connected to matching networks. For the purposes of this example, the amplifier is 
 conjugately matched at the output rather than being matched for optimal output power.
 
 """
@@ -56,7 +56,9 @@ pa_8w.plot();
 # Matching Network
 # ----------------
 # 
-# Build a matching network, with the input and output networks contained in their own `Component` class.
+# Build a matching network, with the input and output networks contained in their own ``Component`` class.
+#
+# sphinx_gallery_thumbnail_number = -3
 
 
 # 50 ohm microstrip model, substrate is from the amplifier evaluation board.
@@ -124,13 +126,13 @@ n = pa_match()
 # --------------------------------
 #
 # The probe data is used to plot the reflection coefficient looking into each component in the network. 
-# On the input side, $\Gamma_{in}$ of the amplifier is plotted first and is followed by each the reflection looking 
+# On the input side, :math:`\Gamma_{in}` of the amplifier is plotted first and is followed by each the reflection looking 
 # into each component that precedes it, until we arrive at S11.
-# The output side starts at $\Gamma_{out}$, and works back towards S22.
+# The output side starts at :math:`\Gamma_{out}``, and works back towards S22.
 #
-# The notation for the legend follows the same convention as S11, or S22. For example, `S(m_in.ms2|1, m_in.c2|2)` 
-# is the ratio of the voltage wave leaving port 1 of `ms2` to the voltage wave leaving port 2 of `c2` 
-# (which is the same wave that enters `ms2`). The result is the reflection coefficient looking into port 1 of `ms2`.
+# The notation for the legend follows the same convention as S11, or S22. For example, ``S(m_in.ms2|1, m_in.c2|2)`` 
+# is the ratio of the voltage wave leaving port 1 of `ms2` to the voltage wave leaving port 2 of ``c2`` 
+# (which is the same wave that enters `ms2`). The result is the reflection coefficient looking into port 1 of ``ms2```.
 
 
 fig, axes = plt.subplot_mosaic(
@@ -185,7 +187,8 @@ fig.tight_layout()
 # ------------------
 #
 # Plot the source and load stability circles, along with the conjugate input impedance for the output matching network.
-# Since $|S_{22}|$ and $|S_{11}|$ of the untuned amplifier are both $<1$, the unstable region is inside the circles.
+# Since :math:`|S_{22}|` and :math:`|S_{11}|` of the untuned amplifier are both $<1$, the unstable region is inside the 
+# circles.
 
 f_wide = np.arange(50, 1500, 5) * 1e6 
 
@@ -209,6 +212,10 @@ gamma_S = n.plot_probe(
 gamma_L = n.plot_probe(
     ("m_out|1", "u1|2"), input_port=1, fmt="smith", axes=ax, frequency=f_wide, 
 )
+
+# %%
+# Plot the Gain
+# 
 
 f_gain = np.arange(300, 600, 5) * 1e6 
 

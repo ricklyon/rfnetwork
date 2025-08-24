@@ -14,3 +14,4 @@ build/
 *.gz
 _autosummary/
 auto_examples/
+docs/sg_execution_times.rst
