@@ -31,11 +31,9 @@ int connect_other(
     char * row_order,
     char * cas_s,
     char * cas_n,
-    int n_row, int f_len, int s1_b, int s1_a, int s2_b, int s2_a, int n_connections
+    int n_row, int f_len, int s1_b, int s1_a, int s2_b, int s2_a, int n_connections, int n_threads
 )
 {
-
-    int n_threads = 1;
 
     int m_b = s1_b + s2_b;
     int m2_a = s1_a + s2_a - (2 * n_connections);
@@ -152,7 +150,6 @@ int connect_other_th(
     int n_row, int f_len, int s1_b, int s1_a, int s2_b, int s2_a, int n_connections
 )
 {
-
 
     int m_b = s1_b + s2_b;
     int m2_a = s1_a + s2_a - (2 * n_connections);
@@ -276,10 +273,9 @@ int connect_self(
     char * row_order,
     char * cas_s,
     char * cas_n,
-    int n_row, int f_len, int s1_b, int s1_a, int n_connections
+    int n_row, int f_len, int s1_b, int s1_a, int n_connections, int n_threads
 )
 {
-    int n_threads = 4;
     
     int m2_a = s1_a - (2 * n_connections);
 

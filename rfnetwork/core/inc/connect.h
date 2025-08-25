@@ -19,7 +19,7 @@ int connect_other(
     char * row_order,
     char * cas_sdata,
     char * cas_ndata,
-    int n_row, int f_len, int s1_b, int s1_a, int s2_b, int s2_a, int n_connections
+    int n_row, int f_len, int s1_b, int s1_a, int s2_b, int s2_a, int n_connections, int n_threads
 );
 
 int connect_self(
@@ -30,7 +30,7 @@ int connect_self(
     char * row_order,
     char * cas_s,
     char * cas_n,
-    int n_row, int f_len, int s1_b, int s1_a, int n_connections
+    int n_row, int f_len, int s1_b, int s1_a, int n_connections, int n_threads
 );
 
 int cascaded_row_order(
