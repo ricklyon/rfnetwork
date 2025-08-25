@@ -21,8 +21,6 @@ typedef Eigen::Map<Eigen::Matrix<std::complex<double>, Eigen::Dynamic, Eigen::Dy
 typedef Eigen::Map<Eigen::Matrix<int, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> MatrixIntType;
 
 
-
-
 int connect_other(
     char * s1,
     char * s2,
@@ -36,6 +34,9 @@ int connect_other(
     int n_row, int f_len, int s1_b, int s1_a, int s2_b, int s2_a, int n_connections
 )
 {
+
+    int n_threads = 1;
+
     int m_b = s1_b + s2_b;
     int m2_a = s1_a + s2_a - (2 * n_connections);
 
@@ -53,27 +54,9 @@ int connect_other(
     int c1_size = (s1_a * s1_a * itemsize);
     int c2_size = (s2_a * s2_a * itemsize);
 
-    // number of existing probes on component data
-    int s1_probe_n = s1_b - s1_a;
-    int s2_probe_n = s2_b - s2_a;
-
     int p1, p2;
 
-    MatrixIntType CONN ((int *) connections, n_connections, 2);
-    MatrixIntType PROBES ((int *) probes, n_connections, 2);
     MatrixIntType ROW_ORDER ((int *) row_order, 1, n_row);
-
-    Eigen::Matrix<std::complex<double>, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> M1(m_b, m_b);
-    Eigen::Matrix<std::complex<double>, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> M2(m_b, m2_a);
-
-    // create permutation matrix that will reorder the rows of M1 after taking its inverse
-    Eigen::Matrix<std::complex<double>, Eigen::Dynamic, Eigen::Dynamic> P(n_row, m_b);
-    // M matrix with probe rows and columns removed, and row-ordered
-    Eigen::Matrix<std::complex<double>, Eigen::Dynamic, Eigen::Dynamic> M_EXT(m2_a, m2_a);
-
-    std::complex<double> t1;
-    std::complex<double> t2;
-
 
     cascaded_row_order(
         connections,
@@ -82,12 +65,127 @@ int connect_other(
         n_row, s1_b, s1_a, s2_b, s2_a, n_connections
     );
 
+    // create permutation matrix that will reorder the rows of M1 after taking its inverse
+    Eigen::Matrix<std::complex<double>, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> P(n_row, m_b);
     P.setConstant(0);
     
     for (int r = 0; r < n_row; r++)
     {
         P(r, ROW_ORDER(0, r)) = 1;
     }
+
+    // divide frequency vector into batches for each thread
+    if (f_len < n_threads)
+    {
+        n_threads = 1;
+    }
+
+    // minimum number of frequencies in each batch
+    int batch_len = f_len / n_threads;
+    // remainder
+    int batch_rm = f_len % n_threads;
+
+    std::thread threads[n_threads];
+    int f_idx = 0; // frequency index of current batch
+    int f_blen; // length of current batch
+
+    char * p_ptr = (char *) P.data();
+
+    char * c1_p = NULL;
+    char * c2_p = NULL; 
+    char * cas_n_p = NULL;
+
+    for (int t = 0; t < n_threads; t++)
+    {   
+
+        f_blen = batch_len;
+
+        // add an extra frequency to the thread if the remainder is still nonzero
+        if (batch_rm > 0)
+        {
+            f_blen++;
+            batch_rm--;
+        }
+        
+        if (cas_n != NULL)
+        {
+            c1_p = c1 + (f_idx * c1_size);
+            c2_p = c2 + (f_idx * c2_size);
+            cas_n_p = cas_n + (f_idx * cas_n_size);
+        }
+
+        threads[t] = std::thread(
+            connect_other_th,
+            s1 + (f_idx * s1_size), 
+            s2 + (f_idx * s2_size), 
+            c1_p, c2_p,
+            connections, 
+            p_ptr, 
+            cas_s + (f_idx * cas_s_size), 
+            cas_n_p,
+            n_row, f_blen, s1_b, s1_a, s2_b, s2_a, n_connections
+        );
+        
+        // increment the frequency index for the next batch
+        f_idx += f_blen;
+    }
+
+    int err = 0;
+    // wait for all threads to complete
+    for (int t = 0; t < n_threads; t++)
+    {
+        threads[t].join();
+    }
+
+    return 0;
+}
+
+int connect_other_th(
+    char * s1,
+    char * s2,
+    char * c1,
+    char * c2,
+    char * connections,
+    char * permutation_m,
+    char * cas_s,
+    char * cas_n,
+    int n_row, int f_len, int s1_b, int s1_a, int s2_b, int s2_a, int n_connections
+)
+{
+
+
+    int m_b = s1_b + s2_b;
+    int m2_a = s1_a + s2_a - (2 * n_connections);
+
+    int itemsize = sizeof(std::complex<double>);
+
+    // size of each frequency matrix in s1
+    int s1_size = (s1_b * s1_a * itemsize);
+    // size of each frequency matrix in s2
+    int s2_size = (s2_b * s2_a * itemsize);
+    // size of each frequency matrix in cascaded sdata
+    int cas_s_size = (n_row * m2_a * itemsize);
+    int cas_n_size = (m2_a * m2_a * itemsize);
+
+    // size of c1, c2 frequency matrix
+    int c1_size = (s1_a * s1_a * itemsize);
+    int c2_size = (s2_a * s2_a * itemsize);
+
+    int p1, p2;
+
+    MatrixIntType CONN ((int *) connections, n_connections, 2);
+
+    Eigen::Matrix<std::complex<double>, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> M1(m_b, m_b);
+    Eigen::Matrix<std::complex<double>, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> M2(m_b, m2_a);
+
+    // create permutation matrix that will reorder the rows of M1 after taking its inverse
+    MatrixType P ((std::complex<double> *) (permutation_m), n_row, m_b);
+
+    // M matrix with probe rows and columns removed, and row-ordered
+    Eigen::Matrix<std::complex<double>, Eigen::Dynamic, Eigen::Dynamic> M_EXT(m2_a, m2_a);
+
+    std::complex<double> t1;
+    std::complex<double> t2;
 
     for (int f = 0; f < f_len; f++)
     {   
@@ -181,6 +279,112 @@ int connect_self(
     int n_row, int f_len, int s1_b, int s1_a, int n_connections
 )
 {
+    int n_threads = 4;
+    
+    int m2_a = s1_a - (2 * n_connections);
+
+    int itemsize = sizeof(std::complex<double>);
+
+    // size of each frequency matrix in s1
+    int s1_size = (s1_b * s1_a * itemsize);
+
+    // size of each frequency matrix in cascaded sdata
+    int cas_s_size = (n_row * m2_a * itemsize);
+    int cas_n_size = (m2_a * m2_a * itemsize);
+
+    // size of c1, c2 frequency matrix
+    int c1_size = (s1_a * s1_a * itemsize);
+
+    MatrixIntType ROW_ORDER ((int *) row_order, 1, n_row);
+        
+    self_cascaded_row_order(
+        connections,
+        probes,
+        row_order,
+        n_row, s1_b, s1_a, n_connections
+    );
+
+    // create permutation matrix that will reorder the rows of M1 after taking its inverse
+    Eigen::Matrix<std::complex<double>, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> P(n_row, s1_b);
+    P.setConstant(0);
+    
+    for (int r = 0; r < n_row; r++)
+    {
+        P(r, ROW_ORDER(0, r)) = 1;
+    }
+
+    // divide frequency vector into batches for each thread
+    if (f_len < n_threads)
+    {
+        n_threads = 1;
+    }
+
+    // minimum number of frequencies in each batch
+    int batch_len = f_len / n_threads;
+    // remainder
+    int batch_rm = f_len % n_threads;
+
+    std::thread threads[n_threads];
+    int f_idx = 0; // frequency index of current batch
+    int f_blen; // length of current batch
+
+    char * p_ptr = (char *) P.data();
+
+    char * c1_p = NULL;
+    char * cas_n_p = NULL;
+
+    for (int t = 0; t < n_threads; t++)
+    {   
+        f_blen = batch_len;
+
+        // add an extra frequency to the thread if the remainder is still nonzero
+        if (batch_rm > 0)
+        {
+            f_blen++;
+            batch_rm--;
+        }
+
+        if (cas_n != NULL)
+        {
+            c1_p = c1 + (f_idx * c1_size);
+            cas_n_p = cas_n + (f_idx * cas_n_size);
+        }
+
+        threads[t] = std::thread(
+            connect_self_th,
+            s1 + (f_idx * s1_size), 
+            c1_p, 
+            connections, 
+            p_ptr, 
+            cas_s + (f_idx * cas_s_size), 
+            cas_n_p,
+            n_row, f_blen, s1_b, s1_a, n_connections
+        );
+
+        // increment the frequency index for the next batch
+        f_idx += f_blen;
+    }
+
+    int err = 0;
+    // wait for all threads to complete
+    for (int t = 0; t < n_threads; t++)
+    {
+        threads[t].join();
+    }
+
+    return 0;
+}
+
+int connect_self_th(
+    char * s1,
+    char * c1,
+    char * connections,
+    char * permutation_m,
+    char * cas_s,
+    char * cas_n,
+    int n_row, int f_len, int s1_b, int s1_a, int n_connections
+)
+{
 
     int m2_a = s1_a - (2 * n_connections);
 
@@ -196,39 +400,21 @@ int connect_self(
     // size of c1, c2 frequency matrix
     int c1_size = (s1_a * s1_a * itemsize);
 
-    // number of existing probes on component data
-    int s1_probe_n = s1_b - s1_a;
-
     int p1, p2;
-
-    MatrixIntType CONN ((int *) connections, n_connections, 2);
-    MatrixIntType PROBES ((int *) probes, n_connections, 2);
-    MatrixIntType ROW_ORDER ((int *) row_order, 1, n_row);
 
     Eigen::Matrix<std::complex<double>, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> M1(s1_b, s1_b);
     Eigen::Matrix<std::complex<double>, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> M2(s1_b, m2_a);
 
+    MatrixIntType CONN ((int *) connections, n_connections, 2);
+
     // create permutation matrix that will reorder the rows of M1 after taking its inverse
-    Eigen::Matrix<std::complex<double>, Eigen::Dynamic, Eigen::Dynamic> P(n_row, s1_b);
+    MatrixType P ((std::complex<double> *) (permutation_m), n_row, s1_b);
     // M matrix with probe rows and columns removed, and row-ordered
     Eigen::Matrix<std::complex<double>, Eigen::Dynamic, Eigen::Dynamic> M_EXT(m2_a, m2_a);
 
     std::complex<double> t1;
     std::complex<double> t2;
-        
-    self_cascaded_row_order(
-        connections,
-        probes,
-        row_order,
-        n_row, s1_b, s1_a, n_connections
-    );
 
-    P.setConstant(0);
-    
-    for (int r = 0; r < n_row; r++)
-    {
-        P(r, ROW_ORDER(0, r)) = 1;
-    }
 
     for (int f = 0; f < f_len; f++)
     {   

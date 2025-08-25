@@ -47,4 +47,26 @@ int self_cascaded_row_order(
     int n_row, int s1_b, int s1_a, int n_connections
 );
 
+int connect_other_th(
+    char * s1,
+    char * s2,
+    char * c1,
+    char * c2,
+    char * connections,
+    char * permutation_m,
+    char * cas_s,
+    char * cas_n,
+    int n_row, int f_len, int s1_b, int s1_a, int s2_b, int s2_a, int n_connections
+);
+
+int connect_self_th(
+    char * s1,
+    char * c1,
+    char * connections,
+    char * permutation_m,
+    char * cas_s,
+    char * cas_n,
+    int n_row, int f_len, int s1_b, int s1_a, int n_connections
+);
+
 #endif /* CONNECT_H */
