@@ -42,7 +42,7 @@ class TestConnectSelf(unittest.TestCase):
         cas_n = np.zeros((len(s1), a_len, a_len), dtype="complex128")
 
         row_order = np.zeros_like(row_order, dtype=np.int32, order="C")
-        core_func.connect_self(s1, c1, connections, probes, row_order, cas_s, cas_n)
+        core_func.connect_self(s1, c1, connections, probes, row_order, cas_s, cas_n, 2)
 
         np.testing.assert_array_almost_equal(cas_s_ref, cas_s)
         np.testing.assert_array_almost_equal(cas_n_ref / (rfn.const.k), cas_n / (rfn.const.k))

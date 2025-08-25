@@ -55,9 +55,15 @@ static PyObject * connect_other_bind(PyObject *self, PyObject *args)
     PyObject * cas_s;
     PyObject * cas_n;
 
-    if (!PyArg_ParseTuple(args, "OOOOOOOOO", &s1, &s2, &c1, &c2, &connections, &probes, &row_order, &cas_s, &cas_n))
-        return PyLong_FromLong(1);
+    int n_threads;
 
+    if (!PyArg_ParseTuple(args, "OOOOOOOOOI", 
+        &s1, &s2, &c1, &c2, &connections, &probes, &row_order, &cas_s, &cas_n, &n_threads)
+    )
+    {
+        return PyLong_FromLong(1);
+    }
+        
     int s1_shape[DATA_NDIM];
     int s2_shape[DATA_NDIM];
     int cas_s_shape[DATA_NDIM];
@@ -134,7 +140,7 @@ static PyObject * connect_other_bind(PyObject *self, PyObject *args)
         (char * ) PyArray_DATA(row_order_array),
         (char * ) PyArray_DATA(cas_s_array),
         cas_n_data,
-        n_row, f_len, s1_b, s1_a, s2_b, s2_a, n_connections
+        n_row, f_len, s1_b, s1_a, s2_b, s2_a, n_connections, n_threads
     );
 
     return PyLong_FromLong(0);
@@ -150,7 +156,9 @@ static PyObject * connect_self_bind(PyObject *self, PyObject *args)
     PyObject * cas_s;
     PyObject * cas_n;
 
-    if (!PyArg_ParseTuple(args, "OOOOOOO", &s1, &c1, &connections, &probes, &row_order, &cas_s, &cas_n))
+    int n_threads;
+
+    if (!PyArg_ParseTuple(args, "OOOOOOOI", &s1, &c1, &connections, &probes, &row_order, &cas_s, &cas_n, &n_threads))
         return PyLong_FromLong(1);
 
     int s1_shape[DATA_NDIM];
@@ -211,7 +219,7 @@ static PyObject * connect_self_bind(PyObject *self, PyObject *args)
         (char * ) PyArray_DATA(row_order_array),
         (char * ) PyArray_DATA(cas_s_array),
         cas_n_data,
-        n_row, f_len, s1_b, s1_a, n_connections
+        n_row, f_len, s1_b, s1_a, n_connections, n_threads
     );
 
     return PyLong_FromLong(0);

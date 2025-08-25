@@ -9,6 +9,7 @@ import rfnetwork as rfn
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib as mpl 
+import time
 
 mpl.rc("legend", loc="lower right")
 
@@ -81,6 +82,10 @@ class Wilkinson(rfn.Network):
     ]
 
 w = Wilkinson()
+
+stime = time.time()
+data = w.evaluate(frequency=frequency, noise=True)
+print(time.time() - stime)
 
 # plot thru paths
 fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(5, 7))

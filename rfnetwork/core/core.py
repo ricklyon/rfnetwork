@@ -1,6 +1,7 @@
 import numpy as np
 from pathlib import Path
 from np_struct import ldarray
+import os
 
 import numpy as np
 
@@ -15,11 +16,16 @@ def junction_sdata(frequency: np.ndarray, N: int) -> np.ndarray:
     return np.broadcast_to(sdata, (len(frequency), N, N)).copy()
     
 
-def connect(c1: dict, c2: dict, connections: list, probes: list = None):
+def connect(c1: dict, c2: dict, connections: list, probes: list = None, n_threads: int = None):
     """
     Connect multiple ports between two components s1 and s2.
     Connections is of the form [(s1 port, s2 port), (s1 port, s2 port), ...].
     """
+
+    # automatically set the number of threads to half the cpu count. 
+    if n_threads is None:
+        n_cpu = os.cpu_count()
+        n_threads = n_cpu // 2 if n_cpu is not None and n_cpu > 2 else 1
 
     connections = np.array(np.atleast_2d(connections), dtype=np.int32, order="C")
 
@@ -51,7 +57,7 @@ def connect(c1: dict, c2: dict, connections: list, probes: list = None):
         n1 = np.ascontiguousarray(c1["n"])
         n2 = np.ascontiguousarray(c2["n"])
 
-    core_func.connect_other(s1, s2, n1, n2, connections, probes, row_order, cas_s, cas_n)
+    core_func.connect_other(s1, s2, n1, n2, connections, probes, row_order, cas_s, cas_n, int(n_threads))
 
     cas = dict(s=cas_s)
 
@@ -61,11 +67,16 @@ def connect(c1: dict, c2: dict, connections: list, probes: list = None):
     return row_order, cas
 
 
-def connect_self(c1: dict, connections: list, probes: list = None):
+def connect_self(c1: dict, connections: list, probes: list = None, n_threads: int = None):
     """
     Connect multiple ports between two components s1 and s2.
     Connections is of the form [(s1 port, s2 port), (s1 port, s2 port), ...].
     """
+
+    # automatically set the number of threads to half the cpu count. 
+    if n_threads is None:
+        n_cpu = os.cpu_count()
+        n_threads = n_cpu // 2 if n_cpu is not None and n_cpu > 2 else 1
 
     connections = np.array(np.atleast_2d(connections), dtype=np.int32, order="C")
 
@@ -95,7 +106,7 @@ def connect_self(c1: dict, connections: list, probes: list = None):
 
     s1 = np.ascontiguousarray(c1["s"])
 
-    core_func.connect_self(s1, n1, connections, probes, row_order, cas_s, cas_n)
+    core_func.connect_self(s1, n1, connections, probes, row_order, cas_s, cas_n, int(n_threads))
 
     cas = dict(s=cas_s)
 
