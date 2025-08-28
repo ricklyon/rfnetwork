@@ -223,7 +223,7 @@ class Attenuator(Component):
 
     def evaluate_sdata(self, frequency: np.ndarray) -> np.ndarray:
 
-        s21 = core.conv.lin_db20(self.state["value"])
+        s21 = core.conv.lin_db20(-np.abs(self.state["value"]))
         sdata = np.array([[1e-6, s21], [s21, 1e-6]], dtype="complex128")
         return np.broadcast_to(sdata, (len(frequency), 2, 2)).copy()
 

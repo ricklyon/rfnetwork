@@ -10,6 +10,9 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib as mpl 
 import time
+from pathlib import Path
+
+DATA_DIR = Path.cwd() / 'data'
 
 mpl.rc("legend", loc="lower right")
 
@@ -83,9 +86,7 @@ class Wilkinson(rfn.Network):
 
 w = Wilkinson()
 
-stime = time.time()
 data = w.evaluate(frequency=frequency, noise=True)
-print(time.time() - stime)
 
 # plot thru paths
 fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(5, 7))
@@ -146,5 +147,102 @@ b.plot(31, ref=21, fmt="ang_unwrap", frequency=frequency, axes=ax2)
 # plot isolation and return loss
 b.plot(11, 41, fmt="db", frequency=frequency, axes=ax3)
 ax3.set_ylim([-50, 0])
+
+fig.tight_layout()
+
+# %%
+# 180 Hybrid Coupler
+# ------------------------
+#
+
+class Hybrid180(rfn.Network):
+    """
+    """
+
+    s1 = msline70p7(len_qw_70p7)
+    s2 = msline70p7(len_qw_70p7)
+    s3 = msline70p7(len_qw_70p7)
+    s4 = msline70p7(len_qw_70p7 * 3)
+
+    nodes = [
+        (s1|1, s4|2, "P1"), # Port A
+        (s1|2, s2|1, "P2"), # A + B
+        (s2|2, s3|1, "P3"), # Port B
+        (s3|2, s4|1, "P4"), # A - B
+    ]
+
+b = Hybrid180(passive=True)
+
+fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(5, 7))
+
+# plot thru paths
+b.plot(21, 41, fmt="db", frequency=frequency, axes=ax1)
+ax1.set_ylim([-10, 0])
+
+# plot phase angle
+b.plot(41, ref=21, fmt="ang_unwrap", frequency=frequency, axes=ax2)
+
+# plot isolation and return loss
+b.plot(11, 31, fmt="db", frequency=frequency, axes=ax3)
+ax3.set_ylim([-50, 0])
+
+fig.tight_layout()
+
+# %%
+# Monopulse Comparator
+# ------------------------
+# 
+# .. image:: ../_static/img/monopulse_comparator.png
+
+class MonopulseComparator(rfn.Network):
+    """
+    """
+
+    h1 = Hybrid180()
+    h2 = Hybrid180()
+    h3 = Hybrid180()
+    h4 = Hybrid180()
+
+    line1 = msline50(0.4)
+    line2 = msline50(0.4)
+    line3 = msline50(0.2)
+    line4 = msline50(0.2)
+
+    r1 = rfn.elements.Resistor(50)
+
+    nodes = [
+        (h1|1, "P1"), # B + C - (A + D)
+        (h1|3, "P2"), # SUM
+        (h2|1, "P3"), # D
+        (h2|3, "P4"), # A
+        (h3|2, "P5"), # C + D - (A+B)
+        (h4|2, "P6"), # B
+        (h4|4, "P7"), # C
+        (h3|4, r1|1),
+        (r1|2, "GND"),
+    ]
+
+    cascades = [
+        (h1|2, line1, h2|2),
+        (h1|4, line2, h4|3),
+        (h2|4, line3, h3|1),
+        (h3|3, line4, h4|1)
+    ]
+
+b = MonopulseComparator(passive=True)
+
+b.evaluate()
+
+fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(5, 7))
+
+# plot thru paths for sum port
+b.plot(32, 42, 62, 72, fmt="db", frequency=frequency, axes=ax1)
+ax1.set_ylim([-15, 0])
+
+# plot phase of sum port
+b.plot(42, 62, 72, ref=32, fmt="ang", frequency=frequency, axes=ax2)
+
+# plot phase of difference port
+b.plot(13, 14, 16, ref=17, fmt="ang", frequency=frequency, axes=ax3)
 
 fig.tight_layout()

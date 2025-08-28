@@ -2,7 +2,7 @@
 rfnetwork
 =========
 
-Efficient linear circuit solver for complex networks of RF components.
+Efficient linear circuit solver for networks of RF components.
 
 Installation
 ============
