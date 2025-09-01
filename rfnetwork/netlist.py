@@ -324,6 +324,9 @@ def connect_node(
 
         # connect a 1-port load to each port in this node
         for i, (c, ports) in enumerate(node_ports.items()):
+            # connect ports from last to first so the lower port numbers don't change as the higher connections
+            # are made
+            ports = sorted(ports, reverse=True)
             for p in ports:
                 _, comp_data[c] = core.connect(comp_data[c], load, (p, 1))
                 # remove the connected port from this component's port list
