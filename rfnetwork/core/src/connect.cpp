@@ -14,6 +14,8 @@
 
 #include "Eigen/Dense"
 
+#define MAX_THREADS 20
+
 using Eigen::MatrixXd;
 
 typedef Eigen::Map<Eigen::Matrix<std::complex<double>, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> MatrixType;
@@ -77,13 +79,17 @@ int connect_other(
     {
         n_threads = 1;
     }
+    else if (n_threads > MAX_THREADS)
+    {
+        n_threads = MAX_THREADS;
+    }
 
     // minimum number of frequencies in each batch
     int batch_len = f_len / n_threads;
     // remainder
     int batch_rm = f_len % n_threads;
 
-    std::thread threads[n_threads];
+    std::thread threads[MAX_THREADS];
     int f_idx = 0; // frequency index of current batch
     int f_blen; // length of current batch
 
@@ -314,13 +320,17 @@ int connect_self(
     {
         n_threads = 1;
     }
+    else if (n_threads > MAX_THREADS)
+    {
+        n_threads = MAX_THREADS;
+    }
 
     // minimum number of frequencies in each batch
     int batch_len = f_len / n_threads;
     // remainder
     int batch_rm = f_len % n_threads;
 
-    std::thread threads[n_threads];
+    std::thread threads[MAX_THREADS];
     int f_idx = 0; // frequency index of current batch
     int f_blen; // length of current batch
 
