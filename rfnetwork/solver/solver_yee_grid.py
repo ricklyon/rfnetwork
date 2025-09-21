@@ -2,15 +2,20 @@
 import numpy as np 
 import matplotlib.pyplot as plt 
 from rfnetwork import const, conv, utils
+import pyvista as pv
+
+from IPython.display import Image as ipyimage
+from PIL import Image
+import io
 
 u0 = const.u0
 e0 = const.e0
 c0 = const.c0
 
-imax = 70
-jmax = 80
-kmax = 50
-nmax = 300
+imax = 100
+jmax = 100
+kmax = 100
+nmax = 150
 f0 = 1.5e9
 fmax = 3e9
 
@@ -135,14 +140,144 @@ for n in range(nmax-1):
     )
 
     # add current sources
-    ez[n+1, imax//2, jmax//2, kmax//2] -= Cb[imax//2, jmax//2, kmax//2] * Jz_src[n]
+    ez[n+1, imax//2, jmax//2, kmax//2 -2:kmax//2 + 2] -= Cb[imax//2, jmax//2, kmax//2] * Jz_src[n]
 
 
-fig, ax = plt.subplots()
-
-im = ax.pcolormesh(20 * np.log10(np.abs(ez[200, :, :, kmax//2 - 10])), vmin=-80)
-fig.colorbar(im)
 
 
-fig, ax = plt.subplots()
-ax.plot(ez[:, imax//2 + 20, jmax//2, kmax//2])
+# fig, ax = plt.subplots()
+# ax.plot(ez[:, imax//2 + 20, jmax//2, kmax//2])
+
+
+# grid =  np.ones(spatial_shape) * del_max
+
+
+
+# data = 20 * np.log10(np.abs(ez[200]))
+# data = np.clip(data, -80, -20)
+
+
+# g.point_data['values'] = data.flatten(order="F")
+# g.point_data["values"] = np.linspace(0, 10, np.prod(spatial_shape)).reshape(spatial_shape).flatten()
+# g.plot(volume=True, cmap="jet", opacity="sigmoid")
+
+g = pv.ImageData()
+
+grid =  np.ones(spatial_shape) * del_max
+g.dimensions = grid.shape
+g.spacing = (del_max, del_max, del_max)
+
+# Open a gif
+plotter = pv.Plotter(off_screen=True)
+
+data = 20 * np.log10(np.abs(ez[50]))
+
+vmin = -55
+vmax = -20
+data = np.clip(data, vmin, vmax)
+
+g.point_data['values'] = data.flatten(order="F")
+plotter.add_volume(
+    g, cmap="jet", opacity="linear", scalars="values", clim=[vmin, vmax]
+)
+
+# data = 20 * np.log10(np.abs(ez[40]))
+# data = np.clip(data, -80, -20)
+
+# g.point_data["values"][:] = data.flatten(order="F")     # update in-place                 # mark as modified
+plotter.camera.zoom(2)
+plotter.render()    
+
+
+plotter.open_gif('wave.gif')
+nframe = nmax // 3
+for n in range(nframe):
+    data = 20 * np.log10(np.abs(ez[n*3]))
+    data = np.clip(data, vmin, vmax)
+    g.point_data["values"][:] = data.flatten(order="F")
+    plotter.render()  
+    plotter.write_frame()
+# plotter.show()
+
+# Closes and finalizes movie
+plotter.close()
+
+ipyimage(filename='wave.gif')
+
+# data = 20 * np.log10(np.abs(ez[200]))
+# data = np.clip(data, -80, -20)
+# g['values'] = data.flatten(order="F")
+# plotter.update_scalars(data.flatten(order="F"), mesh=g, render=True)
+
+# plotter.show()
+
+# fig, ax = plt.subplots()
+# ax.set_axis_off()
+# images = []
+
+# # plotter.open_gif('wave.gif')
+
+# # Update Z and write a frame for each updated position
+# nframe = nmax // 2
+# for n in range(nframe):
+#     # Update values inplace
+#     data = 20 * np.log10(np.abs(ez[n*2]))
+#     data = np.clip(data, -80, -20)
+#     g.point_data["values"][:] = data.flatten(order="F")
+#     plotter.render()  
+
+#     # fig, ax = plt.subplots()
+#     img = plotter.screenshot()
+#     ax.imshow(img)
+#     buf = io.BytesIO()
+#     fig.savefig(buf, format="png")
+#     images.append(Image.open(buf))
+#     # plt.close("all")
+#     # Write a frame. This triggers a render.
+#     # plotter.render()
+    
+#     # plotter.update_scalars(data.flatten(order="F"), mesh=g, render=True)
+#     # plotter.write_frame()
+
+# # # Closes and finalizes movie
+# # plotter.close()
+
+# gifname = f"mw_comparison.gif"
+# images[0].save(
+#     gifname,
+#     format="GIF",
+#     append_images=images,
+#     save_all=True,
+#     duration=50,
+#     loop=0,
+#     optimize=False,
+# )
+
+
+
+
+# fig, ax = plt.subplots()
+
+# im = ax.pcolormesh(data[:, :, kmax//2])
+# fig.colorbar(im)
+
+
+# values = np.linspace(0, 10, 1000).reshape((20, 5, 10))
+# values.shape
+
+# # Create the spatial reference
+# grid = pv.ImageData()
+
+# # Set the grid dimensions: shape because we want to inject our values on the
+# #   POINT data
+# grid.dimensions = values.shape
+
+# # Edit the spatial reference
+# grid.origin = (100, 33, 55.6)  # The bottom left corner of the data set
+# grid.spacing = (1, 5, 2)  # These are the cell sizes along each axis
+
+# # Add the data values to the cell data
+# grid.point_data['values'] = values.flatten(order='F')  # Flatten the array
+
+# # Now plot the grid
+# grid.plot(volume=True, cmap="jet")
