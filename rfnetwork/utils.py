@@ -2,6 +2,32 @@ import re
 from pathlib import Path
 import numpy as np
 
+def dtft(xn: np.ndarray, omega: np.ndarray):
+    """
+    Compute the DTFT of the discrete time signal x[n] over omega (radians per sample).
+    """
+    n = np.arange(len(xn))
+    omega_mesh, n_mesh = np.meshgrid(omega, n)
+
+    # broadcast input sequence across all omega
+    x_b = np.broadcast_to(xn[..., None], (len(n), len(omega)))
+    # sum across all non-zero n
+    Xw = np.sum(x_b * np.exp(-1j* omega_mesh * n_mesh), axis=0)
+
+    return Xw
+
+def dtft_f(xn: np.ndarray, f: np.ndarray, fs: float):
+    """
+    Compute the DTFT of the discrete time signal x[n] over a frequency range. (cycles per second)
+    """
+    # convert the continuous time frequency into a discrete frequency range. The discrete frequencies
+    # are bounded by -0.5 to 0.5 if there is no aliasing.
+    # To convert the continuous time frequency (cycles / sec), into the discrete frequency (cycles / sample). 
+    # divide it by the sampling rate fs (samples / sec):
+    # (cycles / sec) / (samples / sec) = (cycles / sample)
+    fn = f / fs
+    return dtft(xn, 2 * np.pi * fn)
+
 def n_ports_from_snp(path: str | Path) -> int:
     """
     Get the number of ports from a .snp file extension.
