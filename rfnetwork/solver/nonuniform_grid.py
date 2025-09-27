@@ -19,10 +19,10 @@ msline50 = rfn.elements.MSLine(
 
 # number of cells in each dimension
 Nx = 60
-Ny = 60
+Ny = 40
 Nz = 20
 
-Nt = 1400
+Nt = 2500
 f0 = 10e9
 fmax = 15e9
 
@@ -30,7 +30,7 @@ spatial_shape = (Nx, Ny, Nz)
 
 max_er: float = 3,
 # minimum number of cells per wavelength
-cells_per_wavelength: int = 10
+cells_per_wavelength: int = 15
 dtype_ = np.float32
 
 # smallest wavelength
@@ -62,18 +62,19 @@ sigma = np.zeros(spatial_shape, dtype=dtype_)
 sigma_m = np.zeros(spatial_shape, dtype=dtype_)
 
 y_mid = Ny // 2
-ms_y = slice(y_mid, y_mid + 8)
+
+ms_y_mid = y_mid + 2
+ms_y = slice(y_mid, y_mid + 4)
 ms_x = slice(10, -10)
-ms_z = 2
+ms_z = 4
 sub_z = slice(0, ms_z)
 
 w = 0.04
 h = 0.02
 sub_er = 3.57
-cu_h = 0.001
 
 # trace
-# dy[ms_y] = conv.m_in(w / 8)
+dy[ms_y] = conv.m_in(w / 4)
 # dz[5] = conv.m_in(cu_h)
 # sigma[10:-10, ms_y, 5] = 6e7
 
@@ -82,12 +83,11 @@ dz[sub_z] = conv.m_in(h / ms_z)
 epsilon[:, :, sub_z] = sub_er * e0
 (epsilon / e0)[0, 0]
 
-
 # compute maximum time step that ensures convergence, use freespace propagation speed as worst case
 length_min = np.array([np.min(dx), np.min(dy), np.min(dz)])
 dmin = 1 / np.sqrt(((1 / length_min)**2).sum())
 # S = 0.80 * (1 / np.sqrt(3))
-dt = 0.8 * (dmin / const.c0)
+dt = 0.9 * (dmin / const.c0)
 conv.in_m(dmin)
 
 # half cell lengths between h components
@@ -95,32 +95,34 @@ dx_h = (dx[1:] + dx[:-1]) / 2
 dy_h = (dy[1:] + dy[:-1]) / 2
 dz_h = (dz[1:] + dz[:-1]) / 2
 
-dx = 1 / dx[:, None, None]
-dy = 1 / dy[None, :, None]
-dz = 1 / dz[None, None, :]
+dx_inv = 1 / dx[:, None, None]
+dy_inv = 1 / dy[None, :, None]
+dz_inv = 1 / dz[None, None, :]
 
-dx_h = 1 / dx_h[:, None, None]
-dy_h = 1 / dy_h[None, :, None]
-dz_h = 1 / dz_h[None, None, :]
+dx_h_inv = 1 / dx_h[:, None, None]
+dy_h_inv = 1 / dy_h[None, :, None]
+dz_h_inv = 1 / dz_h[None, None, :]
 
 # source
+src = np.zeros(Nt)
+pulse_n = int(Nt * 0.5)
 # width of half pulse in time
-t_half = (dt * (Nt // 3))
+t_half = (dt * (pulse_n // 8))
 # center of the pulse in time
-t0 = (dt * (Nt // 2))
+t0 = (dt * (pulse_n // 2))
 
-t = np.linspace(0, dt * Nt, Nt)
+t = np.linspace(0, dt * pulse_n, pulse_n)
 # gaussian modulated sine wave source
-a = 1
-Jz_src = a * (np.sin(2*np.pi*f0 * (t)) * np.exp(-((t - t0) / t_half)**2)).astype(dtype_).squeeze()
+a = 1e-3
+src[:pulse_n] = a * (np.sin(2*np.pi*f0 * (t)) * np.exp(-((t - t0) / t_half)**2)).astype(dtype_).squeeze()
 
 plt.figure()
-plt.plot(Jz_src)
+plt.plot(src)
 
 # compute discrete Fourier transform
 freq = np.linspace(0.1, 3, 1000) * 1e9
 fs = 1 / dt
-Xf = utils.dtft_f(Jz_src, freq, fs)
+Xf = utils.dtft_f(src, freq, fs)
 # normalize spectrum to one
 Xfn = Xf / np.max(np.abs(Xf))
 
@@ -141,6 +143,50 @@ Cb = (2 * dt) / ((2 * epsilon + (sigma * dt)))
 # coefficient in front of the difference terms of E
 Db = (dt) / (mu)
 
+# resistive load
+r0 = 40
+r0_z = r0 / ms_z
+r_x = Nx-11
+
+r_y = ms_y_mid
+r_z = sub_z
+
+Ca_ez = Ca.copy()
+Cb_ez = Cb.copy()
+
+####
+Ca_r = Ca[r_x, r_y, sub_z]
+Cb_r = Cb[r_x, r_y, sub_z]
+
+rterm = dx_h[r_x-1] * dy_h[r_y-1] * 2 * r0_z
+denom = 1 + (Cb_r * dz[sub_z] / rterm)
+
+Ca_ez_r = (Ca_r - (Cb_r * dz[r_z] / rterm)) / denom
+Cb_ez_r = (Cb_r) / denom
+
+Ca_ez[r_x, r_y, sub_z] = Ca_ez_r
+Cb_ez[r_x, r_y, sub_z] = Cb_ez_r
+###
+
+
+## add source resistor
+r_srcx = 12
+Ca_r = Ca[r_srcx, r_y, sub_z]
+Cb_r = Cb[r_srcx, r_y, sub_z]
+
+rterm = dx_h[r_srcx-1] * dy_h[r_y-1] * 2 * r0_z
+denom = 1 + (Cb_r * dz[sub_z] / rterm)
+
+Ca_ez_r = (Ca_r - (Cb_r * dz[r_z] / rterm)) / denom
+Cb_ez_r = (Cb_r) / denom
+
+Ca_ez[r_srcx, r_y, sub_z] = Ca_ez_r
+Cb_ez[r_srcx, r_y, sub_z] = Cb_ez_r
+###
+
+# voltage sources
+# coefficient in front of resistive voltage source term
+Vs_a = (Cb_r / rterm) / denom
 
 # loop over each time step
 for n in range(Nt-  1):
@@ -151,46 +197,47 @@ for n in range(Nt-  1):
     # hx update
     # edges along x do not get updated
     hx[n+1, 1:-1, :, :] = (hx[n, 1:-1, :, :]) + Db[:-1, :, :] * (
-        (np.diff(ey[n], axis=2) * dz)[1:-1, :, :] - (np.diff(ez[n], axis=1) * dy)[1:-1, :, :]
+        (np.diff(ey[n], axis=2) * dz_inv)[1:-1, :, :] - (np.diff(ez[n], axis=1) * dy_inv)[1:-1, :, :]
     )
 
     # hy update
     # edges along y do not get updated
     hy[n+1, :, 1:-1, :] = (hy[n, :, 1:-1, :]) + Db[:, :-1, :] * (
-        (np.diff(ez[n], axis=0) * dx)[:, 1:-1, :] - (np.diff(ex[n], axis=2) * dz)[:, 1:-1, :]
+        (np.diff(ez[n], axis=0) * dx_inv)[:, 1:-1, :] - (np.diff(ex[n], axis=2) * dz_inv)[:, 1:-1, :]
     )
 
     # hz update
     # edges along z do not get updated
     hz[n+1, :, :, 1:-1] = (hz[n, :, :, 1:-1]) + Db[:, :, :-1] * (
-        (np.diff(ex[n], axis=1) * dy)[:, :, 1:-1] - (np.diff(ey[n], axis=0) * dx)[:, :, 1:-1] 
+        (np.diff(ex[n], axis=1) * dy_inv)[:, :, 1:-1] - (np.diff(ey[n], axis=0) * dx_inv)[:, :, 1:-1] 
     )
 
     # ex update
     # edges along y and z do not get updated
     ex[n+1, :, 1:-1, 1:-1] = (Ca[:, :-1, :-1] * ex[n, :, 1:-1, 1:-1]) + Cb[:, :-1, :-1] * (
-        (np.diff(hz[n+1], axis=1) * dy_h)[:, :, 1:-1] - (np.diff(hy[n+1], axis=2) * dz_h)[:, 1:-1, :]
+        (np.diff(hz[n+1], axis=1) * dy_h_inv)[:, :, 1:-1] - (np.diff(hy[n+1], axis=2) * dz_h_inv)[:, 1:-1, :]
     )
 
     # ey update
     # edges along x and z do not get updated
     ey[n+1, 1:-1, :, 1:-1] = (Ca[:-1, :, :-1] * ey[n, 1:-1, :, 1:-1]) + Cb[:-1, :, :-1] * (
-        (np.diff(hx[n+1], axis=2) * dz_h)[1:-1, :, :] - (np.diff(hz[n+1], axis=0) * dx_h)[:, :, 1:-1]
+        (np.diff(hx[n+1], axis=2) * dz_h_inv)[1:-1, :, :] - (np.diff(hz[n+1], axis=0) * dx_h_inv)[:, :, 1:-1]
     )
 
     # ez update
     # edges along x and y do not get updated
-    ez[n+1, 1:-1, 1:-1, :] = (Ca[:-1, :-1, :] * ez[n, 1:-1, 1:-1, :]) + Cb[:-1, :-1, :] * (
-        (np.diff(hy[n+1], axis=0) * dx_h)[:, 1:-1, :] - (np.diff(hx[n+1], axis=1) * dy_h)[1:-1, :, :]
+    ez[n+1, 1:-1, 1:-1, :] = (Ca_ez[:-1, :-1, :] * ez[n, 1:-1, 1:-1, :]) + Cb_ez[:-1, :-1, :] * (
+        (np.diff(hy[n+1], axis=0) * dx_h_inv)[:, 1:-1, :] - (np.diff(hx[n+1], axis=1) * dy_h_inv)[1:-1, :, :]
     )
 
     # PEC trace
     ex[n+1, ms_x, ms_y, ms_z] = 0
     ey[n+1, ms_x, ms_y, ms_z] = 0
 
-    # add current sources
-    ez[n+1, 11, y_mid + 4, sub_z] -= Cb[11, y_mid + 4, sub_z] * (Jz_src[n])
-    # ez[n+1, Nx//2, Ny//2, Nz//2 -2:Nz//2 + 2] -= Cb[Nx//2, Nx//2, Nz//2] * Jz_src[n]
+    # add resistive voltage source
+    ez[n+1, r_srcx, ms_y_mid, sub_z] += Vs_a * (src[n + 1] / 2)
+    
+    # ez[n+1, 11, ms_y_mid, sub_z] -= Cb[11,  ms_y_mid, sub_z] * (Jz_src[n])
 
 print("done.")
 
@@ -207,14 +254,14 @@ g.spacing = (dmax, dmax, dmax)
 # Open a gif
 plotter = pv.Plotter(off_screen=True)
 
-trace_pnts = np.array([(10, Ny//2, ms_z), (Nx-10, Ny//2, ms_z), (Nx-10, Ny//2 + 8, ms_z)])
+trace_pnts = np.array([(10, Ny//2, ms_z), (Nx-10, Ny//2, ms_z), (Nx-10, Ny//2 + 5, ms_z)])
 trace = pv.Rectangle(trace_pnts * dmax)
 plotter.add_mesh(trace, opacity=0.5)
 
 data = 20 * np.log10(np.abs(ez[50]))
 
-vmin = -60
-vmax = -10
+vmin = -40
+vmax = 10
 data = np.clip(data, vmin, vmax)
 
 g.point_data['values'] = data.flatten(order="F")
@@ -233,7 +280,7 @@ plotter.add_bounding_box()
 
 
 plotter.open_gif('msline.gif')
-nstep = 10
+nstep = 15
 nframe = Nt // nstep
 for n in range(nframe):
     data = 20 * np.log10(np.abs(ez[n*nstep]))
