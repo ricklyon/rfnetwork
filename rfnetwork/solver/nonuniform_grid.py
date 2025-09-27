@@ -12,10 +12,12 @@ e0 = const.e0
 c0 = const.c0
 
 msline50 = rfn.elements.MSLine(
-    w=0.043, 
+    w=0.040, 
     h=0.020, 
     er=3.57, 
 )
+
+msline50.get_properties(10e9)
 
 # number of cells in each dimension
 Nx = 60
@@ -88,7 +90,7 @@ length_min = np.array([np.min(dx), np.min(dy), np.min(dz)])
 dmin = 1 / np.sqrt(((1 / length_min)**2).sum())
 # S = 0.80 * (1 / np.sqrt(3))
 dt = 0.9 * (dmin / const.c0)
-conv.in_m(dmin)
+conv.in_m(dx)
 
 # half cell lengths between h components
 dx_h = (dx[1:] + dx[:-1]) / 2
@@ -146,7 +148,7 @@ Db = (dt) / (mu)
 # resistive load
 r0 = 40
 r0_z = r0 / ms_z
-r_x = Nx-11
+r_x = Nx-10
 
 r_y = ms_y_mid
 r_z = sub_z
@@ -164,13 +166,16 @@ denom = 1 + (Cb_r * dz[sub_z] / rterm)
 Ca_ez_r = (Ca_r - (Cb_r * dz[r_z] / rterm)) / denom
 Cb_ez_r = (Cb_r) / denom
 
-Ca_ez[r_x, r_y, sub_z] = Ca_ez_r
-Cb_ez[r_x, r_y, sub_z] = Cb_ez_r
+# ez component uses the cell properties of the cell to it's left (r_x - 1)
+Ca_ez[r_x-1, r_y, sub_z] = Ca_ez_r
+Cb_ez[r_x-1, r_y, sub_z] = Cb_ez_r
 ###
 
 
 ## add source resistor
-r_srcx = 12
+r0 = 40
+r0_z = r0 / ms_z
+r_srcx = 10
 Ca_r = Ca[r_srcx, r_y, sub_z]
 Cb_r = Cb[r_srcx, r_y, sub_z]
 
@@ -180,8 +185,8 @@ denom = 1 + (Cb_r * dz[sub_z] / rterm)
 Ca_ez_r = (Ca_r - (Cb_r * dz[r_z] / rterm)) / denom
 Cb_ez_r = (Cb_r) / denom
 
-Ca_ez[r_srcx, r_y, sub_z] = Ca_ez_r
-Cb_ez[r_srcx, r_y, sub_z] = Cb_ez_r
+Ca_ez[r_srcx-1, r_y, sub_z] = Ca_ez_r
+Cb_ez[r_srcx-1, r_y, sub_z] = Cb_ez_r
 ###
 
 # voltage sources
@@ -237,9 +242,15 @@ for n in range(Nt-  1):
     # add resistive voltage source
     ez[n+1, r_srcx, ms_y_mid, sub_z] += Vs_a * (src[n + 1] / 2)
     
-    # ez[n+1, 11, ms_y_mid, sub_z] -= Cb[11,  ms_y_mid, sub_z] * (Jz_src[n])
+    # ez[n+1, 28, ms_y_mid, sub_z] -= Cb[28,  ms_y_mid, sub_z] * (1e5 * src[n+1])
 
 print("done.")
+
+# fig, ax = plt.subplots(figsize=(12, 5))
+# plt.plot(Cb_ez[:, r_y, 3])
+# plt.xticks(np.arange(Nx))
+
+# dx_h[r_x - 1]
 
 ez = ez[:, :Nx, :Ny, :Nz]
 
@@ -257,6 +268,7 @@ plotter = pv.Plotter(off_screen=True)
 trace_pnts = np.array([(10, Ny//2, ms_z), (Nx-10, Ny//2, ms_z), (Nx-10, Ny//2 + 5, ms_z)])
 trace = pv.Rectangle(trace_pnts * dmax)
 plotter.add_mesh(trace, opacity=0.5)
+
 
 data = 20 * np.log10(np.abs(ez[50]))
 
@@ -277,6 +289,11 @@ plotter.camera.zoom(1)
 plotter.render()    
 plotter.add_axes()
 plotter.add_bounding_box()
+plotter.camera_position = "xz"
+plotter.camera.elevation += 20
+plotter.camera.azimuth += 10
+plotter.camera.zoom(1.5)
+# plotter.show()
 
 
 plotter.open_gif('msline.gif')
