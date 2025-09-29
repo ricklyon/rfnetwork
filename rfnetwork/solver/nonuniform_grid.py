@@ -67,11 +67,12 @@ y_mid = Ny // 2
 
 ms_y_mid = y_mid + 2
 ms_y = slice(y_mid, y_mid + 4)
+ms_y_ex = slice(y_mid, y_mid + 5)
 ms_x = slice(10, -10)
 ms_z = 4
 sub_z = slice(0, ms_z)
 
-w = 0.04
+w = 0.034
 h = 0.02
 sub_er = 3.57
 
@@ -84,6 +85,10 @@ dy[ms_y] = conv.m_in(w / 4)
 dz[sub_z] = conv.m_in(h / ms_z)
 epsilon[:, :, sub_z] = sub_er * e0
 (epsilon / e0)[0, 0]
+# imaginary part of eps
+tand = 0.007
+eps_p = sub_er * e0 * tand
+sigma[:, :, sub_z] = 0 # 2 * np.pi * f0 * eps_p
 
 # compute maximum time step that ensures convergence, use freespace propagation speed as worst case
 length_min = np.array([np.min(dx), np.min(dy), np.min(dz)])
@@ -109,7 +114,7 @@ dz_h_inv = 1 / dz_h[None, None, :]
 src = np.zeros(Nt)
 pulse_n = int(Nt * 0.5)
 # width of half pulse in time
-t_half = (dt * (pulse_n // 8))
+t_half = (dt * (pulse_n // 20))
 # center of the pulse in time
 t0 = (dt * (pulse_n // 2))
 
@@ -120,6 +125,11 @@ src[:pulse_n] = a * (np.sin(2*np.pi*f0 * (t)) * np.exp(-((t - t0) / t_half)**2))
 
 plt.figure()
 plt.plot(src)
+
+plt.figure()
+frequency = np.arange(5e9, 15e9, 100e6)
+Vinc = rfn.utils.dtft_f(src, frequency, 1 / dt)
+plt.plot(frequency, conv.db20_lin(Vinc))
 
 # compute discrete Fourier transform
 freq = np.linspace(0.1, 3, 1000) * 1e9
@@ -146,7 +156,7 @@ Cb = (2 * dt) / ((2 * epsilon + (sigma * dt)))
 Db = (dt) / (mu)
 
 # resistive load
-r0 = 40
+r0 = 50
 r0_z = r0 / ms_z
 r_x = Nx-10
 
@@ -173,8 +183,6 @@ Cb_ez[r_x-1, r_y, sub_z] = Cb_ez_r
 
 
 ## add source resistor
-r0 = 40
-r0_z = r0 / ms_z
 r_srcx = 10
 Ca_r = Ca[r_srcx, r_y, sub_z]
 Cb_r = Cb[r_srcx, r_y, sub_z]
@@ -236,15 +244,44 @@ for n in range(Nt-  1):
     )
 
     # PEC trace
-    ex[n+1, ms_x, ms_y, ms_z] = 0
+    ex[n+1, ms_x, ms_y_ex, ms_z] = 0
     ey[n+1, ms_x, ms_y, ms_z] = 0
 
     # add resistive voltage source
-    ez[n+1, r_srcx, ms_y_mid, sub_z] += Vs_a * (src[n + 1] / 2)
+    # Vs_a is already divided by sub_z, so we don't need to split the voltage among each ez component
+    ez[n+1, r_srcx, ms_y_mid, sub_z] -= Vs_a * (src[n]) # book says src/2
     
     # ez[n+1, 28, ms_y_mid, sub_z] -= Cb[28,  ms_y_mid, sub_z] * (1e5 * src[n+1])
 
 print("done.")
+
+v1 = -np.sum(ez[:, r_srcx, ms_y_mid, sub_z] * dz[sub_z], axis=-1)
+v2 = -np.sum(ez[:, r_x, ms_y_mid, sub_z] * dz[sub_z], axis=-1)
+
+v_ret = v1 - src
+plt.figure()
+plt.plot(v1)
+plt.plot(src)
+plt.plot(v2)
+# plt.plot(v2 / v1)
+
+frequency = np.arange(5e9, 15e9, 100e6)
+Vinc = rfn.utils.dtft_f(src, frequency, 1 / dt)
+V1 = rfn.utils.dtft_f(v_ret, frequency, 1 / dt)
+V2 = rfn.utils.dtft_f(v2, frequency, 1 / dt)
+
+# plt.figure()
+# plt.plot(frequency, conv.db20_lin(V1))
+# plt.plot(frequency, conv.db20_lin(V2))
+
+fig, ax = plt.subplots()
+ax.plot(frequency / 1e9, conv.db20_lin(V1 / Vinc))
+ax.plot(frequency / 1e9, conv.db20_lin(V2 / Vinc))
+ax.set_ylim([-12, 0])
+ax.set_xlabel("Frequency [GHz]")
+ax.set_ylabel("dB")
+ax.legend(["S11", "S21"])
+plt.show()
 
 # fig, ax = plt.subplots(figsize=(12, 5))
 # plt.plot(Cb_ez[:, r_y, 3])
@@ -256,58 +293,62 @@ ez = ez[:, :Nx, :Ny, :Nz]
 
 # plt.plot(ez[:, Nx//2, Nx//2, Nz//2])
 
-g = pv.ImageData()
+def generate_gif():
+    g = pv.ImageData()
 
-grid =  np.ones(spatial_shape) * dmax
-g.dimensions = grid.shape
-g.spacing = (dmax, dmax, dmax)
+    grid =  np.ones(spatial_shape) * dmax
+    g.dimensions = grid.shape
+    g.spacing = (dmax, dmax, dmax)
 
-# Open a gif
-plotter = pv.Plotter(off_screen=True)
+    # Open a gif
+    plotter = pv.Plotter(off_screen=True)
 
-trace_pnts = np.array([(10, Ny//2, ms_z), (Nx-10, Ny//2, ms_z), (Nx-10, Ny//2 + 5, ms_z)])
-trace = pv.Rectangle(trace_pnts * dmax)
-plotter.add_mesh(trace, opacity=0.5)
-
-
-data = 20 * np.log10(np.abs(ez[50]))
-
-vmin = -40
-vmax = 10
-data = np.clip(data, vmin, vmax)
-
-g.point_data['values'] = data.flatten(order="F")
-plotter.add_volume(
-    g, cmap="jet", opacity="linear", scalars="values", clim=[vmin, vmax]
-)
-
-# data = 20 * np.log10(np.abs(ez[40]))
-# data = np.clip(data, -80, -20)
-
-# g.point_data["values"][:] = data.flatten(order="F")     # update in-place                 # mark as modified
-plotter.camera.zoom(1)
-plotter.render()    
-plotter.add_axes()
-plotter.add_bounding_box()
-plotter.camera_position = "xz"
-plotter.camera.elevation += 20
-plotter.camera.azimuth += 10
-plotter.camera.zoom(1.5)
-# plotter.show()
+    trace_pnts = np.array([(10, Ny//2, ms_z), (Nx-10, Ny//2, ms_z), (Nx-10, Ny//2 + 5, ms_z)])
+    trace = pv.Rectangle(trace_pnts * dmax)
+    plotter.add_mesh(trace, opacity=0.5)
 
 
-plotter.open_gif('msline.gif')
-nstep = 15
-nframe = Nt // nstep
-for n in range(nframe):
-    data = 20 * np.log10(np.abs(ez[n*nstep]))
+    data = 20 * np.log10(np.abs(ez[50]))
+
+    vmin = -30
+    vmax = 10
     data = np.clip(data, vmin, vmax)
-    g.point_data["values"][:] = data.flatten(order="F")
-    plotter.render()  
-    plotter.write_frame()
-# plotter.show()
 
-# Closes and finalizes movie
-plotter.close()
+    g.point_data['values'] = data.flatten(order="F")
+    plotter.add_volume(
+        g, cmap="jet", opacity="linear", scalars="values", clim=[vmin, vmax]
+    )
 
-ipyimage(filename='msline.gif')
+    # data = 20 * np.log10(np.abs(ez[40]))
+    # data = np.clip(data, -80, -20)
+
+    # g.point_data["values"][:] = data.flatten(order="F")     # update in-place                 # mark as modified
+    plotter.camera.zoom(1)
+    plotter.render()    
+    plotter.add_axes()
+    plotter.add_bounding_box()
+    plotter.camera_position = "xz"
+    plotter.camera.elevation += 20
+    plotter.camera.azimuth += 10
+    plotter.camera.zoom(1.5)
+    # plotter.show()
+
+
+    plotter.open_gif('msline.gif')
+    nstep = 15
+    nframe = Nt // nstep
+    for n in range(nframe):
+        data = 20 * np.log10(np.abs(ez[n*nstep]))
+        data = np.clip(data, vmin, vmax)
+        g.point_data["values"][:] = data.flatten(order="F")
+        plotter.render()  
+        plotter.write_frame()
+    # plotter.show()
+
+    # Closes and finalizes movie
+    plotter.close()
+
+    ipyimage(filename='msline.gif')
+
+
+generate_gif()
