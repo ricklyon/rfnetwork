@@ -3,9 +3,11 @@ import numpy as np
 import matplotlib.pyplot as plt 
 from rfnetwork import const, conv, utils
 import pyvista as pv
+import time
 
 from IPython.display import Image as ipyimage
 import rfnetwork as rfn
+import mpl_markers as mplm
 
 u0 = const.u0
 e0 = const.e0
@@ -20,8 +22,8 @@ msline50 = rfn.elements.MSLine(
 msline50.get_properties(10e9)
 
 # number of cells in each dimension
-Nx = 60
-Ny = 40
+Nx = 108
+Ny = 30
 Nz = 20
 
 Nt = 2500
@@ -65,11 +67,11 @@ sigma_m = np.zeros(spatial_shape, dtype=dtype_)
 
 y_mid = Ny // 2
 
-ms_y_mid = y_mid + 2
-ms_y = slice(y_mid, y_mid + 4)
-ms_y_ex = slice(y_mid, y_mid + 5)
+ms_y_mid = y_mid + 1
+ms_y = slice(y_mid, y_mid + 3)
+ms_y_ex = slice(y_mid, y_mid + 4)
 ms_x = slice(10, -10)
-ms_z = 4
+ms_z = 3
 sub_z = slice(0, ms_z)
 
 w = 0.040
@@ -77,7 +79,7 @@ h = 0.02
 sub_er = 3.57
 
 # trace
-dy[ms_y] = conv.m_in(w / 4)
+dy[ms_y] = conv.m_in(w / 3)
 # dz[5] = conv.m_in(cu_h)
 # sigma[10:-10, ms_y, 5] = 6e7
 
@@ -85,6 +87,7 @@ dy[ms_y] = conv.m_in(w / 4)
 dz[sub_z] = conv.m_in(h / ms_z)
 epsilon[:, :, sub_z] = sub_er * e0
 (epsilon / e0)[0, 0]
+# sigma[:, :, sub_z] = 0.04
 
 
 # compute maximum time step that ensures convergence, use freespace propagation speed as worst case
@@ -109,15 +112,15 @@ dz_h_inv = 1 / dz_h[None, None, :]
 
 # source
 src = np.zeros(Nt)
-pulse_n = int(Nt * 0.5)
+pulse_n = 1000
 # width of half pulse in time
-t_half = (dt * (pulse_n // 8))
+t_half = 7e-11#(dt * (pulse_n // 8))
 # center of the pulse in time
 t0 = (dt * (pulse_n // 2))
 
 t = np.linspace(0, dt * pulse_n, pulse_n)
 # gaussian modulated sine wave source
-a = 1e-3
+a = 1e-2
 src[:pulse_n] = a * (np.sin(2*np.pi*f0 * (t)) * np.exp(-((t - t0) / t_half)**2)).astype(dtype_).squeeze()
 # src[:pulse_n] = a * (np.exp(-((t - t0) / t_half)**2)).astype(dtype_).squeeze()
 
@@ -125,7 +128,7 @@ plt.figure()
 plt.plot(src)
 
 plt.figure()
-frequency = np.arange(100e6, 20e9, 100e6)
+frequency = np.arange(100e6, 20e9, 10e6)
 Vinc = rfn.utils.dtft_f(src, frequency, 1 / dt)
 plt.plot(frequency / 1e9, conv.db20_lin(Vinc))
 
@@ -165,42 +168,57 @@ Ca_ez = Ca.copy()
 Cb_ez = Cb.copy()
 
 ####
-Ca_r = Ca[r_x, r_y, sub_z]
-Cb_r = Cb[r_x, r_y, sub_z]
+Ca_r = Ca[r_x-1, r_y-1, 1]
+Cb_r = Cb[r_x-1, r_y-1, 1]
 
-rterm = dx_h[r_x-1] * dy_h[r_y-1] * 2 * r0_z
-denom = 1 + (Cb_r * dz[sub_z] / rterm)
+rterm = dx_h[r_x-1] * dy_h[r_y-1] * 2 * r0
+denom = 1 + (Cb_r * dz[1] / rterm)
 
-Ca_ez_r = (Ca_r - (Cb_r * dz[r_z] / rterm)) / denom
+Ca_ez_r = (Ca_r - (Cb_r * dz[1] / rterm)) / denom
 Cb_ez_r = (Cb_r) / denom
 
 # ez component uses the cell properties of the cell to it's left (r_x - 1)
-Ca_ez[r_x-1, r_y, sub_z] = Ca_ez_r
-Cb_ez[r_x-1, r_y, sub_z] = Cb_ez_r
-###
+Ca_ez[r_x-1, r_y-1, 1] = Ca_ez_r
+Cb_ez[r_x-1, r_y-1, 1] = Cb_ez_r
 
+# 0 ohm resistors to connect the lumped element to the trace
+Ca_ez[r_x-1, r_y-1, 0] = -1
+Cb_ez[r_x-1, r_y-1, 0] = 0
+
+Ca_ez[r_x-1, r_y-1, 2] = -1
+Cb_ez[r_x-1, r_y-1, 2] = 0
+###
 
 ## add source resistor
 r_srcx = 10
-Ca_r = Ca[r_srcx, r_y, sub_z]
-Cb_r = Cb[r_srcx, r_y, sub_z]
 
-rterm = dx_h[r_srcx-1] * dy_h[r_y-1] * 2 * r0_z
-denom = 1 + (Cb_r * dz[sub_z] / rterm)
+Ca_r = Ca[r_srcx-1, r_y-1, 1]
+Cb_r = Cb[r_srcx-1, r_y-1, 1]
 
-Ca_ez_r = (Ca_r - (Cb_r * dz[r_z] / rterm)) / denom
+rterm = dx_h[r_srcx-1] * dy_h[r_y-1] * 2 * r0
+denom = 1 + (Cb_r * dz[1] / rterm)
+
+Ca_ez_r = (Ca_r - (Cb_r * dz[1] / rterm)) / denom
 Cb_ez_r = (Cb_r) / denom
 
-Ca_ez[r_srcx-1, r_y, sub_z] = Ca_ez_r
-Cb_ez[r_srcx-1, r_y, sub_z] = Cb_ez_r
+Ca_ez[r_srcx-1, r_y-1, 1] = Ca_ez_r
+Cb_ez[r_srcx-1, r_y-1, 1] = Cb_ez_r
 ###
+
+# 0 ohm resistors to connect the lumped element to the trace
+Ca_ez[r_srcx-1, r_y-1, 0] = -1
+Cb_ez[r_srcx-1, r_y-1, 0] = 0
+
+Ca_ez[r_srcx-1, r_y-1, 2] = -1
+Cb_ez[r_srcx-1, r_y-1, 2] = 0
 
 # voltage sources
 # coefficient in front of resistive voltage source term
 Vs_a = (Cb_r / rterm) / denom
 
+stime = time.time()
 # loop over each time step
-for n in range(Nt-  1):
+for n in range(Nt -  1):
 
     # grid starts at bottom left corner. A half-cell is placed in front of each component so all field values have 
     # the same number of values. The extra half cell components are not updated.
@@ -247,69 +265,66 @@ for n in range(Nt-  1):
 
     # add resistive voltage source
     # Vs_a is already divided by sub_z, so we don't need to split the voltage among each ez component
-    ez[n+1, r_srcx, ms_y_mid, sub_z] -= Vs_a * (src[n]) # book says src/2
+    ez[n+1, r_srcx, r_y, 1] -= Vs_a * (src[n+1]) # book says src/2
     
-    # ez[n+1, 28, ms_y_mid, sub_z] -= Cb[28,  ms_y_mid, sub_z] * (1e5 * src[n+1])
+    # ez[n+1, r_srcx, ms_y_mid, sub_z] -= Cb[r_srcx,  ms_y_mid, sub_z] * (1e3 * src[n+1])
 
-print("done.")
+print(f"done. Elapsed: {time.time() - stime: .3f}")
 
-v1 = -np.sum(ez[:, r_srcx, ms_y_mid, sub_z] * dz[sub_z], axis=-1)
-v2 = -np.sum(ez[:, r_x - 1, ms_y_mid, sub_z] * dz[sub_z], axis=-1)
+# voltage in lumped port
+v1 = -ez[:, r_srcx, ms_y_mid, 1] * dz[1]
 
-# compute current around ms trace
-# hy above ms trace
-c1 = np.sum(hy[:, r_srcx + 1, ms_y_ex, ms_z -1] * dy_h[ms_y_ex], axis=-1)
+# current in lumped port, defined as leaving the port
+c1 = (hy[:, r_srcx, ms_y_mid, 1] - hy[:, r_srcx - 1, ms_y_mid, 1] ) * dx_h[r_srcx - 1]
+c2 = (-hx[:, r_srcx, ms_y_mid, 1] + hx[:, r_srcx, ms_y_mid - 1, 1] ) * dy_h[ms_y_mid - 1]
+i1 = c1 + c2
 
-# hy below ms trace
-c2 = np.sum(hy[:, r_srcx + 1, ms_y_ex, ms_z] * dy_h[ms_y_ex], axis=-1)
+b1 = (v1 - (i1 * 50)) / 2
+a1 = (v1 + (i1 * 50)) / 2
 
-# hz on each side of trace
-c3 = np.sum(hz[:, r_srcx + 1, ms_y_ex.start -1, ms_z] * dz_h[ms_z - 1])
-c4 = np.sum(hz[:, r_srcx + 1, ms_y_ex.stop -1, ms_z] * dz_h[ms_z - 1]) # stop slice is one past the index, we want the same index as ex
+# voltage in port 2
+v2 = -ez[:, r_x, ms_y_mid, 1] * dz[1]
 
-i1 = c1 + c2 + c3 + c4
+# current in port 2, defined as entering the port
+c1 = (hy[:, r_x, ms_y_mid, 1] - hy[:, r_x - 1, ms_y_mid, 1] ) * dx_h[r_x - 1]
+c2 = (-hx[:, r_x, ms_y_mid, 1] + hx[:, r_x, ms_y_mid - 1, 1] ) * dy_h[ms_y_mid - 1]
+i2 = -(c1 + c2)
 
-frequency = np.arange(5e9, 15e9, 100e6)
-V1 = utils.dtft_f(v1, frequency, 1 / dt)
-I1 = utils.dtft_f(i1, frequency, 1 / dt)
-
-plt.figure()
-plt.plot(frequency / 1e9, conv.db20_lin(V1 / I1))
-
-plt.figure()
-plt.plot(src)
-plt.plot(v1)
-
-v_ret = v1 - src
-
-
-frequency = np.arange(5e9, 15e9, 100e6)
-Vinc = rfn.utils.dtft_f(src, frequency, 1 / dt)
-V1 = rfn.utils.dtft_f(v_ret, frequency, 1 / dt)
-V2 = rfn.utils.dtft_f(v2, frequency, 1 / dt)
+# no entering voltage wave from port 2, just evaluate the voltage across the resistor
+p2 = i2 * 50
 
 # plt.figure()
-# plt.plot(frequency, conv.db20_lin(V1))
-# plt.plot(frequency, conv.db20_lin(V2))
+# plt.plot(b1)
+# plt.plot(a1)
+
+# plt.figure()
+# plt.plot(a1)
+# plt.plot(p2)
+
+# plt.figure()
+# plt.plot(v1)
+# plt.plot(i1 * 50)
+
+frequency = np.arange(5e9, 15e9, 10e6)
+B1 = utils.dtft_f(b1, frequency, 1 / dt)
+A1 = utils.dtft_f(a1, frequency, 1 / dt)
+
+B2 = utils.dtft_f(p2, frequency, 1 / dt)
 
 fig, ax = plt.subplots()
-ax.plot(frequency / 1e9, conv.db20_lin(V1 / Vinc))
-ax.plot(frequency / 1e9, conv.db20_lin(V2 / Vinc))
-ax.set_ylim([-12, 0])
+ax.plot(frequency  / 1e9, conv.db20_lin(B1 / A1))
+ax.plot(frequency / 1e9, conv.db20_lin(B2 / A1))
 ax.set_xlabel("Frequency [GHz]")
+ax.set_ylim([-40, 1])
+ax.margins(x=0)
+ax.legend(["S11", "S21"], loc="upper left")
 ax.set_ylabel("dB")
-ax.legend(["S11", "S21"])
+mplm.line_marker(x=10)
 plt.show()
 
-# fig, ax = plt.subplots(figsize=(12, 5))
-# plt.plot(Cb_ez[:, r_y, 3])
-# plt.xticks(np.arange(Nx))
 
-# dx_h[r_x - 1]
 
 ez = ez[:, :Nx, :Ny, :Nz]
-
-# plt.plot(ez[:, Nx//2, Nx//2, Nz//2])
 
 def generate_gif():
     g = pv.ImageData()
@@ -328,8 +343,8 @@ def generate_gif():
 
     data = 20 * np.log10(np.abs(ez[50]))
 
-    vmin = -30
-    vmax = 10
+    vmin = -20
+    vmax = 20
     data = np.clip(data, vmin, vmax)
 
     g.point_data['values'] = data.flatten(order="F")
@@ -371,3 +386,5 @@ def generate_gif():
 
 generate_gif()
 ipyimage(filename='msline.gif')
+
+
