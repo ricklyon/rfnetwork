@@ -21,8 +21,6 @@ msline50 = rfn.elements.MSLine(
 
 m = msline50(2)
 
-# 1. too wide by 30mils (1.5 cells)
-# 2. sub too thin by 8 mils 
 frequency = np.arange(5e9, 15e9, 10e6)
 # m.plot(11, frequency=frequency, fmt="smith")
 # plt.ylim([-40, 0])
@@ -31,7 +29,6 @@ frequency = np.arange(5e9, 15e9, 10e6)
 msline50.get_properties(10e9)
 
 # number of cells in each dimension
-
 Nt = 2500
 f0 = 10e9
 fmax = 15e9
@@ -80,8 +77,8 @@ ms_y_mid = y_mid + 1
 ms_y = slice(y_mid, y_mid + 2)
 ms_y_ex = slice(y_mid, y_mid + 3)
 ms_x = slice(10, Nx -10)
-ms_z = 2
-sub_z = slice(1, ms_z)
+ms_z = 1
+sub_z = slice(0, ms_z)
 
 w = 0.040
 h = 0.020
@@ -165,7 +162,7 @@ Db_hy = np.ones(hy[0].shape) * Db_0
 Db_hz = np.ones(hz[0].shape) * Db_0
 
 # substrate 
-sub_eps = 3.6 * e0
+sub_eps = sub_er * e0
 Cb_ez[..., sub_z] = (2 * dt) / ((2 * sub_eps + (sig_0 * dt))) 
 Cb_ex[..., sub_z] = (2 * dt) / ((2 * sub_eps + (sig_0 * dt))) 
 Cb_ey[..., sub_z] = (2 * dt) / ((2 * sub_eps + (sig_0 * dt))) 
@@ -187,11 +184,11 @@ Cb_ex[ms_x, ms_y.start: ms_y.stop+1, ms_z] = (2 * dt) / ((2 * er_eff + (sig_pec 
 Cb_ey[ms_x.start: ms_x.stop + 1, ms_y, ms_z] = (2 * dt) / ((2 * er_eff + (sig_pec * dt))) 
 
 # gnd plane
-Ca_ex[..., 1] = (2 * e0 - (sig_pec * dt)) / (2 * e0 + (sig_pec * dt))
-Ca_ey[..., 1] = (2 * e0 - (sig_pec * dt)) / (2 * e0 + (sig_pec * dt))
+# Ca_ex[..., 1] = (2 * e0 - (sig_pec * dt)) / (2 * e0 + (sig_pec * dt))
+# Ca_ey[..., 1] = (2 * e0 - (sig_pec * dt)) / (2 * e0 + (sig_pec * dt))
 
-Cb_ex[..., 1] = (2 * dt) / ((2 * e0 + (sig_pec * dt))) 
-Cb_ey[..., 1] = (2 * dt) / ((2 * e0 + (sig_pec * dt))) 
+# Cb_ex[..., 1] = (2 * dt) / ((2 * e0 + (sig_pec * dt))) 
+# Cb_ey[..., 1] = (2 * dt) / ((2 * e0 + (sig_pec * dt))) 
 
 
 # resistive load
@@ -199,7 +196,7 @@ r0 = 50
 r_x = Nx-10
 
 r_y = ms_y_mid 
-r_z = 1
+r_z = 0
 
 # ez resistor properties
 Ca_r = Ca_ez[r_x, r_y, r_z]
@@ -282,8 +279,7 @@ Db_hx_ez[r_srcx, r_y-1, r_z] = (dt) / (u0_cx)
 Db_hx_ez[r_x, r_y, r_z] = (dt) / (u0_cx)
 Db_hx_ez[r_x, r_y-1, r_z] = (dt) / (u0_cx)
 
-
-
+# alternate thin wire model
 # ke = 1 / ((dx[0] / dy[0]) * np.arctan(dy[0] / dx[0]))
 # Db_hz_ey[ms_x, ms_y.start - 1, ms_z] = ke * dt  / ( u0 )
 # Db_hz_ey[ms_x, ms_y.stop + 1, ms_z] = ke * dt  / ( u0 )
@@ -457,10 +453,7 @@ plt.plot(S11.real, S11.imag)
 # fig, ax = plt.subplots()
 # ax.plot(frequency, np.real(conv.z_gamma(S11, refz=50)))
 
-
 plt.show()
-
-
 
 ez = ez[:, :Nx, :Ny, :Nz]
 
@@ -505,7 +498,7 @@ def generate_gif():
     # plotter.show()
 
 
-    plotter.open_gif('msline.gif')
+    plotter.open_gif('outputs/msline.gif')
     nstep = 15
     nframe = Nt // nstep
     for n in range(nframe):
@@ -523,6 +516,6 @@ def generate_gif():
 
 
 generate_gif()
-ipyimage(filename='msline.gif')
+ipyimage(filename='outputs/msline.gif')
 
 
