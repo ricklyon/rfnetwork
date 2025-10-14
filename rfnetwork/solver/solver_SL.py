@@ -7,6 +7,7 @@ import time
 from IPython.display import Image as ipyimage
 import rfnetwork as rfn
 import mpl_markers as mplm
+import matplotlib.colors as mcolors
 
 u0 = const.u0
 e0 = const.e0
@@ -192,6 +193,7 @@ class Solver_SingleLayer():
         # shorten load along y direction
         # port faces +y
         elif not self.pattern[r_x, r_y - 1] and self.pattern[r_x, r_y]:
+            print("+y")
             self.Db["hx_ez"][r_x, r_y - 1, r_z] = (2 * self.dt) / (u0_c1 * np.log(self.dy[r_y - 1] / a))
             # inductance compensation
             self.Db["hx_ez"][r_x, r_y, r_z] = (self.dt) / (u0_c1)
@@ -199,6 +201,7 @@ class Solver_SingleLayer():
             self.Db["hy_ez"][r_x, r_y, r_z] = (self.dt) / (u0_c1)
         # port faces -y
         elif self.pattern[r_x, r_y - 1] and not self.pattern[r_x , r_y]:
+            print("-y")
             self.Db["hx_ez"][r_x, r_y, r_z] = (2 * self.dt) / (u0_c1 * np.log(self.dy[r_y]/ a))
             # inductance compensation
             self.Db["hx_ez"][r_x, r_y - 1, r_z] = (self.dt) / (u0_c1)
@@ -325,12 +328,24 @@ class Solver_SingleLayer():
         plotter.add_mesh(g, style="wireframe", line_width=0.05, color="k", opacity=0.05)
         # plotter.show()
 
+        pattern_g = pv.ImageData(dimensions=self.pattern.shape + (2,))
+        pattern_g.spacing = (dmax, dmax, dmax)
+
+        p = np.broadcast_to(self.pattern[..., None], self.pattern.shape + (2,)).copy()
+        p[..., 0] = 0
+        pattern_g.point_data["scalars"] = p.flatten(order="F")
         # trace_pnts = np.array([(ms_x.start, ms_y.start, ms_z), (ms_x.stop, ms_y.start, ms_z), (ms_x.stop, ms_y.stop, ms_z)])
         # trace = pv.Rectangle(trace_pnts * dmax)
-        # plotter.add_mesh(trace, opacity=0.7, color="gold")
 
-        # sub = pv.Cube(np.array((Nx//2 - 0.5, Ny//2 - 0.5, 0.5)) * dmax, (Nx-1) * dmax, (Ny-1) * dmax, dmax)
-        # plotter.add_mesh(sub, opacity=0.2, color="green")
+        # Create the colormap from the list of colors
+        cmap_two_colors = mcolors.LinearSegmentedColormap.from_list(
+            "custom_cmap", ["none", "gold"]
+        )
+
+        plotter.add_mesh(pattern_g, opacity=1, cmap=cmap_two_colors, show_scalar_bar=False, smooth_shading=False, interpolate_before_map=False)
+
+        sub = pv.Cube(np.array((Nx//2 - 0.5, Ny//2 - 0.5, 0.5)) * dmax, (Nx-1) * dmax, (Ny-1) * dmax, dmax)
+        plotter.add_mesh(sub, opacity=0.2, color="green")
 
 
         data = 20 * np.log10(np.abs(field[50]))
@@ -353,9 +368,9 @@ class Solver_SingleLayer():
         plotter.add_axes()
         # plotter.add_bounding_box()
         plotter.camera_position = "xz"
-        plotter.camera.elevation += 20
+        plotter.camera.elevation += 30
         plotter.camera.azimuth += 10
-        plotter.camera.zoom(1)
+        plotter.camera.zoom(1.3)
         bar = plotter.add_scalar_bar(
             title="Ez [dB]\n", vertical=False, label_font_size=11, title_font_size=14
         )
@@ -373,7 +388,7 @@ class Solver_SingleLayer():
             plotter.add_title(f"t={n * nstep * self.dt * 1e9:.2f}ns")
             plotter.render()  
             plotter.write_frame()
-        # plotter.show()
+        # # plotter.show()
 
         # Closes and finalizes movie
         plotter.close()
@@ -386,23 +401,39 @@ sub_h = conv.m_in(0.02)
 dx0 = conv.m_in(0.02)
 dy0 = conv.m_in(0.02)
 
-Nx = int((conv.m_in(2) / dx0) + 20)
-Ny = 20
+# Nx = int((conv.m_in(2) / dx0) + 20)
+# Ny = 20
+
+# dx = np.ones(Nx) * dx0
+# dy = np.ones(Ny) * dy0
+
+# p1_x, p1_y = 10, (Ny // 2)
+# p2_x, p2_y = Nx - 10, (Ny // 2)
+
+# pattern = np.zeros((Nx, Ny), dtype=np.int32)
+# pattern[p1_x: p2_x, p1_y-1:p1_y+1] = 1
+
+Nx = 80
+Ny = 80
 
 dx = np.ones(Nx) * dx0
 dy = np.ones(Ny) * dy0
 
-p1_x, p1_y = 10, (Ny // 2)
-p2_x, p2_y = Nx - 10, (Ny // 2)
+p1_x, p1_y = 10, 20
+p2_x, p2_y = Nx-20, Ny - 20
 
 pattern = np.zeros((Nx, Ny), dtype=np.int32)
 pattern[p1_x: p2_x, p1_y-1:p1_y+1] = 1
+pattern[p2_x-1: p2_x+1, p1_y:p2_y] = 1
+
+
 
 yy, xx = np.meshgrid(np.arange(Ny), np.arange(Nx))
 fig, ax = plt.subplots(1, 1)
 ax.pcolormesh(xx, yy, pattern)
 ax.grid()
-ax.set_yticks(np.arange(0.5, Ny + 0.5, 1))
+# ax.set_yticks(np.arange(0.5, Ny + 0.5, 1))
+ax.set_aspect("equal")
 
 s = Solver_SingleLayer(frequency, pattern, dx, dy, er, sub_h)
 
@@ -411,7 +442,7 @@ s.add_port("p2", p2_x, p2_y)
 
 s.dt
 
-Nt = 1300
+Nt = 1200
 f0 = 10e9
 src = np.zeros(Nt)
 pulse_n = 1000
@@ -429,7 +460,7 @@ src[:pulse_n] = a * (np.sin(2*np.pi*f0 * (t)) * np.exp(-((t - t0) / t_half)**2))
 plt.figure()
 plt.plot(src)
 
-ez = s.run("p1", src)["ez"]
+ez = s.run("p2", src)["ez"]
 
 s.generate_gif(ez)
 ipyimage(filename='outputs/msline_2.gif')
