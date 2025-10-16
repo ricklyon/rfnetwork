@@ -14,7 +14,17 @@ e0 = const.e0
 c0 = const.c0
 
 
+msline50 = rfn.elements.MSLine(
+    w=0.04, 
+    h=0.020, 
+    er=3.66, 
+)
 
+m = msline50(2)
+
+frequency = np.arange(5e9, 15e9, 10e6)
+m.plot(11, frequency=frequency, fmt="db")
+plt.ylim([-40, 0])
 
 class Solver_SingleLayer():
 
@@ -227,18 +237,23 @@ class Solver_SingleLayer():
     def run(self, port, v_waveform):
 
         Nt = len(v_waveform)
+
         # numpy type for the field values
         dtype_ = np.float32
         dx, dy, dz = self.dx, self.dy, self.dz
         Nx, Ny, Nz = len(dx), len(dy), len(dz)
+        
+        self.gif_step = 20
+        self.gif_fields = np.zeros((Nt // 20, Nx+1, Ny+1, Nz), dtype=dtype_)
 
+        
         # field values
-        ex = np.zeros((Nt, Nx, Ny+1, Nz+1), dtype=dtype_)
-        ey = np.zeros((Nt, Nx+1, Ny, Nz+1), dtype=dtype_)
-        ez = np.zeros((Nt, Nx+1, Ny+1, Nz), dtype=dtype_)
-        hx = np.zeros((Nt, Nx+1, Ny, Nz), dtype=dtype_)
-        hy = np.zeros((Nt, Nx, Ny+1, Nz), dtype=dtype_)
-        hz = np.zeros((Nt, Nx, Ny, Nz+1), dtype=dtype_)
+        ex = np.zeros((Nx, Ny+1, Nz+1), dtype=dtype_)
+        ey = np.zeros((Nx+1, Ny, Nz+1), dtype=dtype_)
+        ez = np.zeros((Nx+1, Ny+1, Nz), dtype=dtype_)
+        hx = np.zeros((Nx+1, Ny, Nz), dtype=dtype_)
+        hy = np.zeros((Nx, Ny+1, Nz), dtype=dtype_)
+        hz = np.zeros((Nx, Ny, Nz+1), dtype=dtype_)
 
         Ca_ex = self.Ca["ex"][:, 1:-1, 1:-1], # edges along y and z do not get updated
         Ca_ey = self.Ca["ey"][1:-1, :, 1:-1], # edges along x and z do not get updated
@@ -263,6 +278,16 @@ class Solver_SingleLayer():
 
         src_x, src_y, src_z, Vs_a = self.ports[port].values()
 
+        # field values at ports
+        port_fields = dict()
+        for k, p in self.ports.items():
+            port_fields[k] = dict(
+                ez = np.zeros(Nt, dtype=dtype_),
+                hx = np.zeros((Nt, 2), dtype=dtype_),
+                hy = np.zeros((Nt, 2), dtype=dtype_),
+            )
+        
+
         stime = time.time()
         # loop over each time step
         for n in range(Nt -  1):
@@ -272,56 +297,65 @@ class Solver_SingleLayer():
 
             # ex update
             # edges along y and z do not get updated
-            ex[n+1, :, 1:-1, 1:-1] = (Ca_ex * ex[n, :, 1:-1, 1:-1]) + Cb_ex * (
-                (np.diff(hz[n], axis=1) * dy_h_inv)[:, :, 1:-1] - 
-                (np.diff(hy[n], axis=2) * dz_h_inv)[:, 1:-1, :]
+            ex[:, 1:-1, 1:-1] = (Ca_ex * ex[:, 1:-1, 1:-1]) + Cb_ex * (
+                (np.diff(hz, axis=1) * dy_h_inv)[:, :, 1:-1] - 
+                (np.diff(hy, axis=2) * dz_h_inv)[:, 1:-1, :]
             )
 
             # ey update
             # edges along x and z do not get updated
-            ey[n+1, 1:-1, :, 1:-1] = (Ca_ey * ey[n, 1:-1, :, 1:-1]) + Cb_ey * (
-                (np.diff(hx[n], axis=2) * dz_h_inv)[1:-1, :, :] - 
-                (np.diff(hz[n], axis=0) * dx_h_inv)[:, :, 1:-1]
+            ey[1:-1, :, 1:-1] = (Ca_ey * ey[1:-1, :, 1:-1]) + Cb_ey * (
+                (np.diff(hx, axis=2) * dz_h_inv)[1:-1, :, :] - 
+                (np.diff(hz, axis=0) * dx_h_inv)[:, :, 1:-1]
             )
 
             # ez update
             # edges along x and y do not get updated
-            ez[n+1, 1:-1, 1:-1, :] = (Ca_ez * ez[n, 1:-1, 1:-1, :]) + Cb_ez * (
-                (np.diff(hy[n], axis=0) * dx_h_inv)[:, 1:-1, :] - 
-                (np.diff(hx[n], axis=1) * dy_h_inv)[1:-1, :, :]
+            ez[1:-1, 1:-1, :] = (Ca_ez * ez[1:-1, 1:-1, :]) + Cb_ez * (
+                (np.diff(hy, axis=0) * dx_h_inv)[:, 1:-1, :] - 
+                (np.diff(hx, axis=1) * dy_h_inv)[1:-1, :, :]
             )
 
             # add resistive voltage source
             # Vs_a is already divided by sub_z, so we don't need to split the voltage among each ez component
-            ez[n+1, src_x, src_y, src_z] -= Vs_a * (v_waveform[n + 1]) # book says src/2
+            ez[src_x, src_y, src_z] -= Vs_a * (v_waveform[n + 1]) # book says src/2
 
             # hx update
             # all edges are updated
-            hx[n+1, :, :, :] = (hx[n, :, :, :]) + (
-                self.Db["hx_ey"] * (np.diff(ey[n+1], axis=2) * dz_inv) - 
-                self.Db["hx_ez"] * (np.diff(ez[n+1], axis=1) * dy_inv)
+            hx = (hx) + (
+                self.Db["hx_ey"] * (np.diff(ey, axis=2) * dz_inv) - 
+                self.Db["hx_ez"] * (np.diff(ez, axis=1) * dy_inv)
             )
 
             # hy update
             # all edges are updated
-            hy[n+1, :, :, :] = (hy[n, :, :, :]) + (
-                self.Db["hy_ez"]  * (np.diff(ez[n+1], axis=0) * dx_inv) - 
-                self.Db["hy_ex"]  * (np.diff(ex[n+1], axis=2) * dz_inv)
+            hy = (hy) + (
+                self.Db["hy_ez"]  * (np.diff(ez, axis=0) * dx_inv) - 
+                self.Db["hy_ex"]  * (np.diff(ex, axis=2) * dz_inv)
             )
 
             # hz update
             # all edges are updated
-            hz[n+1, :, :, :] = (hz[n, :, :, :]) + (
-                self.Db["hz_ex"]  * (np.diff(ex[n+1], axis=1) * dy_inv) - 
-                self.Db["hz_ey"]  * (np.diff(ey[n+1], axis=0) * dx_inv)
+            hz = (hz) + (
+                self.Db["hz_ex"]  * (np.diff(ex, axis=1) * dy_inv) - 
+                self.Db["hz_ey"]  * (np.diff(ey, axis=0) * dx_inv)
             )
 
-        return dict(ex=ex, ey=ey, ez=ez, hx=hx, hy=hy, hz=hz)
+            # update port values
+            for k, p in self.ports.items():
+                x, y, z, _ = p.values()
+                port_fields[k]["ez"][n + 1] = ez[x, y, z]
+                port_fields[k]["hx"][n + 1] = hx[x, y-1: y+1, z]
+                port_fields[k]["hy"][n + 1] = hy[x-1: x+1, y, z]
+
+            if (n % self.gif_step) == 0:
+                self.gif_fields[n // self.gif_step] = ez
+
+        return port_fields
 
     def get_ba(self, port, fields):
 
         x, y, z, _ = self.ports[port].values()
-        print(x, y, z)
 
         dx, dy, dz = self.dx, self.dy, self.dz
 
@@ -329,16 +363,19 @@ class Solver_SingleLayer():
         dx_h = (dx[1:] + dx[:-1]) / 2
         dy_h = (dy[1:] + dy[:-1]) / 2
 
-        ez, hx, hy = fields["ez"], fields["hx"], fields["hy"]
+        ez, hx, hy = fields[port]["ez"], fields[port]["hx"], fields[port]["hy"]
 
         # voltage in lumped port
-        v1 = -ez[:, x, y, z] * self.dz[z]
+        v1 = -ez * self.dz[z]
 
         # current in lumped port, defined as leaving the port
-        c1 = (hy[:, x, y, z] - hy[:, x - 1, y, z] ) * dy_h[y - 1]
-        c2 = (-hx[:, x, y, z] + hx[:, x, y - 1, z] ) * dx_h[x - 1]
+        c1 = (hy[:, 1] - hy[:, 0] ) * dy_h[y - 1]
+        c2 = (-hx[:, 1] + hx[:, 0] ) * dx_h[x - 1]
 
         i1 = (c1 + c2)
+
+        fig, ax = plt.subplots()
+        ax.plot(v1)
 
         # plt.figure()
         # plt.plot(v1)
@@ -357,20 +394,20 @@ class Solver_SingleLayer():
 
         return B1, A1
 
-    def generate_gif(self, field):
-        Nt = len(field)
+    def generate_gif(self, filename):
+        nframe = len(self.gif_fields)
         # numpy type for the field values
         dtype_ = np.float32
         dx, dy, dz = self.dx, self.dy, self.dz
         Nx, Ny, Nz = len(dx), len(dy), len(dz)
 
-        field = field[:, :Nx, :Ny, :Nz]
+        field = self.gif_fields[:, :Nx, :Ny, :Nz]
         g = pv.ImageData()
 
         grid =  np.ones((Nx, Ny, Nz))
         g.dimensions = (Nx, Ny, Nz)
         dmax = dx[0]
-        g.spacing = (dmax, dmax, dmax)
+        g.spacing = (dx[0], dy[0], dz[0])
         # edges = g.extract_all_edges()
 
         # Open a gif
@@ -380,8 +417,9 @@ class Solver_SingleLayer():
         # plotter.show()
 
         pattern_g = pv.ImageData(dimensions=self.pattern.shape + (2,))
-        pattern_g.spacing = (dmax, dmax, dmax)
+        pattern_g.spacing = (dx[0], dy[0], dz[0])
 
+        # patt_nan = np.where(self.pattern < 0.01, np.nan, self.pattern)[..., None]
         p = np.broadcast_to(self.pattern[..., None], self.pattern.shape + (2,)).copy()
         p[..., 0] = 0
         pattern_g.point_data["scalars"] = p.flatten(order="F")
@@ -395,11 +433,12 @@ class Solver_SingleLayer():
 
         plotter.add_mesh(pattern_g, opacity=1, cmap=cmap_two_colors, show_scalar_bar=False, smooth_shading=False, interpolate_before_map=False)
 
-        sub = pv.Cube(np.array((Nx//2 - 0.5, Ny//2 - 0.5, 0.5)) * dmax, (Nx-1) * dmax, (Ny-1) * dmax, dmax)
-        plotter.add_mesh(sub, opacity=0.2, color="green")
+        gx0, dy0, dz0 = (dx[0], dy[0], dz[0])
+        sub = pv.Cube(np.array(((Nx//2 - 0.5) * dx0, (Ny//2 - 0.5) * dy0, 0.5 * dz0)), (Nx-1) * dx0, (Ny-1) * dy0, dz0)
+        plotter.add_mesh(sub, opacity=0.1, color="green")
 
 
-        data = 20 * np.log10(np.abs(field[50]))
+        data = 20 * np.log10(np.abs(field[20]))
 
         vmin = -20
         vmax = 30
@@ -429,14 +468,13 @@ class Solver_SingleLayer():
         # plotter.show()
 
 
-        plotter.open_gif('outputs/msline_2.gif')
-        nstep = 15
-        nframe = Nt // nstep
+        plotter.open_gif(filename)
+
         for n in range(nframe):
-            data = 20 * np.log10(np.abs(field[n*nstep]))
+            data = 20 * np.log10(np.abs(field[n]))
             data = np.clip(data, vmin, vmax)
             g.point_data["values"][:] = data.flatten(order="F")
-            plotter.add_title(f"t={n * nstep * self.dt * 1e9:.2f}ns")
+            plotter.add_title(f"t={n * self.gif_step * self.dt * 1e9:.2f}ns")
             plotter.render()  
             plotter.write_frame()
         # # plotter.show()
@@ -464,41 +502,84 @@ def corner():
     return pattern, dx, dy
 
 
-frequency: np.ndarray = np.arange(5e9, 15.01e9, 10e6)
+frequency: np.ndarray = np.arange(5e9, 15e9, 10e6)
 er: float = 3.66
+er_eff = 2.84
 sub_h = conv.m_in(0.02)
 
 dx0 = conv.m_in(0.02)
-dy0 = conv.m_in(0.02)
+dy0 = conv.m_in(0.005)
+
+w = conv.m_in(0.04)
+sp = conv.m_in(0.005)
+
+
+def draw_line(pattern, xn, yn, width_mil, length_m):
+    wn = int(conv.m_in(width_mil / 1000) / dy0)
+    ln = int(length_m / dx0)
+    pattern[xn: xn + ln, yn:yn+wn] = 1
+
+    return xn + ln, yn + wn
 
 f0 = 10e9
-lam0 = const.c0 / f0
+lam0 = (const.c0 / np.sqrt(er_eff)) / f0
 
-Nx = int(( conv.m_in(2)/ dx0) + 20)
-Ny = 20
+Nx = int((lam0 / 4) * 10 / dx0)
+Ny = 80
+
+pattern = np.zeros((Nx, Ny), dtype=np.int32)
+
+# coupling parameters, width, spacing, of each section, mils
+c_params = [(30, 5), (40, 10), (40, 10), (30, 5)]
+
+# p1 line
+y0 = 20
+x0 = 20
+
+cx = x0
+cy = y0
+w0 = 40
+cx, _ = draw_line(pattern, x0, cy, w0, lam0 / 3)
+
+w0n = int(np.around(conv.m_in(w0 / 1000) / dy0))
+c0wn = int(np.around(conv.m_in(c_params[0][0] / 1000) / dy0))
+
+cy += int(w0n - c0wn)
+last_y = cy
+
+for i, (cw, cs) in enumerate(c_params):
+    # number of cells in space
+    if i > 0:
+        c0wn = int(np.around(conv.m_in(c_params[i-1][0] / 1000) / dy0))
+        c1wn = int(np.around(conv.m_in(cw / 1000) / dy0))
+
+        cy += np.clip(int(c0wn - c1wn), 0, None)
+
+    spn = int(np.around((conv.m_in(cs / 1000) / dy0)))
+    _, cy = draw_line(pattern, cx, cy, cw, lam0 / 4)
+    last_y = cy
+    cx, _ = draw_line(pattern, cx, cy + spn, cw, lam0 / 4)
+    cy += spn
+
+# p2 line
+c0wn = int(np.around(conv.m_in(c_params[-1][0] / 1000) / dy0))
+last_y += int(w0n - c0wn) // 2
+cx, _ = draw_line(pattern, cx, last_y, w0, lam0 / 3)
+
+
+yy, xx = np.meshgrid(np.arange(Ny), np.arange(Nx))
+fig, ax = plt.subplots(1, 1, figsize=(10, 12))
+ax.pcolormesh(xx, yy, pattern)
+ax.grid()
+ax.set_yticks(np.arange(0.5, Ny + 0.5, 1), np.arange(1, Ny+1))
+ax.set_aspect("equal")
+
+p1_x, p1_y = (x0, y0 + w0n // 2)
+p2_x, p2_y = (cx, last_y + w0n // 2)
 
 dx = np.ones(Nx) * dx0
 dy = np.ones(Ny) * dy0
 
-p1_x, p1_y = 10, Ny//2
-p2_x, p2_y = Nx - 10, Ny//2
-
-# p3_x, p3_y = 10, 23
-# p4_x, p4_y = Nx - 10, 23
-
-pattern = np.zeros((Nx, Ny), dtype=np.int32)
-pattern[p1_x: p2_x, p1_y-1:p1_y+1] = 1
-# pattern[p3_x: p4_x, p3_y-1:p3_y+1] = 1
-
-
-
-
-yy, xx = np.meshgrid(np.arange(Ny), np.arange(Nx))
-fig, ax = plt.subplots(1, 1)
-ax.pcolormesh(xx, yy, pattern)
-ax.grid()
-# ax.set_yticks(np.arange(0.5, Ny + 0.5, 1))
-ax.set_aspect("equal")
 
 s = Solver_SingleLayer(frequency, pattern, dx, dy, er, sub_h)
 
@@ -509,34 +590,39 @@ s.add_port("p2", p2_x, p2_y)
 
 s.dt
 
-Nt = 1300
+Nt = 8000
 f0 = 10e9
 src = np.zeros(Nt)
 pulse_n = 1000
 # width of half pulse in time
-t_half = 9e-11#(dt * (pulse_n // 8))
+t_half = 5e-11#(dt * (pulse_n // 8))
 # center of the pulse in time
-t0 = (s.dt * 250)
+t0 = (s.dt * 350)
 
 t = np.linspace(0, s.dt * pulse_n, pulse_n)
 # gaussian modulated sine wave source
-a = 1e-2
+a = 4e-2
 src[:pulse_n] = a * (np.sin(2*np.pi*f0 * (t)) * np.exp(-((t - t0) / t_half)**2)).astype(np.float32).squeeze()
 # src[:pulse_n] = a * (np.exp(-((t - t0) / t_half)**2)).astype(dtype_).squeeze()
 plt.figure()
 plt.plot(src)
 
+import time
+stime = time.time()
 fields = s.run("p1", src)
+print(time.time() - stime)
 
 b1, a1 = s.get_ba("p1", fields)
 b2, a2 = s.get_ba("p2", fields)
 
+
 fig, ax = plt.subplots()
 ax_t = ax.twinx()
 ax.plot(frequency  / 1e9, conv.db20_lin(b1 / a1))
-ax_t.plot(frequency / 1e9, conv.db20_lin(b2 / a1), color="orange", alpha=0.5)
+ax_t.plot(frequency / 1e9, conv.db20_lin(b2 / a1), color="orange", alpha=1)
 ax.set_xlabel("Frequency [GHz]")
 ax.set_ylim([-50, 1])
+ax_t.set_ylim([-50, 1])
 ax.margins(x=0)
 ax.legend(["S11", "S21"], loc="upper left")
 ax_t.legend(["S21"], loc="upper right")
@@ -545,5 +631,5 @@ ax_t.set_ylabel("dB")
 mplm.line_marker(x=10)
 plt.show()
 
-# s.generate_gif(fields["ez"])
+s.generate_gif("msline_2.gif")
 # ipyimage(filename='outputs/msline_2.gif')
