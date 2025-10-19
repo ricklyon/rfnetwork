@@ -407,6 +407,72 @@ class Solver_SingleLayer():
                 self.gif_fields[n // self.gif_step] = ez
 
         return port_fields
+    
+    def add_xPML(self, d_pml=10):
+        """
+        Add PML layer to the top face of the solution box.
+        """
+        m_pml = 3 # sigma profile order
+        
+        dt = self.dt
+        dz = self.dz[-1]
+        eta0 = np.sqrt(u0 / e0)
+        er_eff = (self.er * e0 + e0) / 2
+        # now define the values of sigma and sigma_m from the profiles
+        sigma_max = 0.8 * (m_pml + 1) / (eta0 * dz)
+    
+        # define sigma profile in the PML region on the right side of the grid. 
+        i_pml = np.arange(0, d_pml)[..., None, None]
+    
+        # sigma on the cell edges. Components on the edge of the PML have a sigma of 0.
+        sigma_e_n = sigma_max * ((i_pml) / (d_pml))**m_pml
+        # sigma in the middle of the cells. First Hz component in the PML is 0.5 cells into the PML
+        sigma_e_np5 = sigma_max * ((i_pml + 0.5) / (d_pml))**m_pml
+
+        # magnetic conductivity
+        # plt.figure()
+        # plt.plot(np.arange(0, 10, 1), sigma_m_n.squeeze())
+        # plt.plot(np.arange(0.5, 10.5, 1), sigma_m_np5.squeeze())
+
+        # first ex component is at the edge of the PML where sigma = 0, last component is at the solve boundary and not updated
+        eps_ez = np.ones(len(self.dz))[None, None] * e0
+        eps_ez[..., 0] = self.er * e0
+        self.Ca["ez_x"][-d_pml-1:-1] = (2 * eps_ez - (sigma_e_n * dt)) / (2 * eps_ez + (sigma_e_n * dt))
+        self.Cb["ez_x"][-d_pml-1:-1] = (2 * dt) / ((2 * eps_ez + (sigma_e_n * dt))) 
+
+        eps_ey = np.ones(len(self.dz) + 1)[None, None] * e0
+        eps_ey[..., 1] = er_eff
+        # self.Ca["ey_x"][-d_pml-1:-1] = (2 * eps_ey - (sigma_e_n * dt)) / (2 * eps_ey + (sigma_e_n * dt))
+        # self.Cb["ey_x"][-d_pml-1:-1] = (2 * dt) / ((2 * eps_ey + (sigma_e_n * dt))) 
+
+        # exclude the ey components in the trace from the PML
+        ey_patt = (pattern[:-1] | pattern[1:])[-d_pml:]
+        ey_sig = ey_patt * 1e7
+        
+        self.Ca["ey_x"][-d_pml-1:-1] = np.where(
+            ey_patt[..., None], 
+            self.Ca["ey_x"][-d_pml-1:-1],
+            (2 * eps_ey - (sigma_e_n * dt)) / (2 * eps_ey + (sigma_e_n * dt)),
+        )
+        self.Cb["ey_x"][-d_pml-1:-1] = np.where(
+            ey_patt[..., None], 
+            self.Cb["ey_x"][-d_pml-1:-1],
+            (2 * dt) / ((2 * eps_ey + (sigma_e_n * dt))),
+        )
+
+        # hx/hy components are in the middle of the PML cells, use half cell indices
+        eps_hy = np.ones(len(self.dz))[None, None] * e0
+        eps_hy[..., 0] = self.er * e0
+        sigma_m_np5 = sigma_e_np5 * u0 / eps_hy
+        self.Da["hy_x"][-d_pml:] = (2 * u0 - (sigma_m_np5 * dt)) / (2 * u0 + (sigma_m_np5 * dt))
+        self.Db["hy_x"][-d_pml:] = (2 * dt) / ((2 * u0 + (sigma_m_np5 * dt))) 
+
+        eps_hz = np.ones(len(self.dz) + 1)[None, None] * e0
+        eps_hz[..., 1] = self.er * e0
+        sigma_m_np5 = sigma_e_np5 * u0 / eps_hz
+        self.Da["hz_x"][-d_pml:] = (2 * u0 - (sigma_m_np5 * dt)) / (2 * u0 + (sigma_m_np5 * dt))
+        self.Db["hz_x"][-d_pml:] = (2 * dt) / ((2 * u0 + (sigma_m_np5 * dt))) 
+
 
 
     def add_zPML(self, d_pml=10):
@@ -538,7 +604,7 @@ class Solver_SingleLayer():
 
     
 
-    def generate_gif(self, filename):
+    def generate_gif(self, filename, view="xz", vmax=30, vmin=-20, zoom=1.3, el=10, az=0):
         nframe = len(self.gif_fields)
         # numpy type for the field values
         dtype_ = np.float32
@@ -548,9 +614,7 @@ class Solver_SingleLayer():
         field = self.gif_fields[:, :Nx, :Ny, :Nz]
         g = pv.ImageData()
 
-        grid =  np.ones((Nx, Ny, Nz))
         g.dimensions = (Nx, Ny, Nz)
-        dmax = dx[0]
         g.spacing = (dx[0], dy[0], dz[0])
         # edges = g.extract_all_edges()
 
@@ -567,25 +631,32 @@ class Solver_SingleLayer():
         p = np.broadcast_to(self.pattern[..., None], self.pattern.shape + (2,)).copy()
         p[..., 0] = 0
         pattern_g.point_data["scalars"] = p.flatten(order="F")
-        # trace_pnts = np.array([(ms_x.start, ms_y.start, ms_z), (ms_x.stop, ms_y.start, ms_z), (ms_x.stop, ms_y.stop, ms_z)])
-        # trace = pv.Rectangle(trace_pnts * dmax)
 
         # Create the colormap from the list of colors
         cmap_two_colors = mcolors.LinearSegmentedColormap.from_list(
             "custom_cmap", ["none", "gold"]
         )
 
-        plotter.add_mesh(pattern_g, opacity=1, cmap=cmap_two_colors, show_scalar_bar=False, smooth_shading=False, interpolate_before_map=False)
+        plotter.add_mesh(
+            pattern_g, 
+            opacity=1, 
+            cmap=cmap_two_colors, 
+            show_scalar_bar=False, 
+            smooth_shading=False, 
+            interpolate_before_map=False
+        )
 
         gx0, dy0, dz0 = (dx[0], dy[0], dz[0])
-        sub = pv.Cube(np.array(((Nx//2 - 0.5) * dx0, (Ny//2 - 0.5) * dy0, 0.5 * dz0)), (Nx-1) * dx0, (Ny-1) * dy0, dz0)
+        sub = pv.Cube(
+            center=np.array(((Nx//2 - 0.5) * dx0, (Ny//2 - 0.5) * dy0, 0.5 * dz0)), 
+            x_length=(Nx-1) * dx0, 
+            y_length=(Ny-1) * dy0, 
+            z_length = dz0
+        )
         plotter.add_mesh(sub, opacity=0.1, color="green")
 
 
         data = 20 * np.log10(np.abs(field[20]))
-
-        vmin = -20
-        vmax = 30
         data = np.clip(data, vmin, vmax)
 
         g.point_data['values'] = data.flatten(order="F")
@@ -593,24 +664,18 @@ class Solver_SingleLayer():
             g, cmap="jet", opacity="linear", scalars="values", clim=[vmin, vmax], show_scalar_bar=False
         )
 
-        # data = 20 * np.log10(np.abs(ez[40]))
-        # data = np.clip(data, -80, -20)
-
-        # g.point_data["values"][:] = data.flatten(order="F")     # update in-place                 # mark as modified
-        plotter.camera.zoom(1)
+        
         plotter.render()    
         plotter.add_axes()
-        # plotter.add_bounding_box()
-        plotter.camera_position = "xz"
-        plotter.camera.elevation += 10
-        # plotter.camera.azimuth += 3
-        plotter.camera.zoom(1.3)
+        plotter.camera_position = view
+        plotter.camera.elevation += el
+        plotter.camera.azimuth += az
         bar = plotter.add_scalar_bar(
             title="Ez [dB]\n", vertical=False, label_font_size=11, title_font_size=14
         )
+        plotter.camera.zoom(zoom)
         # bar.GetTitleTextProperty().SetLineSpacing(3)
         # plotter.show()
-
 
         plotter.open_gif(filename)
 
@@ -657,8 +722,8 @@ class Solver_SingleLayer():
         V1 = utils.dtft_f(v1, self.frequency, 1 / self.dt)
         I1 = utils.dtft_f(i1, self.frequency, 1 / self.dt)
 
-        # advance current by half a time-step to be at the same time sample as the voltage
-        # h components are behind of the e components by half a time step
+        # delay current by half a time-step to be at the same time sample as the voltage
+        # h components are ahead of the e components by half a time step
         I1 = I1 * np.exp(1j * 2 * np.pi * self.frequency * self.dt / 2)
 
         z0 = 50 
@@ -693,7 +758,7 @@ p2_x, p2_y = Nx - 10, Ny//2
 # p4_x, p4_y = Nx - 10, 23
 
 pattern = np.zeros((Nx, Ny), dtype=np.int32)
-pattern[p1_x: p2_x, p1_y-1:p1_y+1] = 1
+pattern[p1_x:, p1_y-1:p1_y+1] = 1
 # pattern[p3_x: p4_x, p3_y-1:p3_y+1] = 1
 # pattern[p1_x:, p1_y-1:p1_y+1] = 1
     
@@ -704,8 +769,8 @@ dy = np.ones(Ny) * dy0
 s = Solver_SingleLayer(frequency, pattern, dx, dy, er, sub_h, 20)
 
 s.add_port("p1", p1_x, p1_y)
-s.add_port("p2", p2_x, p2_y)
-# s.add_zPML()
+# s.add_port("p2", p2_x, p2_y)
+s.add_xPML()
 
 
 Nt = 1300
@@ -728,12 +793,12 @@ plt.plot(src)
 fields = s.run("p1", src)
 
 b1, a1 = s.get_ba("p1", fields)
-b2, a2 = s.get_ba("p2", fields)
+# b2, a2 = s.get_ba("p2", fields)
 
 fig, ax = plt.subplots()
 ax_t = ax.twinx()
 ax.plot(frequency  / 1e9, conv.db20_lin(b1 / a1))
-ax_t.plot(frequency / 1e9, conv.db20_lin(b2 / a1), color="orange", alpha=0.5)
+# ax_t.plot(frequency / 1e9, conv.db20_lin(b2 / a1), color="orange", alpha=0.5)
 ax.set_xlabel("Frequency [GHz]")
 ax.set_ylim([-50, 1])
 ax.margins(x=0)
@@ -751,5 +816,5 @@ stime = time.time()
 fields = s.run("p1", src)
 print(time.time() - stime)
 
-s.generate_gif("msline_2.gif")
+s.generate_gif("msline_2.gif", el=30, zoom=1.3, vmin=-30)
 ipyimage(filename='msline_2.gif')
