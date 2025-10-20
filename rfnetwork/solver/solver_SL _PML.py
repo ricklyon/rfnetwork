@@ -167,6 +167,11 @@ class Solver_SingleLayer():
         self.dt = dt
         self.pattern = pattern
         self.ports = dict()
+        self.probes = dict()
+
+    def add_probe(self, name, x, y, z, field):
+
+        self.probes[name] = dict(x=x, y=y, z=z, field=field)
 
     def run(self, port, v_waveform, gif_step=10):
 
@@ -265,7 +270,9 @@ class Solver_SingleLayer():
                 hx = np.zeros((Nt, 2), dtype=dtype_),
                 hy = np.zeros((Nt, 2), dtype=dtype_),
             )
-        
+
+        for k, p in self.probes.items():
+            self.probes[k]["values"] = np.zeros(Nt, dtype=dtype_)
 
         hx = hx_y
         hy = hy_z
@@ -406,6 +413,10 @@ class Solver_SingleLayer():
             if (n % self.gif_step) == 0:
                 self.gif_fields[n // self.gif_step] = ez
 
+            for k, p in self.probes.items():
+                self.probes[k]["values"][n+1] = ez[p["x"], p["y"], p["z"]]
+
+
         return port_fields
     
     def add_xPML(self, d_pml=10):
@@ -415,11 +426,11 @@ class Solver_SingleLayer():
         m_pml = 3 # sigma profile order
         
         dt = self.dt
-        dz = self.dz[-1]
+        dx = self.dx[-1]
         eta0 = np.sqrt(u0 / e0)
         er_eff = (self.er * e0 + e0) / 2
         # now define the values of sigma and sigma_m from the profiles
-        sigma_max = 0.8 * (m_pml + 1) / (eta0 * dz)
+        sigma_max = 0.8 * (m_pml + 1) / (eta0 * dx)
     
         # define sigma profile in the PML region on the right side of the grid. 
         i_pml = np.arange(0, d_pml)[..., None, None]
@@ -430,48 +441,66 @@ class Solver_SingleLayer():
         sigma_e_np5 = sigma_max * ((i_pml + 0.5) / (d_pml))**m_pml
 
         # magnetic conductivity
-        # plt.figure()
-        # plt.plot(np.arange(0, 10, 1), sigma_m_n.squeeze())
-        # plt.plot(np.arange(0.5, 10.5, 1), sigma_m_np5.squeeze())
+        plt.figure()
+        plt.plot(np.arange(0, 10, 1), sigma_e_n.squeeze())
+        plt.plot(np.arange(0.5, 10.5, 1), sigma_e_np5.squeeze())
 
+        # ex
         # first ex component is at the edge of the PML where sigma = 0, last component is at the solve boundary and not updated
+        # sigma / eps must be constant across y and z, page 291 in taflove
+        # scale sigma by eps
         eps_ez = np.ones(len(self.dz))[None, None] * e0
         eps_ez[..., 0] = self.er * e0
-        self.Ca["ez_x"][-d_pml-1:-1] = (2 * eps_ez - (sigma_e_n * dt)) / (2 * eps_ez + (sigma_e_n * dt))
-        self.Cb["ez_x"][-d_pml-1:-1] = (2 * dt) / ((2 * eps_ez + (sigma_e_n * dt))) 
-
+        sigma_ez = np.broadcast_to(sigma_e_n, (d_pml,) + self.Ca["ez_x"].shape[1:]).copy()
+        sigma_ez *= (eps_ez / e0)
+        
+        self.Ca["ez_x"][-d_pml-1:-1] = (2 * eps_ez - (sigma_ez * dt)) / (2 * eps_ez + (sigma_ez * dt))
+        self.Cb["ez_x"][-d_pml-1:-1] = (2 * dt) / ((2 * eps_ez + (sigma_ez * dt))) 
+        # (sigma_ez / eps_ez)[5, 0, :]
+        
+        # ey
         eps_ey = np.ones(len(self.dz) + 1)[None, None] * e0
         eps_ey[..., 1] = er_eff
+        sigma_ey = np.broadcast_to(sigma_e_n, (d_pml,) + self.Ca["ey_x"].shape[1:]).copy()
+        sigma_ey *= (eps_ey / e0)
+        
         # self.Ca["ey_x"][-d_pml-1:-1] = (2 * eps_ey - (sigma_e_n * dt)) / (2 * eps_ey + (sigma_e_n * dt))
         # self.Cb["ey_x"][-d_pml-1:-1] = (2 * dt) / ((2 * eps_ey + (sigma_e_n * dt))) 
+        # print((sigma_ey / eps_ey)[5, 0, :])
 
         # exclude the ey components in the trace from the PML
         ey_patt = (pattern[:-1] | pattern[1:])[-d_pml:]
-        ey_sig = ey_patt * 1e7
         
         self.Ca["ey_x"][-d_pml-1:-1] = np.where(
             ey_patt[..., None], 
             self.Ca["ey_x"][-d_pml-1:-1],
-            (2 * eps_ey - (sigma_e_n * dt)) / (2 * eps_ey + (sigma_e_n * dt)),
+            (2 * eps_ey - (sigma_ey * dt)) / (2 * eps_ey + (sigma_ey * dt)),
         )
         self.Cb["ey_x"][-d_pml-1:-1] = np.where(
             ey_patt[..., None], 
             self.Cb["ey_x"][-d_pml-1:-1],
-            (2 * dt) / ((2 * eps_ey + (sigma_e_n * dt))),
+            (2 * dt) / ((2 * eps_ey + (sigma_ey * dt))),
         )
 
         # hx/hy components are in the middle of the PML cells, use half cell indices
         eps_hy = np.ones(len(self.dz))[None, None] * e0
         eps_hy[..., 0] = self.er * e0
-        sigma_m_np5 = sigma_e_np5 * u0 / eps_hy
-        self.Da["hy_x"][-d_pml:] = (2 * u0 - (sigma_m_np5 * dt)) / (2 * u0 + (sigma_m_np5 * dt))
-        self.Db["hy_x"][-d_pml:] = (2 * dt) / ((2 * u0 + (sigma_m_np5 * dt))) 
+        simga_e_hy = np.broadcast_to(sigma_e_np5, (d_pml,) + self.Da["hy_x"].shape[1:]).copy()
+        simga_e_hy *= (eps_hy / e0)
+        sigma_m_hy = simga_e_hy * u0 / eps_hy
+        
+        self.Da["hy_x"][-d_pml:] = (2 * u0 - (sigma_m_hy * dt)) / (2 * u0 + (sigma_m_hy * dt))
+        self.Db["hy_x"][-d_pml:] = (2 * dt) / ((2 * u0 + (sigma_m_hy * dt))) 
 
         eps_hz = np.ones(len(self.dz) + 1)[None, None] * e0
-        eps_hz[..., 1] = self.er * e0
-        sigma_m_np5 = sigma_e_np5 * u0 / eps_hz
-        self.Da["hz_x"][-d_pml:] = (2 * u0 - (sigma_m_np5 * dt)) / (2 * u0 + (sigma_m_np5 * dt))
-        self.Db["hz_x"][-d_pml:] = (2 * dt) / ((2 * u0 + (sigma_m_np5 * dt))) 
+        eps_hz[..., 1] = er_eff
+        sigma_e_hz = np.broadcast_to(sigma_e_np5, (d_pml,) + self.Da["hz_x"].shape[1:]).copy()
+        sigma_e_hz *= (eps_hz / e0)
+        sigma_m_hz = sigma_e_hz * u0 / eps_hz
+        
+        
+        self.Da["hz_x"][-d_pml:] = (2 * u0 - (sigma_m_hz * dt)) / (2 * u0 + (sigma_m_hz * dt))
+        self.Db["hz_x"][-d_pml:] = (2 * dt) / ((2 * u0 + (sigma_m_hz * dt))) 
 
 
 
@@ -499,9 +528,9 @@ class Solver_SingleLayer():
         sigma_m_n = sigma_e_n * u0 / e0
         sigma_m_np5 = sigma_e_np5 * u0 / e0
 
-        plt.figure()
-        plt.plot(np.arange(0, 10, 1), sigma_m_n.squeeze())
-        plt.plot(np.arange(0.5, 10.5, 1), sigma_m_np5.squeeze())
+        # plt.figure()
+        # plt.plot(np.arange(0, 10, 1), sigma_m_n.squeeze())
+        # plt.plot(np.arange(0.5, 10.5, 1), sigma_m_np5.squeeze())
 
         # first ex component is at the edge of the PML where sigma = 0, last component is at the solve boundary and not updated
         self.Ca["ex_z"][..., -d_pml-1:-1] = (2 * e0 - (sigma_e_n * dt)) / (2 * e0 + (sigma_e_n * dt))
@@ -712,8 +741,8 @@ class Solver_SingleLayer():
 
         i1 = (c1 + c2)
 
-        fig, ax = plt.subplots()
-        ax.plot(v1)
+        # fig, ax = plt.subplots()
+        # ax.plot(v1)
 
         # plt.figure()
         # plt.plot(v1)
@@ -734,7 +763,7 @@ class Solver_SingleLayer():
     
 
 frequency: np.ndarray = np.arange(5e9, 15e9, 10e6)
-er: float = 3.66
+er: float = 1
 er_eff = 2.84
 sub_h = conv.m_in(0.02)
 
@@ -771,6 +800,8 @@ s = Solver_SingleLayer(frequency, pattern, dx, dy, er, sub_h, 20)
 s.add_port("p1", p1_x, p1_y)
 # s.add_port("p2", p2_x, p2_y)
 s.add_xPML()
+# s.add_xPML()
+s.add_probe("probe1", 20, p1_y, 0, "ez")
 
 
 Nt = 1300
@@ -792,6 +823,21 @@ plt.plot(src)
 
 fields = s.run("p1", src)
 
+# probe fields
+fig, ax = plt.subplots()
+
+fwd = s.probes["probe1"]["values"].copy()
+fwd /= np.max(np.abs(fwd))
+
+ax.plot(np.arange(len(src)) * s.dt / 1e-9, conv.db20_lin(fwd))
+ax.set_ylim([-80, 0])
+ax.set_xlabel("Time [ns]")
+ax.set_ylabel("|$E_z$| [dB]")
+ax.grid(True)
+
+
+
+# sparameters
 b1, a1 = s.get_ba("p1", fields)
 # b2, a2 = s.get_ba("p2", fields)
 
@@ -806,7 +852,7 @@ ax.legend(["S11", "S21"], loc="upper left")
 ax_t.legend(["S21"], loc="upper right")
 ax.set_ylabel("dB")
 ax_t.set_ylabel("dB")
-mplm.line_marker(x=10)
+mplm.axis_marker(y=np.max(conv.db20_lin(b1 / a1)), axes=ax)
 plt.show()
 
 
@@ -816,5 +862,5 @@ stime = time.time()
 fields = s.run("p1", src)
 print(time.time() - stime)
 
-s.generate_gif("msline_2.gif", el=30, zoom=1.3, vmin=-30)
-ipyimage(filename='msline_2.gif')
+# s.generate_gif("msline_2.gif", el=30, zoom=1.3, vmin=-40, vmax=20)
+# ipyimage(filename='msline_2.gif')
