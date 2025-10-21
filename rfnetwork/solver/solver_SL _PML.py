@@ -421,7 +421,7 @@ class Solver_SingleLayer():
 
         return port_fields
     
-    def add_xPML(self, d_pml=10):
+    def add_xPML(self, d_pml=10, side="upper"):
         """
         Add PML layer to the top face of the solution box.
         """
@@ -443,9 +443,22 @@ class Solver_SingleLayer():
         sigma_e_np5 = sigma_max * ((i_pml + 0.5) / (d_pml))**m_pml
 
         # magnetic conductivity
-        plt.figure()
-        plt.plot(np.arange(0, d_pml, 1), sigma_e_n.squeeze())
-        plt.plot(np.arange(0.5, d_pml + .5, 1), sigma_e_np5.squeeze())
+        # plt.figure()
+        # plt.plot(np.arange(0, d_pml, 1), sigma_e_n.squeeze())
+        # plt.plot(np.arange(0.5, d_pml + .5, 1), sigma_e_np5.squeeze())
+
+        e_idx = slice(d_pml, 0, -1) if side=="lower" else slice(-d_pml-1, -1)
+        h_idx = slice(d_pml-1, None, -1) if side=="lower" else slice(-d_pml, None)
+
+        # s = np.arange(15)
+        # s[slice(d_pml-1, None, -1) ]
+        # s[10::-1]
+        # s[slice(d_pml+1, 0, -1)]
+
+        # s[slice(-d_pml-1, -1)]
+
+        # s[slice(d_pml, None, -1)]
+        # s[-d_pml:]
 
         # ez
         # first ez component is at the edge of the PML where sigma = 0, last component is at the solve boundary and not updated
@@ -456,8 +469,8 @@ class Solver_SingleLayer():
         sigma_ez = np.broadcast_to(sigma_e_n, (d_pml,) + self.Ca["ez_x"].shape[1:]).copy()
         sigma_ez *= (eps_ez / e0)
         
-        self.Ca["ez_x"][-d_pml-1:-1] = (2 * eps_ez - (sigma_ez * dt)) / (2 * eps_ez + (sigma_ez * dt))
-        self.Cb["ez_x"][-d_pml-1:-1] = (2 * dt) / ((2 * eps_ez + (sigma_ez * dt))) 
+        self.Ca["ez_x"][e_idx] = (2 * eps_ez - (sigma_ez * dt)) / (2 * eps_ez + (sigma_ez * dt))
+        self.Cb["ez_x"][e_idx] = (2 * dt) / ((2 * eps_ez + (sigma_ez * dt))) 
         # (sigma_ez / eps_ez)[5, 0, :]
         
         # ey
@@ -470,16 +483,16 @@ class Solver_SingleLayer():
         # print((sigma_ey / eps_ey)[5, 0, :])
 
         # exclude the ey components in the trace from the PML
-        ey_patt = (pattern[:-1] | pattern[1:])[-d_pml:]
+        ey_patt = (pattern[:-1] | pattern[1:])[h_idx]
         
-        self.Ca["ey_x"][-d_pml-1:-1] = np.where(
+        self.Ca["ey_x"][e_idx] = np.where(
             ey_patt[..., None], 
-            self.Ca["ey_x"][-d_pml-1:-1],
+            self.Ca["ey_x"][e_idx],
             (2 * eps_ey - (sigma_ey * dt)) / (2 * eps_ey + (sigma_ey * dt)),
         )
-        self.Cb["ey_x"][-d_pml-1:-1] = np.where(
+        self.Cb["ey_x"][e_idx] = np.where(
             ey_patt[..., None], 
-            self.Cb["ey_x"][-d_pml-1:-1],
+            self.Cb["ey_x"][e_idx],
             (2 * dt) / ((2 * eps_ey + (sigma_ey * dt))),
         )
 
@@ -490,8 +503,8 @@ class Solver_SingleLayer():
         simga_e_hy *= (eps_hy / e0)
         sigma_m_hy = simga_e_hy * u0 / eps_hy
         
-        self.Da["hy_x"][-d_pml:] = (2 * u0 - (sigma_m_hy * dt)) / (2 * u0 + (sigma_m_hy * dt))
-        self.Db["hy_x"][-d_pml:] = (2 * dt) / ((2 * u0 + (sigma_m_hy * dt))) 
+        self.Da["hy_x"][h_idx] = (2 * u0 - (sigma_m_hy * dt)) / (2 * u0 + (sigma_m_hy * dt))
+        self.Db["hy_x"][h_idx] = (2 * dt) / ((2 * u0 + (sigma_m_hy * dt))) 
 
         eps_hz = np.ones(len(self.dz) + 1)[None, None] * e0
         eps_hz[..., 0] = self.er * e0
@@ -501,9 +514,8 @@ class Solver_SingleLayer():
         sigma_m_hz = sigma_e_hz * u0 / eps_hz
         
         
-        self.Da["hz_x"][-d_pml:] = (2 * u0 - (sigma_m_hz * dt)) / (2 * u0 + (sigma_m_hz * dt))
-        self.Db["hz_x"][-d_pml:] = (2 * dt) / ((2 * u0 + (sigma_m_hz * dt))) 
-
+        self.Da["hz_x"][h_idx] = (2 * u0 - (sigma_m_hz * dt)) / (2 * u0 + (sigma_m_hz * dt))
+        self.Db["hz_x"][h_idx] = (2 * dt) / ((2 * u0 + (sigma_m_hz * dt))) 
 
 
     def add_zPML(self, d_pml=10):
@@ -522,22 +534,16 @@ class Solver_SingleLayer():
         i_pml = np.arange(0, d_pml)[None, None]
     
         # sigma on the cell edges. Components on the edge of the PML have a sigma of 0.
-        sigma_e_n = sigma_max * ((i_pml) / (d_pml + 0.5))**m_pml
+        sigma_e_n = sigma_max * ((i_pml) / (d_pml))**m_pml
         # sigma in the middle of the cells. First Hz component in the PML is 0.5 cells into the PML
-        sigma_e_np5 = sigma_max * ((i_pml + 0.5) / (d_pml + 0.5))**m_pml
-
-        # magnetic conductivity
-        sigma_m_n = sigma_e_n * u0 / e0
+        sigma_e_np5 = sigma_max * ((i_pml + 0.5) / (d_pml))**m_pml
         sigma_m_np5 = sigma_e_np5 * u0 / e0
 
-        # plt.figure()
-        # plt.plot(np.arange(0, 10, 1), sigma_m_n.squeeze())
-        # plt.plot(np.arange(0.5, 10.5, 1), sigma_m_np5.squeeze())
-
-        # first ex component is at the edge of the PML where sigma = 0, last component is at the solve boundary and not updated
+        # ex
         self.Ca["ex_z"][..., -d_pml-1:-1] = (2 * e0 - (sigma_e_n * dt)) / (2 * e0 + (sigma_e_n * dt))
         self.Cb["ex_z"][..., -d_pml-1:-1] = (2 * dt) / ((2 * e0 + (sigma_e_n * dt))) 
-
+        
+        # ey
         self.Ca["ey_z"][..., -d_pml-1:-1] = (2 * e0 - (sigma_e_n * dt)) / (2 * e0 + (sigma_e_n * dt))
         self.Cb["ey_z"][..., -d_pml-1:-1] = (2 * dt) / ((2 * e0 + (sigma_e_n * dt))) 
 
@@ -548,14 +554,7 @@ class Solver_SingleLayer():
         self.Da["hy_z"][..., -d_pml:] = (2 * u0 - (sigma_m_np5 * dt)) / (2 * u0 + (sigma_m_np5 * dt))
         self.Db["hy_z"][..., -d_pml:] = (2 * dt) / ((2 * u0 + (sigma_m_np5 * dt))) 
 
-        # plt.plot(self.Da["hy_z"][10, 10])
-        # plt.plot(self.Db["hy_z"][10, 10])
-        
-        # Ca_0 = (2 * e0 - (sig_0 * dt)) / (2 * e0 + (sig_0 * dt))
-        # Cb_0 = (2 * dt) / ((2 * e0 + (sig_0 * dt))) 
-        # Da = (2 * u0 - (sigma_m * dt)) / (2 * u0 + (sigma_m * dt))
-        # Db_0 = (2 * dt) / ((2 * u0 + (sigma_m * dt))) 
-        
+    
 
     def add_port(self, name, ez_x, ez_y, r0=50, ind_comp = 0.75):
         # resistive load
@@ -698,13 +697,15 @@ class Solver_SingleLayer():
         
         plotter.render()    
         plotter.add_axes()
-        plotter.camera_position = view
+        plotter.camera_position = "xz"
+        # plotter.camera.position = (dx[0] * 120, -dy[0] * 80, dz[0] * 30)
+        # plotter.camera.focal_point = (dx[0] * 120, dy[0] * 80, 0)
         plotter.camera.elevation += el
         plotter.camera.azimuth += az
         bar = plotter.add_scalar_bar(
             title="Ez [dB]\n", vertical=False, label_font_size=11, title_font_size=14
         )
-        plotter.camera.zoom(zoom)
+        plotter.camera.zoom(1)
         # bar.GetTitleTextProperty().SetLineSpacing(3)
         # plotter.show()
 
@@ -717,7 +718,7 @@ class Solver_SingleLayer():
             plotter.add_title(f"t={n * self.gif_step * self.dt * 1e9:.2f}ns")
             plotter.render()  
             plotter.write_frame()
-        # # plotter.show()
+        # plotter.show()
 
         # Closes and finalizes movie
         plotter.close()
@@ -766,7 +767,7 @@ class Solver_SingleLayer():
 
 frequency: np.ndarray = np.arange(5e9, 15e9, 10e6)
 er: float = 3.66
-er_eff = 2.84
+
 sub_h = conv.m_in(0.02)
 
 dx0 = conv.m_in(0.02)
@@ -774,7 +775,6 @@ dy0 = conv.m_in(0.02)
 
 
 f0 = 10e9
-lam0 = (const.c0 / np.sqrt(er_eff)) / f0
 
 Nx = int(( conv.m_in(2)/ dx0) + 20)
 Ny = 20
@@ -789,7 +789,7 @@ p2_x, p2_y = Nx - 10, Ny//2
 # p4_x, p4_y = Nx - 10, 23
 
 pattern = np.zeros((Nx, Ny), dtype=np.int32)
-pattern[p1_x:, p1_y-1:p1_y+1] = 1
+pattern[:p2_x, p1_y-1:p1_y+1] = 1
 # pattern[p3_x: p4_x, p3_y-1:p3_y+1] = 1
 # pattern[p1_x:, p1_y-1:p1_y+1] = 1
     
@@ -799,11 +799,11 @@ dy = np.ones(Ny) * dy0
 
 s = Solver_SingleLayer(frequency, pattern, dx, dy, er, sub_h, 20)
 
-s.add_port("p1", p1_x, p1_y)
-# s.add_port("p2", p2_x, p2_y)
-s.add_xPML(d_pml = 10)
-# s.add_xPML()
-s.add_probe("probe1", 20, p1_y, 0, "ez")
+# s.add_port("p1", p1_x, p1_y)
+s.add_port("p2", p2_x, p2_y)
+s.add_xPML(d_pml = 10, side="lower")
+s.add_zPML(d_pml = 5)
+s.add_probe("probe1", Nx-20, p1_y, 0, "ez")
 
 
 Nt = 1300
@@ -823,7 +823,7 @@ src[:pulse_n] = a * (np.sin(2*np.pi*f0 * (t)) * np.exp(-((t - t0) / t_half)**2))
 plt.figure()
 plt.plot(src)
 
-fields = s.run("p1", src)
+fields = s.run("p2", src)
 
 # probe fields
 fig, ax = plt.subplots()
@@ -840,7 +840,7 @@ ax.grid(True)
 
 
 # sparameters
-b1, a1 = s.get_ba("p1", fields)
+b1, a1 = s.get_ba("p2", fields)
 # b2, a2 = s.get_ba("p2", fields)
 
 fig, ax = plt.subplots()
@@ -859,10 +859,5 @@ plt.show()
 
 
 
-import time
-stime = time.time()
-fields = s.run("p1", src)
-print(time.time() - stime)
-
-# s.generate_gif("msline_2.gif", el=30, zoom=1.3, vmin=-40, vmax=20)
-# ipyimage(filename='msline_2.gif')
+s.generate_gif("msline_2.gif", el=30, zoom=1.5, vmin=-40, vmax=20)
+ipyimage(filename='msline_2.gif')
