@@ -95,24 +95,25 @@ class Solver_SingleLayer():
 
         # ex and ey are on the boundary between material cells, compute the average of the substrate
         # FIX for non-uniform grids
-        Cb_ex[..., ms_z] = (Cb_ex[..., ms_z - 1] + Cb_ex[..., ms_z + 1]) / 2
-        Cb_ey[..., ms_z] = (Cb_ey[..., ms_z - 1] + Cb_ey[..., ms_z + 1]) / 2
+        eps_avg = 2 * e0 * e0 * er / (e0 + er * e0)
+        Cb_ex[..., ms_z] = (2 * dt) / ((2 * eps_avg + (sig_0 * dt))) 
+        Cb_ey[..., ms_z] = (2 * dt) / ((2 * eps_avg + (sig_0 * dt))) 
+        # Cb_ex[..., ms_z] = (Cb_ex[..., ms_z - 1] + Cb_ex[..., ms_z + 1]) / 2
+        # Cb_ey[..., ms_z] = (Cb_ey[..., ms_z - 1] + Cb_ey[..., ms_z + 1]) / 2
 
         # PEC pattern
         # conductivity of PEC
         sig_pec = 1e7
-        # effective permittivity for ex/ey components on the boundary of the substrate
-        er_eff = (sub_eps + e0) / 2
 
         # set ex coefficient to PEC if either cell next to it (along y) is set as copper
         ex_patt = (pattern[:, :-1] | pattern[:, 1:]) 
         ex_sig = ex_patt * sig_pec
 
         Ca_ex[..., 1:-1, ms_z] = np.where(
-            ex_patt, (2 * er_eff - (ex_sig * dt)) / (2 * er_eff + (ex_sig * dt)), Ca_ex[..., 1:-1, ms_z]
+            ex_patt, (2 * eps_avg - (ex_sig * dt)) / (2 * eps_avg + (ex_sig * dt)), Ca_ex[..., 1:-1, ms_z]
         )
         Cb_ex[..., 1:-1, ms_z] = np.where(
-            ex_patt, (2 * dt) / ((2 * er_eff + (ex_sig * dt))), Cb_ex[..., 1:-1, ms_z]
+            ex_patt, (2 * dt) / ((2 * eps_avg + (ex_sig * dt))), Cb_ex[..., 1:-1, ms_z]
         )
 
         # set ey coefficient to PEC if either cell next to it (along x) is set as copper
@@ -120,10 +121,10 @@ class Solver_SingleLayer():
         ey_sig = ey_patt * sig_pec
         
         Ca_ey[1:-1, :, ms_z] = np.where(
-            ey_patt, (2 * er_eff - (ey_sig * dt)) / (2 * er_eff + (ey_sig * dt)), Ca_ey[1:-1, :, ms_z]
+            ey_patt, (2 * eps_avg - (ey_sig * dt)) / (2 * eps_avg + (ey_sig * dt)), Ca_ey[1:-1, :, ms_z]
         )
         Cb_ey[1:-1, :, ms_z] = np.where(
-            ey_patt, (2 * dt) / ((2 * er_eff + (ey_sig * dt))) , Cb_ey[1:-1, :, ms_z]
+            ey_patt, (2 * dt) / ((2 * eps_avg + (ey_sig * dt))) , Cb_ey[1:-1, :, ms_z]
         )
 
         self.Ca = dict(
@@ -168,6 +169,7 @@ class Solver_SingleLayer():
         self.pattern = pattern
         self.ports = dict()
         self.probes = dict()
+        self.eps_avg = eps_avg
 
     def add_probe(self, name, x, y, z, field):
 
@@ -442,13 +444,13 @@ class Solver_SingleLayer():
 
         # magnetic conductivity
         plt.figure()
-        plt.plot(np.arange(0, 10, 1), sigma_e_n.squeeze())
-        plt.plot(np.arange(0.5, 10.5, 1), sigma_e_np5.squeeze())
+        plt.plot(np.arange(0, d_pml, 1), sigma_e_n.squeeze())
+        plt.plot(np.arange(0.5, d_pml + .5, 1), sigma_e_np5.squeeze())
 
-        # ex
-        # first ex component is at the edge of the PML where sigma = 0, last component is at the solve boundary and not updated
+        # ez
+        # first ez component is at the edge of the PML where sigma = 0, last component is at the solve boundary and not updated
         # sigma / eps must be constant across y and z, page 291 in taflove
-        # scale sigma by eps
+        # scale sigma by eps so that sigma / eps is constant
         eps_ez = np.ones(len(self.dz))[None, None] * e0
         eps_ez[..., 0] = self.er * e0
         sigma_ez = np.broadcast_to(sigma_e_n, (d_pml,) + self.Ca["ez_x"].shape[1:]).copy()
@@ -460,12 +462,11 @@ class Solver_SingleLayer():
         
         # ey
         eps_ey = np.ones(len(self.dz) + 1)[None, None] * e0
-        eps_ey[..., 1] = er_eff
+        eps_ey[..., 0] = self.er * e0
+        eps_ey[..., 1] = self.eps_avg
+
         sigma_ey = np.broadcast_to(sigma_e_n, (d_pml,) + self.Ca["ey_x"].shape[1:]).copy()
         sigma_ey *= (eps_ey / e0)
-        
-        # self.Ca["ey_x"][-d_pml-1:-1] = (2 * eps_ey - (sigma_e_n * dt)) / (2 * eps_ey + (sigma_e_n * dt))
-        # self.Cb["ey_x"][-d_pml-1:-1] = (2 * dt) / ((2 * eps_ey + (sigma_e_n * dt))) 
         # print((sigma_ey / eps_ey)[5, 0, :])
 
         # exclude the ey components in the trace from the PML
@@ -493,7 +494,8 @@ class Solver_SingleLayer():
         self.Db["hy_x"][-d_pml:] = (2 * dt) / ((2 * u0 + (sigma_m_hy * dt))) 
 
         eps_hz = np.ones(len(self.dz) + 1)[None, None] * e0
-        eps_hz[..., 1] = er_eff
+        eps_hz[..., 0] = self.er * e0
+        eps_hz[..., 1] = e0
         sigma_e_hz = np.broadcast_to(sigma_e_np5, (d_pml,) + self.Da["hz_x"].shape[1:]).copy()
         sigma_e_hz *= (eps_hz / e0)
         sigma_m_hz = sigma_e_hz * u0 / eps_hz
@@ -763,7 +765,7 @@ class Solver_SingleLayer():
     
 
 frequency: np.ndarray = np.arange(5e9, 15e9, 10e6)
-er: float = 1
+er: float = 3.66
 er_eff = 2.84
 sub_h = conv.m_in(0.02)
 
@@ -799,7 +801,7 @@ s = Solver_SingleLayer(frequency, pattern, dx, dy, er, sub_h, 20)
 
 s.add_port("p1", p1_x, p1_y)
 # s.add_port("p2", p2_x, p2_y)
-s.add_xPML()
+s.add_xPML(d_pml = 10)
 # s.add_xPML()
 s.add_probe("probe1", 20, p1_y, 0, "ez")
 
