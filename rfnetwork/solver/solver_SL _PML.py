@@ -185,7 +185,7 @@ class Solver_SingleLayer():
         Nx, Ny, Nz = len(dx), len(dy), len(dz)
         
         self.gif_step = gif_step
-        self.gif_fields = np.zeros((Nt // self.gif_step, Nx+1, Ny+1, Nz), dtype=dtype_)
+        self.gif_fields = np.zeros(((Nt // self.gif_step) + 1, Nx+1, Ny+1, Nz), dtype=dtype_)
 
         
         # field values
@@ -420,7 +420,103 @@ class Solver_SingleLayer():
 
 
         return port_fields
+
+    def add_yPML(self, d_pml=10, side="upper"):
+        """
+        Add PML layer to the top face of the solution box.
+        """
+        m_pml = 3 # sigma profile order
+        
+        dt = self.dt
+        dy = self.dy[-1]
+        eta0 = np.sqrt(u0 / e0)
+        er_eff = (self.er * e0 + e0) / 2
+        # now define the values of sigma and sigma_m from the profiles
+        sigma_max = 0.8 * (m_pml + 1) / (eta0 * dy)
     
+        # define sigma profile in the PML region on the right side of the grid. 
+        i_pml = np.arange(0, d_pml)[None, :, None]
+    
+        # sigma on the cell edges. Components on the edge of the PML have a sigma of 0.
+        sigma_e_n = sigma_max * ((i_pml) / (d_pml))**m_pml
+        # sigma in the middle of the cells. First Hz component in the PML is 0.5 cells into the PML
+        sigma_e_np5 = sigma_max * ((i_pml + 0.5) / (d_pml))**m_pml
+
+        # magnetic conductivity
+        # plt.figure()
+        # plt.plot(np.arange(0, d_pml, 1), sigma_e_n.squeeze())
+        # plt.plot(np.arange(0.5, d_pml + .5, 1), sigma_e_np5.squeeze())
+
+        e_idx = slice(d_pml, 0, -1) if side=="lower" else slice(-d_pml-1, -1)
+        h_idx = slice(d_pml-1, None, -1) if side=="lower" else slice(-d_pml, None)
+
+        # s = np.arange(15)
+        # s[slice(d_pml-1, None, -1) ]
+        # s[10::-1]
+        # s[slice(d_pml+1, 0, -1)]
+
+        # s[slice(-d_pml-1, -1)]
+
+        # s[slice(d_pml, None, -1)]
+        # s[-d_pml:]
+
+        # ez
+        # first ez component is at the edge of the PML where sigma = 0, last component is at the solve boundary and not updated
+        # sigma / eps must be constant across y and z, page 291 in taflove
+        # scale sigma by eps so that sigma / eps is constant
+        eps_ez = np.ones(len(self.dz))[None, None] * e0
+        eps_ez[..., 0] = self.er * e0
+        sigma_ez = np.broadcast_to(sigma_e_n, (self.Ca["ez_x"].shape[0], d_pml, self.Ca["ez_x"].shape[-1])).copy()
+        sigma_ez *= (eps_ez / e0)
+        
+        self.Ca["ez_y"][:, e_idx] = (2 * eps_ez - (sigma_ez * dt)) / (2 * eps_ez + (sigma_ez * dt))
+        self.Cb["ez_y"][:, e_idx] = (2 * dt) / ((2 * eps_ez + (sigma_ez * dt))) 
+        # (sigma_ez / eps_ez)[5, 0, :]
+        
+        # ex
+        eps_ex = np.ones(len(self.dz) + 1)[None, None] * e0
+        eps_ex[..., 0] = self.er * e0
+        eps_ex[..., 1] = self.eps_avg
+
+        sigma_ex = np.broadcast_to(sigma_e_n, (self.Ca["ex_y"].shape[0], d_pml, self.Ca["ex_y"].shape[-1])).copy()
+        sigma_ex *= (eps_ex / e0)
+        # print((sigma_ey / eps_ey)[5, 0, :])
+
+        # exclude the ey components in the trace from the PML
+        ex_patt = (pattern[:, :-1] | pattern[:, 1:])[:, h_idx]
+        
+        self.Ca["ex_y"][:, e_idx] = np.where(
+            ex_patt[..., None], 
+            self.Ca["ex_y"][:, e_idx],
+            (2 * eps_ex - (sigma_ex * dt)) / (2 * eps_ex + (sigma_ex * dt)),
+        )
+        self.Cb["ex_y"][:, e_idx] = np.where(
+            ex_patt[..., None], 
+            self.Cb["ex_y"][:, e_idx],
+            (2 * dt) / ((2 * eps_ex + (sigma_ex * dt))),
+        )
+
+        # hx/hy components are in the middle of the PML cells, use half cell indices
+        eps_hx = np.ones(len(self.dz))[None, None] * e0
+        eps_hx[..., 0] = self.er * e0
+        simga_e_hx = np.broadcast_to(sigma_e_np5, (self.Da["hx_y"].shape[0], d_pml, self.Da["hx_y"].shape[-1])).copy()
+        simga_e_hx *= (eps_hx / e0)
+        sigma_m_hx = simga_e_hx * u0 / eps_hx
+        
+        self.Da["hx_y"][:, h_idx] = (2 * u0 - (sigma_m_hx * dt)) / (2 * u0 + (sigma_m_hx * dt))
+        self.Db["hx_y"][:, h_idx] = (2 * dt) / ((2 * u0 + (sigma_m_hx * dt))) 
+
+        eps_hz = np.ones(len(self.dz) + 1)[None, None] * e0
+        eps_hz[..., 0] = self.er * e0
+        eps_hz[..., 1] = e0
+        sigma_e_hz = np.broadcast_to(sigma_e_np5, (self.Da["hz_y"].shape[0], d_pml, self.Da["hz_y"].shape[-1])).copy()
+        sigma_e_hz *= (eps_hz / e0)
+        sigma_m_hz = sigma_e_hz * u0 / eps_hz
+        
+        
+        self.Da["hz_y"][:, h_idx] = (2 * u0 - (sigma_m_hz * dt)) / (2 * u0 + (sigma_m_hz * dt))
+        self.Db["hz_y"][:, h_idx] = (2 * dt) / ((2 * u0 + (sigma_m_hz * dt))) 
+
     def add_xPML(self, d_pml=10, side="upper"):
         """
         Add PML layer to the top face of the solution box.
@@ -634,33 +730,30 @@ class Solver_SingleLayer():
 
     
 
-    def generate_gif(self, filename, view="xz", vmax=30, vmin=-20, zoom=1.3, el=10, az=0):
+    def generate_gif(self, filename, view="xz", vmax=30, vmin=-20, zoom=1.3, el=10, az=0, volume=False):
         nframe = len(self.gif_fields)
         # numpy type for the field values
         dtype_ = np.float32
         dx, dy, dz = self.dx, self.dy, self.dz
         Nx, Ny, Nz = len(dx), len(dy), len(dz)
 
-        field = self.gif_fields[:, :Nx, :Ny, :Nz]
-        g = pv.ImageData()
+        field = self.gif_fields#[:, :Nx, :Ny, :Nz]
+        field = np.where(np.abs(field) < 1e-12, 1e-12, field)
 
-        g.dimensions = (Nx, Ny, Nz)
-        g.spacing = (dx[0], dy[0], dz[0])
-        # edges = g.extract_all_edges()
+        gx = np.concatenate([[0], np.cumsum(dx)])
+        gy = np.concatenate([[0], np.cumsum(dy)])
+        gz = np.concatenate([[0], np.cumsum(dz)])
+        
+        grid = pv.RectilinearGrid(gx, gy, gz)
 
-        # Open a gif
+        ez_fields = pv.RectilinearGrid(gx, gy, gz[1:])
+
         plotter = pv.Plotter(off_screen=True)
-
-        plotter.add_mesh(g, style="wireframe", line_width=0.05, color="k", opacity=0.05)
-        # plotter.show()
-
-        pattern_g = pv.ImageData(dimensions=self.pattern.shape + (2,))
-        pattern_g.spacing = (dx[0], dy[0], dz[0])
-
-        # patt_nan = np.where(self.pattern < 0.01, np.nan, self.pattern)[..., None]
-        p = np.broadcast_to(self.pattern[..., None], self.pattern.shape + (2,)).copy()
-        p[..., 0] = 0
-        pattern_g.point_data["scalars"] = p.flatten(order="F")
+        # add grid
+        plotter.add_mesh(grid, style="wireframe", line_width=0.05, color="k", opacity=0.05)
+        # add copper features
+        pattern_g = pv.RectilinearGrid(gx, gy, dz[:1])
+        pattern_g.cell_data["values"] = self.pattern.flatten(order="F")
 
         # Create the colormap from the list of colors
         cmap_two_colors = mcolors.LinearSegmentedColormap.from_list(
@@ -675,29 +768,33 @@ class Solver_SingleLayer():
             smooth_shading=False, 
             interpolate_before_map=False
         )
-
-        gx0, dy0, dz0 = (dx[0], dy[0], dz[0])
+        plotter.add_axes()
+        
+        # substrate
+        Gx, Gy, Gz = np.sum(dx), np.sum(dy), dz[0]
+        
         sub = pv.Cube(
-            center=np.array(((Nx//2 - 0.5) * dx0, (Ny//2 - 0.5) * dy0, 0.5 * dz0)), 
-            x_length=(Nx-1) * dx0, 
-            y_length=(Ny-1) * dy0, 
-            z_length = dz0
+            center=(Gx / 2, Gy / 2, Gz / 2), 
+            x_length=Gx, 
+            y_length=Gy, 
+            z_length=Gz
         )
         plotter.add_mesh(sub, opacity=0.1, color="green")
+        # plotter.show()
 
 
         data = 20 * np.log10(np.abs(field[20]))
-        data = np.clip(data, vmin, vmax)
 
-        g.point_data['values'] = data.flatten(order="F")
-        plotter.add_volume(
-            g, cmap="jet", opacity="linear", scalars="values", clim=[vmin, vmax], show_scalar_bar=False
-        )
+        ez_fields.point_data['values'] = data.flatten()
+        if volume:
+            plotter.add_volume(ez_fields, cmap="jet", opacity="linear", scalars="values", clim=[vmin, vmax], show_scalar_bar=False)
+        else:
+            plotter.add_mesh(ez_fields, cmap="jet", opacity="linear", scalars="values", clim=[vmin, vmax], show_scalar_bar=False)
 
         
         plotter.render()    
         plotter.add_axes()
-        plotter.camera_position = "xz"
+        plotter.camera_position = view
         # plotter.camera.position = (dx[0] * 120, -dy[0] * 80, dz[0] * 30)
         # plotter.camera.focal_point = (dx[0] * 120, dy[0] * 80, 0)
         plotter.camera.elevation += el
@@ -705,7 +802,7 @@ class Solver_SingleLayer():
         bar = plotter.add_scalar_bar(
             title="Ez [dB]\n", vertical=False, label_font_size=11, title_font_size=14
         )
-        plotter.camera.zoom(1)
+        plotter.camera.zoom(zoom)
         # bar.GetTitleTextProperty().SetLineSpacing(3)
         # plotter.show()
 
@@ -714,7 +811,7 @@ class Solver_SingleLayer():
         for n in range(nframe):
             data = 20 * np.log10(np.abs(field[n]))
             data = np.clip(data, vmin, vmax)
-            g.point_data["values"][:] = data.flatten(order="F")
+            ez_fields.point_data["values"][:] = data.flatten(order="F")
             plotter.add_title(f"t={n * self.gif_step * self.dt * 1e9:.2f}ns")
             plotter.render()  
             plotter.write_frame()
@@ -773,47 +870,64 @@ sub_h = conv.m_in(0.02)
 dx0 = conv.m_in(0.02)
 dy0 = conv.m_in(0.02)
 
-
 f0 = 10e9
 
-Nx = int(( conv.m_in(2)/ dx0) + 20)
-Ny = 20
+Nx = 60 #int(( conv.m_in(2)/ dx0) + 20)
+Ny = 60
 
 dx = np.ones(Nx) * dx0
 dy = np.ones(Ny) * dy0
 
 p1_x, p1_y = 10, Ny//2
-p2_x, p2_y = Nx - 10, Ny//2
+
+p2_x, p2_y = int((3/4) * Nx), Ny - 10
+p3_x, p3_y = int((3/4) * Nx), 10
 
 # p3_x, p3_y = 10, 23
 # p4_x, p4_y = Nx - 10, 23
 
 pattern = np.zeros((Nx, Ny), dtype=np.int32)
-pattern[:p2_x, p1_y-1:p1_y+1] = 1
-# pattern[p3_x: p4_x, p3_y-1:p3_y+1] = 1
-# pattern[p1_x:, p1_y-1:p1_y+1] = 1
-    
-dx = np.ones(Nx) * dx0
-dy = np.ones(Ny) * dy0
+pattern[p1_x:p2_x, p1_y-2:p1_y+2] = 1
+pattern[p2_x-1:p2_x+1, p1_y:] = 1
+pattern[p3_x-1:p3_x+1, :p1_y+1] = 1
+# pattern[p3_x-1:p3_x+1, p1_y-1:p1_y+1] = 0
+
+
+
+fig, ax = plt.subplots()
+ax.pcolormesh(pattern.T)
+ax.set_aspect("equal")
+
+dy[p1_y-2:p1_y+2] = conv.m_in(0.01)
+
+dx[p2_x-3:p2_x+3] = conv.m_in(0.0055)
+# dx[p2_x-2] = conv.m_in(0.010)
+# dx[p2_x+1] = conv.m_in(0.010)
+
+np.meshgrid(dx, dy)
+fig, ax = plt.subplots()
+ax.plot(dx)
 
 
 s = Solver_SingleLayer(frequency, pattern, dx, dy, er, sub_h, 20)
 
-# s.add_port("p1", p1_x, p1_y)
-s.add_port("p2", p2_x, p2_y)
-s.add_xPML(d_pml = 10, side="lower")
+s.add_port("p1", p1_x, p1_y)
+# s.add_port("p2", p2_x, p2_y)
+# s.add_port("p3", p3_x, p3_y)
+s.add_yPML(d_pml = 10, side="lower")
+s.add_yPML(d_pml = 10, side="upper")
 s.add_zPML(d_pml = 5)
-s.add_probe("probe1", Nx-20, p1_y, 0, "ez")
+# s.add_probe("probe1", Nx-20, p1_y, 0, "ez")
 
 
-Nt = 1300
+Nt = 1100
 f0 = 10e9
 src = np.zeros(Nt)
 pulse_n = 1000
 # width of half pulse in time
-t_half = 9e-11#(dt * (pulse_n // 8))
+t_half = 4e-11#(dt * (pulse_n // 8))
 # center of the pulse in time
-t0 = (s.dt * 250)
+t0 = (s.dt * 300)
 
 t = np.linspace(0, s.dt * pulse_n, pulse_n)
 # gaussian modulated sine wave source
@@ -823,24 +937,24 @@ src[:pulse_n] = a * (np.sin(2*np.pi*f0 * (t)) * np.exp(-((t - t0) / t_half)**2))
 plt.figure()
 plt.plot(src)
 
-fields = s.run("p2", src)
+fields = s.run("p1", src, gif_step=15)
 
-# probe fields
-fig, ax = plt.subplots()
+# # probe fields
+# fig, ax = plt.subplots()
 
-fwd = s.probes["probe1"]["values"].copy()
-fwd /= np.max(np.abs(fwd))
+# fwd = s.probes["probe1"]["values"].copy()
+# fwd /= np.max(np.abs(fwd))
 
-ax.plot(np.arange(len(src)) * s.dt / 1e-9, conv.db20_lin(fwd))
-ax.set_ylim([-80, 0])
-ax.set_xlabel("Time [ns]")
-ax.set_ylabel("|$E_z$| [dB]")
-ax.grid(True)
+# ax.plot(np.arange(len(src)) * s.dt / 1e-9, conv.db20_lin(fwd))
+# ax.set_ylim([-80, 0])
+# ax.set_xlabel("Time [ns]")
+# ax.set_ylabel("|$E_z$| [dB]")
+# ax.grid(True)
 
 
 
 # sparameters
-b1, a1 = s.get_ba("p2", fields)
+b1, a1 = s.get_ba("p1", fields)
 # b2, a2 = s.get_ba("p2", fields)
 
 fig, ax = plt.subplots()
@@ -859,5 +973,5 @@ plt.show()
 
 
 
-s.generate_gif("msline_2.gif", el=30, zoom=1.5, vmin=-40, vmax=20)
+s.generate_gif("msline_2.gif", el=0, zoom=3, vmin=-20, vmax=20, az=0, view="xy", volume=False)
 ipyimage(filename='msline_2.gif')
