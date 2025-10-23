@@ -727,9 +727,6 @@ class Solver_SingleLayer():
         self.ports[name] = dict(x=r_x, y=r_y, z=r_z, Vs_a = 1 / (denom * rterm))
 
         
-
-    
-
     def generate_gif(self, filename, view="xz", vmax=30, vmin=-20, zoom=1.3, el=10, az=0, volume=False):
         nframe = len(self.gif_fields)
         # numpy type for the field values
@@ -737,22 +734,22 @@ class Solver_SingleLayer():
         dx, dy, dz = self.dx, self.dy, self.dz
         Nx, Ny, Nz = len(dx), len(dy), len(dz)
 
-        field = self.gif_fields#[:, :Nx, :Ny, :Nz]
+        field = self.gif_fields[..., 0:1]
         field = np.where(np.abs(field) < 1e-12, 1e-12, field)
 
         gx = np.concatenate([[0], np.cumsum(dx)])
         gy = np.concatenate([[0], np.cumsum(dy)])
         gz = np.concatenate([[0], np.cumsum(dz)])
         
-        grid = pv.RectilinearGrid(gx, gy, gz)
+        grid = pv.RectilinearGrid(gx, gy, (dz[0]))
 
-        ez_fields = pv.RectilinearGrid(gx, gy, gz[1:])
+        ez_fields = pv.RectilinearGrid(gx, gy, (dz[0]))
 
         plotter = pv.Plotter(off_screen=True)
         # add grid
         plotter.add_mesh(grid, style="wireframe", line_width=0.05, color="k", opacity=0.05)
         # add copper features
-        pattern_g = pv.RectilinearGrid(gx, gy, dz[:1])
+        pattern_g = pv.RectilinearGrid(gx, gy, dz[0])
         pattern_g.cell_data["values"] = self.pattern.flatten(order="F")
 
         # Create the colormap from the list of colors
@@ -780,8 +777,6 @@ class Solver_SingleLayer():
             z_length=Gz
         )
         plotter.add_mesh(sub, opacity=0.1, color="green")
-        # plotter.show()
-
 
         data = 20 * np.log10(np.abs(field[20]))
 
@@ -791,7 +786,6 @@ class Solver_SingleLayer():
         else:
             plotter.add_mesh(ez_fields, cmap="jet", opacity="linear", scalars="values", clim=[vmin, vmax], show_scalar_bar=False)
 
-        
         plotter.render()    
         plotter.add_axes()
         plotter.camera_position = view
@@ -803,8 +797,6 @@ class Solver_SingleLayer():
             title="Ez [dB]\n", vertical=False, label_font_size=11, title_font_size=14
         )
         plotter.camera.zoom(zoom)
-        # bar.GetTitleTextProperty().SetLineSpacing(3)
-        # plotter.show()
 
         plotter.open_gif(filename)
 
@@ -890,23 +882,23 @@ pattern = np.zeros((Nx, Ny), dtype=np.int32)
 pattern[p1_x:p2_x, p1_y-2:p1_y+2] = 1
 pattern[p2_x-1:p2_x+1, p1_y:] = 1
 pattern[p3_x-1:p3_x+1, :p1_y+1] = 1
-# pattern[p3_x-1:p3_x+1, p1_y-1:p1_y+1] = 0
+pattern[p3_x-1:p3_x+1, p1_y-1:p1_y+1] = 0
 
 
 
-fig, ax = plt.subplots()
-ax.pcolormesh(pattern.T)
-ax.set_aspect("equal")
+# fig, ax = plt.subplots()
+# ax.pcolormesh(pattern.T)
+# ax.set_aspect("equal")
 
 dy[p1_y-2:p1_y+2] = conv.m_in(0.01)
 
-dx[p2_x-3:p2_x+3] = conv.m_in(0.0055)
+dx[p2_x-3:p2_x+3] = conv.m_in(0.005)
 # dx[p2_x-2] = conv.m_in(0.010)
 # dx[p2_x+1] = conv.m_in(0.010)
 
-np.meshgrid(dx, dy)
-fig, ax = plt.subplots()
-ax.plot(dx)
+# np.meshgrid(dx, dy)
+# fig, ax = plt.subplots()
+# ax.plot(dx)
 
 
 s = Solver_SingleLayer(frequency, pattern, dx, dy, er, sub_h, 20)
@@ -962,7 +954,7 @@ ax_t = ax.twinx()
 ax.plot(frequency  / 1e9, conv.db20_lin(b1 / a1))
 # ax_t.plot(frequency / 1e9, conv.db20_lin(b2 / a1), color="orange", alpha=0.5)
 ax.set_xlabel("Frequency [GHz]")
-ax.set_ylim([-50, 1])
+ax.set_ylim([-30, 1])
 ax.margins(x=0)
 ax.legend(["S11", "S21"], loc="upper left")
 ax_t.legend(["S21"], loc="upper right")
