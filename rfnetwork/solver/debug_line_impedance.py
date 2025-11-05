@@ -118,21 +118,21 @@ class Solver_SingleLayer():
         )
 
         self.Ca = dict(
-            ex_y = Ca_ex,
-            ex_z = Ca_ex,
-            ey_z = Ca_ey,
-            ey_x = Ca_ey,
-            ez_x = Ca_ez,
-            ez_y = Ca_ez
+            ex_y = Ca_ex.copy(),
+            ex_z = Ca_ex.copy(),
+            ey_z = Ca_ey.copy(),
+            ey_x = Ca_ey.copy(),
+            ez_x = Ca_ez.copy(),
+            ez_y = Ca_ez.copy()
         )
 
         self.Cb = dict(
-            ex_y = Cb_ex,
-            ex_z = Cb_ex,
-            ey_z = Cb_ey,
-            ey_x = Cb_ey,
-            ez_x = Cb_ez,
-            ez_y = Cb_ez
+            ex_y = Cb_ex.copy(),
+            ex_z = Cb_ex.copy(),
+            ey_z = Cb_ey.copy(),
+            ey_x = Cb_ey.copy(),
+            ez_x = Cb_ez.copy(),
+            ez_y = Cb_ez.copy()
         )
 
         self.Da = dict(
@@ -525,11 +525,11 @@ class Solver_SingleLayer():
         # sigma / eps must be constant across y and z, page 291 in taflove
         # scale sigma by eps so that sigma / eps is constant
         eps_ez = self.eps_ez
-        sigma_ez = np.broadcast_to(sigma_e_n, (self.Ca["ez_x"].shape[0], d_pml, self.Ca["ez_x"].shape[-1])).copy()
+        sigma_ez = np.broadcast_to(sigma_e_n, (self.Ca["ez_y"].shape[0], d_pml, self.Ca["ez_y"].shape[-1])).copy()
         sigma_ez *= (eps_ez / e0)
 
         self.Ca["ez_y"][:, e_idx] = (2 * eps_ez - (sigma_ez * dt)) / (2 * eps_ez + (sigma_ez * dt))
-        self.Cb["ez_y"][:, e_idx] = (2 * dt) / ((2 * eps_ez + (sigma_ez * dt))) 
+        self.Cb["ez_y"][:, e_idx] = (2 * dt) / ((2 * eps_ez + (sigma_ez * dt)))
         # (sigma_ez / eps_ez)[5, 0, :]
 
         # ex
@@ -542,12 +542,12 @@ class Solver_SingleLayer():
         ex_patt = (pattern[:, :-1] | pattern[:, 1:])[:, h_idx]
 
         self.Ca["ex_y"][:, e_idx] = np.where(
-            ex_patt[..., None], 
+            ex_patt[..., None],
             self.Ca["ex_y"][:, e_idx],
             (2 * eps_ex - (sigma_ex * dt)) / (2 * eps_ex + (sigma_ex * dt)),
         )
         self.Cb["ex_y"][:, e_idx] = np.where(
-            ex_patt[..., None], 
+            ex_patt[..., None],
             self.Cb["ex_y"][:, e_idx],
             (2 * dt) / ((2 * eps_ex + (sigma_ex * dt))),
         )
@@ -559,7 +559,7 @@ class Solver_SingleLayer():
         sigma_m_hx = simga_e_hx * u0 / eps_hx
 
         self.Da["hx_y"][:, h_idx] = (2 * u0 - (sigma_m_hx * dt)) / (2 * u0 + (sigma_m_hx * dt))
-        self.Db["hx_y"][:, h_idx] = (2 * dt) / ((2 * u0 + (sigma_m_hx * dt))) 
+        self.Db["hx_y"][:, h_idx] = (2 * dt) / ((2 * u0 + (sigma_m_hx * dt)))
 
         eps_hz = self.eps_exy
         sigma_e_hz = np.broadcast_to(sigma_e_np5, (self.Da["hz_y"].shape[0], d_pml, self.Da["hz_y"].shape[-1])).copy()
@@ -567,7 +567,7 @@ class Solver_SingleLayer():
         sigma_m_hz = sigma_e_hz * u0 / eps_hz
 
         self.Da["hz_y"][:, h_idx] = (2 * u0 - (sigma_m_hz * dt)) / (2 * u0 + (sigma_m_hz * dt))
-        self.Db["hz_y"][:, h_idx] = (2 * dt) / ((2 * u0 + (sigma_m_hz * dt))) 
+        self.Db["hz_y"][:, h_idx] = (2 * dt) / ((2 * u0 + (sigma_m_hz * dt)))
 
     def add_xPML(self, d_pml=10, side="upper"):
         """
@@ -824,12 +824,15 @@ class Solver_SingleLayer():
 
 frequency: np.ndarray = np.arange(5e9, 15e9, 10e6)
 
+# CTRL + SHIFT + C
+# command pallet
 
 f0 = 10e9
 Nz = 20
 
+ms_z = 2
 eps_z = np.ones(Nz) * e0
-eps_z[:2] = 3.66 * e0
+eps_z[:ms_z] = 3.66 * e0
 
 
 Nx = 120
@@ -842,7 +845,7 @@ p2_x, p2_y = Nx-10, Ny//2
 pattern = np.zeros((Nx, Ny), dtype=np.int32)
 pattern[p1_x:, p1_y-1:p1_y+1] = 1
 
-w = 0.02
+w = 0.04
 dx0 = conv.m_in(0.02)
 dy0 = conv.m_in(0.02)
 dz0 = conv.m_in(0.01)
@@ -855,7 +858,7 @@ dy[p1_y-1:p1_y+1] = conv.m_in(w/2)
 dy[p1_y-2] = conv.m_in(0.01)
 dy[p1_y+1] = conv.m_in(0.01)
 
-s = Solver_SingleLayer(frequency, pattern, dx, dy, dz, eps_z, ms_z=2)
+s = Solver_SingleLayer(frequency, pattern, dx, dy, dz, eps_z, ms_z=ms_z)
 
 s.add_port("p1", "x+", p1_x, p1_y, r0=50, ref_plane=15)
 # s.add_port("p2", "x-", p2_x, p2_y, r0=None, ref_plane=3)
@@ -864,7 +867,7 @@ s.add_port("p1", "x+", p1_x, p1_y, r0=50, ref_plane=15)
 s.add_xPML(d_pml=10, side="upper")
 s.add_yPML(d_pml=10, side="lower")
 s.add_yPML(d_pml=10, side="upper")
-s.add_zPML(d_pml=5)
+# s.add_zPML(d_pml=5)
 
 pulse_n = 1300
 # width of half pulse in time
@@ -876,6 +879,58 @@ t = np.linspace(0, s.dt * pulse_n, pulse_n)
 # i_amp = 0.5e-3
 # j_amp = i_amp / (dx[p1_x] * dy[p1_y])
 vsrc = 1e-2 * (np.sin(2*np.pi*f0 * (t)) * np.exp(-((t - t0) / t_half)**2)).astype(np.float32).squeeze()
+
+Ca_0 = 1
+Cb_0 = (s.dt) / (e0)
+Cb_e = (s.dt) / (e0 * 3.66)
+
+sig = 5e2
+dt = s.dt
+Ca = (2 * e0 - (sig * dt)) / (2 * e0 + (sig * dt))
+Cb = (2 * dt) / ((2 * e0 + (sig * dt)))
+
+s.Cb["ex_y"][p1_x:, 16, 2] = (s.Cb["ex_y"][p1_x:, 16, 2] + s.Cb["ex_y"][p1_x:, 17, 2]) / 2
+s.Cb["ex_y"][p1_x:, 14, 2] = (s.Cb["ex_y"][p1_x:, 14, 2] + s.Cb["ex_y"][p1_x:, 13, 2]) / 2
+
+s.Ca["ex_y"][p1_x:, 16, 2] = (s.Ca["ex_y"][p1_x:, 16, 2] * s.Ca["ex_y"][p1_x:, 17, 2]) / 2
+s.Ca["ex_y"][p1_x:, 14, 2] = (s.Ca["ex_y"][p1_x:, 14, 2] * s.Ca["ex_y"][p1_x:, 13, 2]) / 2
+
+# plot material coeff
+fig, ax = plt.subplots(figsize=(10, 5))
+im = ax.pcolormesh(np.arange(Nx), np.arange(Ny+1), s.Ca["ex_y"][..., 2].T, cmap="RdBu", vmin=-1, vmax=1)
+ax.set_xticks(np.arange(0, Nx, 5))
+ax.set_yticks(np.arange(Ny+1))
+ax.grid()
+fig.colorbar(im, ticks=np.arange(-1, 1.2, 0.2))
+
+fig, ax = plt.subplots(figsize=(10, 5))
+im = ax.pcolormesh(np.arange(Nx), np.arange(Ny+1), s.Cb["ex_y"][..., 2].T, cmap="RdBu", vmin=0, vmax=Cb_0)
+ax.set_xticks(np.arange(0, Nx, 5))
+ax.set_yticks(np.arange(Ny+1))
+ax.grid()
+fig.colorbar(im)
+
+fig, ax = plt.subplots(figsize=(10, 5))
+im = ax.pcolormesh(np.arange(Nx+1), np.arange(Ny), s.Cb["ey_x"][..., 2].T, cmap="RdBu", vmin=0, vmax=Cb_0)
+ax.set_xticks(np.arange(0, Nx, 5))
+ax.set_yticks(np.arange(Ny+1))
+ax.grid()
+fig.colorbar(im)
+
+fig, ax = plt.subplots(figsize=(10, 5))
+im = ax.pcolormesh(np.arange(Nx+1), np.arange(Ny+1), s.Cb["ez_x"][..., 2].T, cmap="RdBu", vmin=0, vmax=Cb_0)
+ax.set_xticks(np.arange(0, Nx, 5))
+ax.set_yticks(np.arange(Ny+1))
+ax.grid()
+fig.colorbar(im)
+
+
+
+
+sig = 1e7
+dt = s.dt
+Ca_0 = (2 * e0 - (sig * dt)) / (2 * e0 + (sig * dt))
+Cb_0 = (2 * dt) / ((2 * e0 + (sig * dt)))
 
 s.run("p1", vsrc, gif_step=15)
 
