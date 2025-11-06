@@ -70,24 +70,28 @@ class Solver_SingleLayer():
         Cb_ey = np.ones((Nx+1, Ny, Nz+1)) * Cb_0
         Cb_ez = np.ones((Nx+1, Ny+1, Nz)) * Cb_0
 
-        # substrate 
+        # substrate
+        eps_exy = eps_z.copy()
+        eps_exy = np.concatenate([eps_exy, [e0]])
         Cb_ez[..., :] = (2 * dt) / ((2 * eps_z + (sig_0 * dt)))
-        # Cb_ex[..., 1:] = (2 * dt) / ((2 * eps_z + (sig_0 * dt)))
-        # Cb_ey[..., 1:] = (2 * dt) / ((2 * eps_z + (sig_0 * dt)))
+        Cb_ex[..., :] = (2 * dt) / ((2 * eps_exy + (sig_0 * dt)))
+        Cb_ey[..., :] = (2 * dt) / ((2 * eps_exy + (sig_0 * dt)))
 
         # ex and ey are on the boundary between material cells, compute the average of the substrate
         # FIX for non-uniform grids along z
-        eps_exy = (2 * eps_z[:-1] * eps_z[1:]) / (eps_z[:-1] + eps_z[1:])
+        # eps_exy = (2 * eps_z[:-1] * eps_z[1:]) / (eps_z[:-1] + eps_z[1:])
+        
         # eps_exy = np.sqrt((eps_z[:-1] * eps_z[1:]))
         # eps_exy = ((eps_z[:-1] + eps_z[1:])) / 2
         
         
-        eps_exy = np.concatenate([[e0], eps_exy, [e0]])
+        # eps_exy = np.concatenate([eps_exy, [e0]])
         # eps_exy = np.ones_like(eps_exy) * e0
 
-        # eps_avg = (e0 + (e0 * er))/ 2
-        Cb_ex[..., :] = (2 * dt) / ((2 * eps_exy + (sig_0 * dt))) 
-        Cb_ey[..., :] = (2 * dt) / ((2 * eps_exy + (sig_0 * dt))) 
+        # eps_avg = (e0 + (e0 * 3.66)) / 2
+        # eps_exy[ms_z] = eps_avg
+        # Cb_ex[..., :] = (2 * dt) / ((2 * eps_exy + (sig_0 * dt))) 
+        # Cb_ey[..., :] = (2 * dt) / ((2 * eps_exy + (sig_0 * dt))) 
         # Cb_ex[..., ms_z] = (Cb_ex[..., ms_z - 1] + Cb_ex[..., ms_z + 1]) / 2
         # Cb_ey[..., ms_z] = (Cb_ey[..., ms_z - 1] + Cb_ey[..., ms_z + 1]) / 2
 
@@ -97,24 +101,25 @@ class Solver_SingleLayer():
 
         # set ex coefficient to PEC if either cell next to it (along y) is set as copper
         ex_patt = (pattern[:, :-1] | pattern[:, 1:]) 
-        ex_sig = ex_patt * sig_pec
+        
+        Ca_ms = (2 * eps_exy[ms_z] - (sig_pec * dt)) / (2 * eps_exy[ms_z] + (sig_pec * dt))
+        Cb_ms = (2 * dt) / ((2 * eps_exy[ms_z] + (sig_pec * dt)))
 
         Ca_ex[..., 1:-1, ms_z] = np.where(
-            ex_patt, (2 * eps_exy[ms_z] - (ex_sig * dt)) / (2 * eps_exy[ms_z] + (ex_sig * dt)), Ca_ex[..., 1:-1, ms_z]
+            ex_patt, Ca_ms, Ca_ex[..., 1:-1, ms_z]
         )
         Cb_ex[..., 1:-1, ms_z] = np.where(
-            ex_patt, (2 * dt) / ((2 * eps_exy[ms_z] + (ex_sig * dt))), Cb_ex[..., 1:-1, ms_z]
+            ex_patt, Cb_ms, Cb_ex[..., 1:-1, ms_z]
         )
 
         # set ey coefficient to PEC if either cell next to it (along x) is set as copper
-        ey_patt = (pattern[:-1] | pattern[1:]) 
-        ey_sig = ey_patt * sig_pec
+        ey_patt = (pattern[:-1] | pattern[1:])
 
         Ca_ey[1:-1, :, ms_z] = np.where(
-            ey_patt, (2 * eps_exy[ms_z] - (ey_sig * dt)) / (2 * eps_exy[ms_z] + (ey_sig * dt)), Ca_ey[1:-1, :, ms_z]
+            ey_patt, Ca_ms, Ca_ey[1:-1, :, ms_z]
         )
         Cb_ey[1:-1, :, ms_z] = np.where(
-            ey_patt, (2 * dt) / ((2 * eps_exy[ms_z] + (ey_sig * dt))) , Cb_ey[1:-1, :, ms_z]
+            ey_patt, Cb_ms, Cb_ey[1:-1, :, ms_z]
         )
 
         self.Ca = dict(
@@ -845,28 +850,30 @@ p2_x, p2_y = Nx-10, Ny//2
 pattern = np.zeros((Nx, Ny), dtype=np.int32)
 pattern[p1_x:, p1_y-1:p1_y+1] = 1
 
-w = 0.04
+w = 0.02
+d = 0.02
 dx0 = conv.m_in(0.02)
-dy0 = conv.m_in(0.02)
-dz0 = conv.m_in(0.01)
+dy0 = conv.m_in(0.01)
+dz0 = conv.m_in(d/ms_z)
 
 dx = np.ones(Nx) * dx0
 dy = np.ones(Ny) * dy0
 dz = np.ones(Nz) * dz0
 
 dy[p1_y-1:p1_y+1] = conv.m_in(w/2)
-dy[p1_y-2] = conv.m_in(0.01)
-dy[p1_y+1] = conv.m_in(0.01)
+dy[p1_y-2] = conv.m_in(w/4)
+dy[p1_y+1] = conv.m_in(w/4)
+# dz[ms_z+1] = conv.m_in(0.005)
 
 s = Solver_SingleLayer(frequency, pattern, dx, dy, dz, eps_z, ms_z=ms_z)
 
 s.add_port("p1", "x+", p1_x, p1_y, r0=50, ref_plane=15)
-# s.add_port("p2", "x-", p2_x, p2_y, r0=None, ref_plane=3)
+# s.add_port("p2", "x-", p2_x, p2_y, r0=50, ref_plane=3)
 
 # s.add_xPML(d_pml=10, side="lower")
 s.add_xPML(d_pml=10, side="upper")
-s.add_yPML(d_pml=10, side="lower")
-s.add_yPML(d_pml=10, side="upper")
+# s.add_yPML(d_pml=10, side="lower")
+# s.add_yPML(d_pml=10, side="upper")
 # s.add_zPML(d_pml=5)
 
 pulse_n = 1300
@@ -884,16 +891,30 @@ Ca_0 = 1
 Cb_0 = (s.dt) / (e0)
 Cb_e = (s.dt) / (e0 * 3.66)
 
-sig = 5e2
+sig = 1e7
 dt = s.dt
 Ca = (2 * e0 - (sig * dt)) / (2 * e0 + (sig * dt))
 Cb = (2 * dt) / ((2 * e0 + (sig * dt)))
+er_eff = 2.5
+Cb_ms = (dt) / (e0 * 1.5)
 
-s.Cb["ex_y"][p1_x:, 16, 2] = (s.Cb["ex_y"][p1_x:, 16, 2] + s.Cb["ex_y"][p1_x:, 17, 2]) / 2
-s.Cb["ex_y"][p1_x:, 14, 2] = (s.Cb["ex_y"][p1_x:, 14, 2] + s.Cb["ex_y"][p1_x:, 13, 2]) / 2
+# s.Cb["ex_y"][p1_x:, 16, ms_z] = (s.Cb["ex_y"][p1_x:, 16, ms_z] + s.Cb["ex_y"][p1_x:, 17, ms_z]) / 2
+# s.Cb["ex_y"][p1_x:, 14, ms_z] = (s.Cb["ex_y"][p1_x:, 14, ms_z] + s.Cb["ex_y"][p1_x:, 13, ms_z]) / 2
 
-s.Ca["ex_y"][p1_x:, 16, 2] = (s.Ca["ex_y"][p1_x:, 16, 2] * s.Ca["ex_y"][p1_x:, 17, 2]) / 2
-s.Ca["ex_y"][p1_x:, 14, 2] = (s.Ca["ex_y"][p1_x:, 14, 2] * s.Ca["ex_y"][p1_x:, 13, 2]) / 2
+# s.Ca["ex_y"][p1_x:, 16, ms_z] = (s.Ca["ex_y"][p1_x:, 16, ms_z] + s.Ca["ex_y"][p1_x:, 17, ms_z]) / 2
+# s.Ca["ex_y"][p1_x:, 14, ms_z] = (s.Ca["ex_y"][p1_x:, 14, ms_z] + s.Ca["ex_y"][p1_x:, 13, ms_z]) / 2
+
+# s.Cb["ex_z"][..., :p1_y-1, ms_z] = Cb_ms
+# s.Cb["ex_y"][..., :p1_y-1:, ms_z] = Cb_ms
+# s.Cb["ex_z"][..., p1_y+2:, ms_z] = Cb_ms
+# s.Cb["ex_y"][..., p1_y+2:, ms_z] = Cb_ms
+
+# s.Cb["ey_x"][..., :p1_y-1, ms_z] = Cb_ms
+# s.Cb["ey_z"][..., :p1_y-1, ms_z] = Cb_ms
+# s.Cb["ey_x"][..., p1_y+1:, ms_z] = Cb_ms
+# s.Cb["ey_z"][..., p1_y+1:, ms_z] = Cb_ms
+
+
 
 # plot material coeff
 fig, ax = plt.subplots(figsize=(10, 5))
@@ -911,26 +932,25 @@ ax.grid()
 fig.colorbar(im)
 
 fig, ax = plt.subplots(figsize=(10, 5))
-im = ax.pcolormesh(np.arange(Nx+1), np.arange(Ny), s.Cb["ey_x"][..., 2].T, cmap="RdBu", vmin=0, vmax=Cb_0)
-ax.set_xticks(np.arange(0, Nx, 5))
-ax.set_yticks(np.arange(Ny+1))
+im = ax.pcolormesh(np.arange(Ny+1), np.arange(Nz+1), s.Cb["ex_y"][20, :, :].T, cmap="RdBu", vmin=0, vmax=Cb_0)
+ax.set_xticks(np.arange(Ny+1))
+ax.set_yticks(np.arange(Nz+1))
 ax.grid()
 fig.colorbar(im)
 
 fig, ax = plt.subplots(figsize=(10, 5))
-im = ax.pcolormesh(np.arange(Nx+1), np.arange(Ny+1), s.Cb["ez_x"][..., 2].T, cmap="RdBu", vmin=0, vmax=Cb_0)
-ax.set_xticks(np.arange(0, Nx, 5))
-ax.set_yticks(np.arange(Ny+1))
+im = ax.pcolormesh(np.arange(Ny), np.arange(Nz+1), s.Cb["ey_z"][20, :, :].T, cmap="RdBu", vmin=0, vmax=Cb_0)
+ax.set_xticks(np.arange(Ny))
+ax.set_yticks(np.arange(Nz+1))
 ax.grid()
 fig.colorbar(im)
-
 
 
 
 sig = 1e7
 dt = s.dt
-Ca_0 = (2 * e0 - (sig * dt)) / (2 * e0 + (sig * dt))
-Cb_0 = (2 * dt) / ((2 * e0 + (sig * dt)))
+# Ca_0 = (2 * e0 - (sig * dt)) / (2 * e0 + (sig * dt))
+# Cb_0 = (2 * dt) / ((2 * e0 + (sig * dt)))
 
 s.run("p1", vsrc, gif_step=15)
 
@@ -950,8 +970,8 @@ phi_d = np.angle(I1_2 / I1_1)
 td = phi_d / (frequency * 2 * np.pi)
 
 I1_d = I1_1 * np.exp(1j * (td / 2) * 2 * np.pi * frequency)
-I1 = I1_d * np.exp(-1j * 2 * np.pi * s.frequency * s.dt / 2)
-# I1 = i1_1
+I1 = I1_d * np.exp(1j * 2 * np.pi * s.frequency * s.dt / 2)
+# I1 = I1_d
 
 z0 = 50
 A1 = (V1 + z0 * I1) / (2 * np.sqrt(z0))
@@ -977,9 +997,12 @@ ax.set_ylim([0, 100])
 mplm.line_marker(x=10e9)
 mplm.axis_marker(y=zref)
 
-# fig, ax = plt.subplots()
-# rfn.plots.draw_smithchart(ax)
-# plt.plot(S11.real, S11.imag)
+fig, ax = plt.subplots()
+rfn.plots.draw_smithchart(ax)
+plt.plot(S11.real, S11.imag)
+
+fig, ax = plt.subplots()
+ax.plot(frequency, conv.db20_lin(S11))
 
 pv.set_jupyter_backend('trame')
 p = s.render()
