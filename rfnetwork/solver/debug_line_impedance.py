@@ -27,7 +27,7 @@ class Solver_SingleLayer():
         dx: np.ndarray,
         dy: np.ndarray,
         dz: np.ndarray,
-        eps_z: float, 
+        eps_z: float,
         ms_z: float
     ):
         self.frequency = frequency
@@ -97,7 +97,7 @@ class Solver_SingleLayer():
 
         # PEC pattern
         # conductivity of PEC
-        sig_pec = 1e7
+        sig_pec = 1e15
 
         # set ex coefficient to PEC if either cell next to it (along y) is set as copper
         ex_patt = (pattern[:, :-1] | pattern[:, 1:]) 
@@ -164,8 +164,44 @@ class Solver_SingleLayer():
         self.ports = dict()
         self.v_probes = dict()
         self.i_probes = dict()
+        self.fields = dict()
         self.eps_exy = eps_exy
         self.eps_ez = eps_z
+        
+        # field shapes
+        self.fshape = dict(
+            ex=(Nx, Ny+1, Nz+1),
+            ey=(Nx+1, Ny, Nz+1),
+            ez=(Nx+1, Ny+1, Nz),
+            hx=(Nx+1, Ny, Nz),
+            hy=(Nx, Ny+1, Nz),
+            hz=(Nx, Ny, Nz+1)
+        )
+
+        # grid edge cell locations in meters
+        gx = np.concatenate([[0], np.cumsum(dx)])
+        gy = np.concatenate([[0], np.cumsum(dy)])
+        gz = np.concatenate([[0], np.cumsum(dz)])
+
+        # middle cell locations
+        gx_h = (gx[1:] + gx[:-1]) / 2
+        gy_h = (gy[1:] + gy[:-1]) / 2
+        gz_h = (gz[1:] + gz[:-1]) / 2
+
+        # locations of all field components in grid
+        self.floc = dict(
+            ex=(gx_h, gy, gz),
+            ey=(gx, gy_h, gz),
+            ez=(gx, gy, gz_h),
+            hx=(gx, gy_h, gz_h),
+            hy=(gx_h, gy, gz_h),
+            hz=(gx_h, gy_h, gz)
+        )
+
+        # locations of the centers of each cell
+        self.cell_loc = (gx_h, gy_h, gz_h)
+        # location of grid edges
+        self.edge_loc = (gx, gy, gz)
 
     def add_v_probe(self, name, x, y):
         """
@@ -189,6 +225,42 @@ class Solver_SingleLayer():
             
         self.i_probes[name] = dict(x=x, y=y, axis=axis)
 
+    def add_field_monitor(self, name: str, field: str, axis: str, position: int, t_step: int):
+        """
+        Add field monitor along a slice through the 3D volume
+
+        Parameters
+        ----------
+        name : str
+        field : {'ex', 'ey', 'ez', 'hx', 'hy', 'hz'}
+        axis : {'x', 'y', 'z'}
+        position : int
+            index along axis of the slice
+        t_step : int, default: 1
+            number of time steps between each capture.
+        """
+
+        if field not in self.fshape.keys():
+            raise ValueError(f"Unsuported field: {field}. Expecting one of: {tuple(self.fshape.keys())}")
+        if axis not in ('x', 'y', 'z'):
+            raise ValueError(f"Unsupported axis: {axis}")
+
+        # get the spatial shape of the field slice
+        axis_i = dict(x=0, y=1, z=2)[axis]
+        shape = list(self.fshape[field])
+        axis_len = shape.pop(axis_i)
+
+        if (position < 0) or (position > self.fshape[field][axis_i] - 1):
+            raise ValueError(f"Position out of bounds, expecting value from 0 - {axis_len}")
+
+        slc = [slice(None)] * 3
+        slc[axis_i] = position
+        
+        self.fields[name] = dict(
+            field=field, axis=axis, position=position, t_step=t_step, slc=tuple(slc), shape=tuple(shape)
+        )
+
+        
     def add_port(self, name, direction, ez_x, ez_y, r0=50, ref_plane=3):
 
         # resistive load
@@ -229,7 +301,13 @@ class Solver_SingleLayer():
             self.add_i_probe(name + "_i1", xv - 1, slice(yi_1, yi_2))
             self.add_i_probe(name + "_i2", xv, slice(yi_1, yi_2))
             self.add_v_probe(name + "_v", xv, yv)
-            
+
+            # a = conv.m_in(0.001)
+            # if direction[1] == "+":
+            #     self.Db["hy_x"][r_x - 1, r_y, r_z] = (2 * self.dt) / (u0 * np.log(self.dx[r_x - 1] / a))
+            # else:
+            #     self.Db["hy_x"][r_x, r_y, r_z] = (2 * self.dt) / (u0 * np.log(self.dx[r_x] / a))
+
         # elif direction == "y+":
         #     xv, yv = r_x, r_y + ref_plane
         # elif direction == "y-":
@@ -240,7 +318,7 @@ class Solver_SingleLayer():
             x=r_x, y=r_y, z=r_z, Vs_a=1 / (denom * rterm * self.ms_z)
         )
         
-    def run(self, port, v_waveform, gif_step=10):
+    def run(self, port, v_waveform):
 
         Nt = len(v_waveform)
 
@@ -248,9 +326,6 @@ class Solver_SingleLayer():
         dtype_ = np.float32
         dx, dy, dz = self.dx, self.dy, self.dz
         Nx, Ny, Nz = len(dx), len(dy), len(dz)
-        
-        self.gif_step = gif_step
-        self.gif_fields = np.zeros(((Nt // self.gif_step) + 1, Nx+1, Ny+1, Nz), dtype=dtype_)
 
         # field values
         ex_y = np.zeros((Nx, Ny+1, Nz+1), dtype=dtype_)
@@ -334,6 +409,10 @@ class Solver_SingleLayer():
 
         for k, p in self.i_probes.items():
             self.i_probes[k]["values"] = np.zeros(Nt, dtype=dtype_)
+
+        # initialize field monitors
+        for k, f in self.fields.items():
+            self.fields[k]["values"] = np.zeros(((Nt // f["t_step"])+1,) + f["shape"], dtype=dtype_)
 
         hx = hx_y
         hy = hy_z
@@ -467,9 +546,6 @@ class Solver_SingleLayer():
             #     self.Db["hz_ey"]  * (np.diff(ey, axis=0) * dx_inv)
             # )
 
-            if (n % self.gif_step) == 0:
-                self.gif_fields[n // self.gif_step] = ez
-
             # update voltage probes
             for name, p in self.v_probes.items():
                 self.v_probes[name]["values"][n+1] = -np.sum(ez[p["x"], p["y"], :self.ms_z] * dz[:self.ms_z])
@@ -496,6 +572,15 @@ class Solver_SingleLayer():
                 #     hz_p = (hz[x.start - 1, y, ms_z] - hz[x.stop + 1, y, ms_z]) * dz_h[ms_z - 1]
                 #     self.i_probes[name]["values"][n + 1] = np.sum(hx_p) + hz_p
 
+            # update field monitors
+            for name, f in self.fields.items():
+                t_step = f["t_step"]
+                if (n % t_step) != 0:
+                    continue
+                    
+                field = dict(ex=ex, ey=ey, ez=ez, hx=hx, hy=hy, hz=hz)[f["field"]]
+                f["values"][n // t_step] = field[f["slc"]]
+                
                     
     def add_yPML(self, d_pml=10, side="upper"):
         """
@@ -602,16 +687,6 @@ class Solver_SingleLayer():
         e_idx = slice(d_pml, 0, -1) if side=="lower" else slice(-d_pml-1, -1)
         h_idx = slice(d_pml-1, None, -1) if side=="lower" else slice(-d_pml, None)
 
-        # s = np.arange(15)
-        # s[slice(d_pml-1, None, -1) ]
-        # s[10::-1]
-        # s[slice(d_pml+1, 0, -1)]
-
-        # s[slice(-d_pml-1, -1)]
-
-        # s[slice(d_pml, None, -1)]
-        # s[-d_pml:]
-
         # ez
         # first ez component is at the edge of the PML where sigma = 0, last component is at the solve boundary and not updated
         # sigma / eps must be constant across y and z, page 291 in taflove
@@ -705,23 +780,15 @@ class Solver_SingleLayer():
         Plot the model geometry
         """
 
-        dx, dy, dz = conv.in_m(self.dx), conv.in_m(self.dy), conv.in_m(self.dz)
         ms_z = self.ms_z
-
-        # cell edges
-        gx = np.concatenate([[0], np.cumsum(dx)])
-        gy = np.concatenate([[0], np.cumsum(dy)])
-        gz = np.concatenate([[0], np.cumsum(dz)])
-
-        # middle cell locations
-        gx_h = (gx[1:] + gx[:-1]) / 2
-        gy_h = (gy[1:] + gy[:-1]) / 2
-        gz_h = (gz[1:] + gz[:-1]) / 2
+        gx, gy, gz = [conv.in_m(f) for f in self.edge_loc]
+        gx_h, gy_h, gz_h = [conv.in_m(f) for f in self.cell_loc]
         
-        grid = pv.RectilinearGrid(gx, gy, gz[:ms_z+1])
+        grid = pv.RectilinearGrid(gx, gy, gz)
+        
 
         plotter = pv.Plotter()
-        plotter.enable_parallel_projection()
+        # plotter.enable_parallel_projection()
         # add grid
         plotter.add_mesh(grid, style="wireframe", line_width=0.05, color="k", opacity=0.05)
         
@@ -773,40 +840,35 @@ class Solver_SingleLayer():
                 plotter.add_mesh(rect, line_width=2, color="k", opacity=0.4)
                     
 
-        plotter.show_grid(n_zlabels=2)
+        plotter.show_grid(n_zlabels=2, font_size=9)
         
         return plotter
 
-    def generate_gif(self, filename, view="xz", vmax=30, vmin=-20, zoom=1.3, el=10, az=0, volume=False):
+    def animate_fields(self, filename, monitor_name: str, view="xz", vmax=30, vmin=-20, zoom=1.3, el=10, az=0, opacity="linear"):
 
         plotter = self.render()
-        ms_z = self.ms_z
-        
-        nframe = len(self.gif_fields)
-        
-        dx, dy, dz = conv.in_m(self.dx), conv.in_m(self.dy), conv.in_m(self.dz)
+        monitor = self.fields[monitor_name]
+        field = monitor["values"]
+        slc = monitor["slc"]
+        t_step = monitor["t_step"]
 
-        field = self.gif_fields[..., self.ms_z - 1]
         field = np.where(np.abs(field) < 1e-12, 1e-12, field)
         field_db = np.clip(20 * np.log10(np.abs(field)), vmin, vmax)
-
-        gx = np.concatenate([[0], np.cumsum(dx)])
-        gy = np.concatenate([[0], np.cumsum(dy)])
-        gz = np.concatenate([[0], np.cumsum(dz)])
         
-        ez_fields = pv.RectilinearGrid(gx, gy, gz[ms_z-1: ms_z])
-        ez_fields.point_data['values'] = field_db[0].flatten(order="F")
-        
-        if volume:
-            plotter.add_volume(ez_fields, cmap="jet", opacity="linear", scalars="values", clim=[vmin, vmax], show_scalar_bar=False)
-        else:
-            plotter.add_mesh(ez_fields, cmap="jet", opacity="linear", scalars="values", clim=[vmin, vmax], show_scalar_bar=False)
+        nframe = len(field)
 
-        plotter.render()
+        floc_m = self.floc[monitor["field"]]
+        floc_in = [conv.in_m(f) for f in floc_m]
+        # slice each axis of grid locations, forcing integer indices into slices
+        g = [floc_in[i][s] if isinstance(s, slice) else floc_in[i][s: s+1] for i, s in enumerate(slc)]
+        
+        fmesh = pv.RectilinearGrid(*g)
+        fmesh.point_data['values'] = field_db[0].flatten(order="F")
+        
+        plotter.add_mesh(fmesh, cmap="jet", scalars="values", clim=[vmin, vmax], show_scalar_bar=False, opacity=opacity)
+
         plotter.add_axes()
         plotter.camera_position = view
-        # plotter.camera.position = (dx[0] * 120, -dy[0] * 80, dz[0] * 30)
-        # plotter.camera.focal_point = (dx[0] * 120, dy[0] * 80, 0)
         plotter.camera.elevation += el
         plotter.camera.azimuth += az
         plotter.camera.zoom(zoom)
@@ -818,8 +880,8 @@ class Solver_SingleLayer():
         plotter.open_gif(filename)
 
         for n in range(nframe):
-            ez_fields.point_data["values"][:] = field_db[n].flatten(order="F")
-            plotter.add_title(f"t={n * self.gif_step * self.dt * 1e9:.2f}ns")
+            fmesh.point_data["values"][:] = field_db[n].flatten(order="F")
+            plotter.add_title(f"t={n * t_step * self.dt * 1e9:.2f}ns")
             plotter.render()
             plotter.write_frame()
 
@@ -848,37 +910,44 @@ p1_x, p1_y = 10, Ny//2
 p2_x, p2_y = Nx-10, Ny//2
 
 pattern = np.zeros((Nx, Ny), dtype=np.int32)
-pattern[p1_x:, p1_y-1:p1_y+1] = 1
+pattern[p1_x:p2_x, p1_y-1:p1_y+1] = 1
 
-w = 0.02
+w = 0.04
 d = 0.02
 dx0 = conv.m_in(0.02)
-dy0 = conv.m_in(0.01)
+dy0 = conv.m_in(0.02)
 dz0 = conv.m_in(d/ms_z)
 
 dx = np.ones(Nx) * dx0
 dy = np.ones(Ny) * dy0
 dz = np.ones(Nz) * dz0
 
-dy[p1_y-1:p1_y+1] = conv.m_in(w/2)
-dy[p1_y-2] = conv.m_in(w/4)
-dy[p1_y+1] = conv.m_in(w/4)
-# dz[ms_z+1] = conv.m_in(0.005)
+# line appears to be slightly too low in impedance, I think becuase the edge of PEC is approximated by the Yee grid,
+# rather than make the mesh drastically smaller, compensate the line width.
+# This appears to be independent of dz or dx, and only a function of dy adjacent to the trace.
+dy[p1_y-1:p1_y+1] = conv.m_in(w/2 - (w/10))
+dy[p1_y-2] = conv.m_in(w/2)
+dy[p1_y+1] = conv.m_in(w/2)
+dy[p1_y-3] = (conv.m_in((w/2)) + dy0) / 2
+dy[p1_y+2] = (conv.m_in((w/2)) + dy0) / 2
 
 s = Solver_SingleLayer(frequency, pattern, dx, dy, dz, eps_z, ms_z=ms_z)
 
-s.add_port("p1", "x+", p1_x, p1_y, r0=50, ref_plane=15)
-# s.add_port("p2", "x-", p2_x, p2_y, r0=50, ref_plane=3)
+s.add_port("p1", "x+", p1_x, p1_y, r0=50, ref_plane=1)
+s.add_port("p2", "x-", p2_x, p2_y, r0=50, ref_plane=1)
+
+s.add_field_monitor("ez_ms", "ez", "z", ms_z, 20)
+s.add_field_monitor("ez_xz", "ez", "y", p1_y, 20)
 
 # s.add_xPML(d_pml=10, side="lower")
-s.add_xPML(d_pml=10, side="upper")
+# s.add_xPML(d_pml=10, side="upper")
 # s.add_yPML(d_pml=10, side="lower")
 # s.add_yPML(d_pml=10, side="upper")
-# s.add_zPML(d_pml=5)
+s.add_zPML(d_pml=5)
 
-pulse_n = 1300
+pulse_n = 1600
 # width of half pulse in time
-t_half = 3e-11  # (dt * (pulse_n // 8))
+t_half = 4e-11  # (dt * (pulse_n // 8))
 # center of the pulse in time
 t0 = (s.dt * 340)
 
@@ -890,6 +959,7 @@ vsrc = 1e-2 * (np.sin(2*np.pi*f0 * (t)) * np.exp(-((t - t0) / t_half)**2)).astyp
 Ca_0 = 1
 Cb_0 = (s.dt) / (e0)
 Cb_e = (s.dt) / (e0 * 3.66)
+Db_0 = (s.dt) / (u0)
 
 sig = 1e7
 dt = s.dt
@@ -898,61 +968,7 @@ Cb = (2 * dt) / ((2 * e0 + (sig * dt)))
 er_eff = 2.5
 Cb_ms = (dt) / (e0 * 1.5)
 
-# s.Cb["ex_y"][p1_x:, 16, ms_z] = (s.Cb["ex_y"][p1_x:, 16, ms_z] + s.Cb["ex_y"][p1_x:, 17, ms_z]) / 2
-# s.Cb["ex_y"][p1_x:, 14, ms_z] = (s.Cb["ex_y"][p1_x:, 14, ms_z] + s.Cb["ex_y"][p1_x:, 13, ms_z]) / 2
-
-# s.Ca["ex_y"][p1_x:, 16, ms_z] = (s.Ca["ex_y"][p1_x:, 16, ms_z] + s.Ca["ex_y"][p1_x:, 17, ms_z]) / 2
-# s.Ca["ex_y"][p1_x:, 14, ms_z] = (s.Ca["ex_y"][p1_x:, 14, ms_z] + s.Ca["ex_y"][p1_x:, 13, ms_z]) / 2
-
-# s.Cb["ex_z"][..., :p1_y-1, ms_z] = Cb_ms
-# s.Cb["ex_y"][..., :p1_y-1:, ms_z] = Cb_ms
-# s.Cb["ex_z"][..., p1_y+2:, ms_z] = Cb_ms
-# s.Cb["ex_y"][..., p1_y+2:, ms_z] = Cb_ms
-
-# s.Cb["ey_x"][..., :p1_y-1, ms_z] = Cb_ms
-# s.Cb["ey_z"][..., :p1_y-1, ms_z] = Cb_ms
-# s.Cb["ey_x"][..., p1_y+1:, ms_z] = Cb_ms
-# s.Cb["ey_z"][..., p1_y+1:, ms_z] = Cb_ms
-
-
-
-# plot material coeff
-fig, ax = plt.subplots(figsize=(10, 5))
-im = ax.pcolormesh(np.arange(Nx), np.arange(Ny+1), s.Ca["ex_y"][..., 2].T, cmap="RdBu", vmin=-1, vmax=1)
-ax.set_xticks(np.arange(0, Nx, 5))
-ax.set_yticks(np.arange(Ny+1))
-ax.grid()
-fig.colorbar(im, ticks=np.arange(-1, 1.2, 0.2))
-
-fig, ax = plt.subplots(figsize=(10, 5))
-im = ax.pcolormesh(np.arange(Nx), np.arange(Ny+1), s.Cb["ex_y"][..., 2].T, cmap="RdBu", vmin=0, vmax=Cb_0)
-ax.set_xticks(np.arange(0, Nx, 5))
-ax.set_yticks(np.arange(Ny+1))
-ax.grid()
-fig.colorbar(im)
-
-fig, ax = plt.subplots(figsize=(10, 5))
-im = ax.pcolormesh(np.arange(Ny+1), np.arange(Nz+1), s.Cb["ex_y"][20, :, :].T, cmap="RdBu", vmin=0, vmax=Cb_0)
-ax.set_xticks(np.arange(Ny+1))
-ax.set_yticks(np.arange(Nz+1))
-ax.grid()
-fig.colorbar(im)
-
-fig, ax = plt.subplots(figsize=(10, 5))
-im = ax.pcolormesh(np.arange(Ny), np.arange(Nz+1), s.Cb["ey_z"][20, :, :].T, cmap="RdBu", vmin=0, vmax=Cb_0)
-ax.set_xticks(np.arange(Ny))
-ax.set_yticks(np.arange(Nz+1))
-ax.grid()
-fig.colorbar(im)
-
-
-
-sig = 1e7
-dt = s.dt
-# Ca_0 = (2 * e0 - (sig * dt)) / (2 * e0 + (sig * dt))
-# Cb_0 = (2 * dt) / ((2 * e0 + (sig * dt)))
-
-s.run("p1", vsrc, gif_step=15)
+s.run("p1", vsrc)
 
     
 v1 = s.v_probes["p1_v"]["values"]
@@ -969,9 +985,10 @@ I1 = utils.dtft(i1, s.frequency, 1 / s.dt)
 phi_d = np.angle(I1_2 / I1_1)
 td = phi_d / (frequency * 2 * np.pi)
 
-I1_d = I1_1 * np.exp(1j * (td / 2) * 2 * np.pi * frequency)
-I1 = I1_d * np.exp(1j * 2 * np.pi * s.frequency * s.dt / 2)
+# I1_d = I1_1 * np.exp(1j * (td / 2) * 2 * np.pi * frequency)
+# I1 = I1_d * np.exp(-1j * 2 * np.pi * s.frequency * s.dt / 2)
 # I1 = I1_d
+I1 = I1 * np.exp(-1j * 2 * np.pi * s.frequency * s.dt / 2)
 
 z0 = 50
 A1 = (V1 + z0 * I1) / (2 * np.sqrt(z0))
@@ -993,7 +1010,7 @@ zref = msline50.get_properties(10e9).sel(value="z0")[0]
 fig, ax = plt.subplots()
 ax.plot(frequency, conv.z_gamma(S11).real)
 ax.plot(frequency, Z.real)
-ax.set_ylim([0, 100])
+ax.set_ylim([0, 120])
 mplm.line_marker(x=10e9)
 mplm.axis_marker(y=zref)
 
@@ -1002,14 +1019,16 @@ rfn.plots.draw_smithchart(ax)
 plt.plot(S11.real, S11.imag)
 
 fig, ax = plt.subplots()
+ref_s11 = msline50(conv.in_m((Nx - 20) * dx0)).evaluate(frequency)["s"].sel(b=1, a=1)
 ax.plot(frequency, conv.db20_lin(S11))
+ax.plot(frequency, conv.db20_lin(ref_s11))
 
 pv.set_jupyter_backend('trame')
 p = s.render()
 p.show()
 
-# p = s.generate_gif("msline_2.gif", el=0, zoom=1, vmin=-20, vmax=20, az=0, view="xy", volume=False)
-# ipyimage(filename='msline_2.gif')
+p = s.animate_fields("msline_2.gif", "ez_xz", el=20, zoom=1.3, vmin=-20, vmax=20, az=30, view="xz", opacity=None)
+ipyimage(filename='msline_2.gif')
 
 
 
