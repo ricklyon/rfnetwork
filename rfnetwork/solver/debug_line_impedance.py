@@ -261,12 +261,13 @@ class Solver_SingleLayer():
         )
 
         
-    def add_port(self, name, direction, ez_x, ez_y, r0=50, ref_plane=3):
+    def add_port(self, number, direction, ez_x, ez_y, r0=50, ref_plane=3):
 
         # resistive load
         r_x = ez_x
         r_y = ez_y
         r_z = slice(0, self.ms_z)
+        name = f"p{number}"
 
         dx_r = (self.dx[ez_x - 1] + self.dx[ez_x]) / 2
         dy_r = (self.dy[ez_y - 1] + self.dy[ez_y]) / 2
@@ -315,9 +316,12 @@ class Solver_SingleLayer():
             
         # add to port list
         self.ports[name] = dict(
-            x=r_x, y=r_y, z=r_z, Vs_a=1 / (denom * rterm * self.ms_z)
+            x=r_x, y=r_y, z=r_z, Vs_a=1 / (denom * rterm * self.ms_z), direction=direction
         )
-        
+
+
+            
+            
     def run(self, port, v_waveform):
 
         Nt = len(v_waveform)
@@ -401,7 +405,7 @@ class Solver_SingleLayer():
         Db_hz_x = -self.Db["hz_x"] * dx_inv
         Db_hz_y = self.Db["hz_y"] * dy_inv
 
-        src_x, src_y, src_z, Vs_a = self.ports[port].values()
+        src_x, src_y, src_z, Vs_a, _ = self.ports[port].values()
 
         # initialize probes
         for k, p in self.v_probes.items():
@@ -844,7 +848,9 @@ class Solver_SingleLayer():
         
         return plotter
 
-    def animate_fields(self, filename, monitor_name: str, view="xz", vmax=30, vmin=-20, zoom=1.3, el=10, az=0, opacity="linear"):
+    def animate_fields(
+        self, filename, monitor_name: str, view="xz", vmax=30, vmin=-20, zoom=1.3, el=10, az=0, opacity="linear"
+    ):
 
         plotter = self.render()
         monitor = self.fields[monitor_name]
@@ -889,6 +895,60 @@ class Solver_SingleLayer():
         plotter.close()
 
 
+    def get_sparameters(self, z0=50):
+
+        nports = len(self.ports)
+        nfrequency = len(self.frequency)
+        # matrix for entering voltage waves (A) and exiting waves (B) from each port
+        A = np.zeros((nfrequency, nports), dtype=np.complex128)
+        B = np.zeros((nfrequency, nports), dtype=np.complex128)
+        
+        for i in range(nports):
+            name = f"p{i+1}"
+
+            # voltage and current probes at port
+            vp = self.v_probes[name + "_v"]["values"]
+            i_1 = self.i_probes[name + "_i1"]["values"]
+            i_2 = self.i_probes[name + "_i2"]["values"]
+
+            ip = (i_1 + i_2) / 2
+
+            # current direction is defined going into the port, if port inward direction is negative,
+            # invert the sign
+            if self.ports[name]["direction"][1] == "-":
+                ip = -ip
+
+            # convert to frequency domain
+            Vp = utils.dtft(vp, s.frequency, 1 / s.dt)
+            Ip = utils.dtft(ip, s.frequency, 1 / s.dt)
+
+            # alternative method (instead of averaging currents) of time delaying the current
+            # input to be at the same spatial point as the voltage probe.
+            # phi_d = np.angle(I1_2 / I1_1)
+            # td = phi_d / (frequency * 2 * np.pi)
+            # I1_d = I1_1 * np.exp(1j * (td / 2) * 2 * np.pi * frequency)
+            
+            # h-fields are 1/2 time step ahead of the e-fields. Delay current so they are at the same time step
+            Ip = Ip * np.exp(-1j * 2 * np.pi * s.frequency * s.dt / 2)
+
+            # foward and reverse voltage waves
+            A[:, i] = (Vp + z0 * Ip) / (2 * np.sqrt(z0))
+            B[:, i] = (Vp - np.conj(z0) * Ip) / (2 * np.sqrt(z0))
+
+        # s-parameter matrix
+        # broadcast A across rows, and B across columns
+        A_full = A[:, None, :]
+        B_full = B[..., None]
+        S = B_full / A_full
+
+        return S
+            
+
+            
+            
+            
+
+
 frequency: np.ndarray = np.arange(5e9, 15e9, 10e6)
 
 # CTRL + SHIFT + C
@@ -910,9 +970,9 @@ p1_x, p1_y = 10, Ny//2
 p2_x, p2_y = Nx-10, Ny//2
 
 pattern = np.zeros((Nx, Ny), dtype=np.int32)
-pattern[p1_x:p2_x, p1_y-1:p1_y+1] = 1
+pattern[p1_x:, p1_y-1:p1_y+1] = 1
 
-w = 0.04
+w = 0.01
 d = 0.02
 dx0 = conv.m_in(0.02)
 dy0 = conv.m_in(0.02)
@@ -922,7 +982,7 @@ dx = np.ones(Nx) * dx0
 dy = np.ones(Ny) * dy0
 dz = np.ones(Nz) * dz0
 
-# line appears to be slightly too low in impedance, I think becuase the edge of PEC is approximated by the Yee grid,
+# line appears to be slightly too low in impedance, I think because the edge of PEC is approximated by the Yee grid,
 # rather than make the mesh drastically smaller, compensate the line width.
 # This appears to be independent of dz or dx, and only a function of dy adjacent to the trace.
 dy[p1_y-1:p1_y+1] = conv.m_in(w/2 - (w/10))
@@ -933,14 +993,14 @@ dy[p1_y+2] = (conv.m_in((w/2)) + dy0) / 2
 
 s = Solver_SingleLayer(frequency, pattern, dx, dy, dz, eps_z, ms_z=ms_z)
 
-s.add_port("p1", "x+", p1_x, p1_y, r0=50, ref_plane=1)
-s.add_port("p2", "x-", p2_x, p2_y, r0=50, ref_plane=1)
+s.add_port(1, "x+", p1_x, p1_y, r0=50, ref_plane=5)
+s.add_port(2, "x-", p2_x, p2_y, r0=None, ref_plane=5)
 
 s.add_field_monitor("ez_ms", "ez", "z", ms_z, 20)
 s.add_field_monitor("ez_xz", "ez", "y", p1_y, 20)
 
 # s.add_xPML(d_pml=10, side="lower")
-# s.add_xPML(d_pml=10, side="upper")
+s.add_xPML(d_pml=10, side="upper")
 # s.add_yPML(d_pml=10, side="lower")
 # s.add_yPML(d_pml=10, side="upper")
 s.add_zPML(d_pml=5)
@@ -970,33 +1030,10 @@ Cb_ms = (dt) / (e0 * 1.5)
 
 s.run("p1", vsrc)
 
-    
-v1 = s.v_probes["p1_v"]["values"]
-i1_1 = s.i_probes["p1_i1"]["values"]
-i1_2 = s.i_probes["p1_i2"]["values"]
+S = s.get_sparameters()
 
-i1 = (i1_1 + i1_2) / 2
-
-V1 = utils.dtft(v1, s.frequency, 1 / s.dt)
-I1_1 = utils.dtft(i1_1, s.frequency, 1 / s.dt)
-I1_2 = utils.dtft(i1_2, s.frequency, 1 / s.dt)
-I1 = utils.dtft(i1, s.frequency, 1 / s.dt)
-
-phi_d = np.angle(I1_2 / I1_1)
-td = phi_d / (frequency * 2 * np.pi)
-
-# I1_d = I1_1 * np.exp(1j * (td / 2) * 2 * np.pi * frequency)
-# I1 = I1_d * np.exp(-1j * 2 * np.pi * s.frequency * s.dt / 2)
-# I1 = I1_d
-I1 = I1 * np.exp(-1j * 2 * np.pi * s.frequency * s.dt / 2)
-
-z0 = 50
-A1 = (V1 + z0 * I1) / (2 * np.sqrt(z0))
-B1 = (V1 - np.conj(z0) * I1) / (2 * np.sqrt(z0))
-
-S11 = B1 / A1
-
-Z = V1 / I1
+S11 = S[:, 0, 0]
+S21 = S[:, 1, 0]
 
 
 msline50 = rfn.elements.MSLine(
@@ -1009,7 +1046,6 @@ zref = msline50.get_properties(10e9).sel(value="z0")[0]
 
 fig, ax = plt.subplots()
 ax.plot(frequency, conv.z_gamma(S11).real)
-ax.plot(frequency, Z.real)
 ax.set_ylim([0, 120])
 mplm.line_marker(x=10e9)
 mplm.axis_marker(y=zref)
@@ -1020,8 +1056,11 @@ plt.plot(S11.real, S11.imag)
 
 fig, ax = plt.subplots()
 ref_s11 = msline50(conv.in_m((Nx - 20) * dx0)).evaluate(frequency)["s"].sel(b=1, a=1)
-ax.plot(frequency, conv.db20_lin(S11))
-ax.plot(frequency, conv.db20_lin(ref_s11))
+ax.plot(frequency/1e9, conv.db20_lin(S11))
+ax.plot(frequency/1e9, conv.db20_lin(ref_s11))
+
+fig, ax = plt.subplots()
+ax.plot(frequency/1e9, conv.db20_lin(S21))
 
 pv.set_jupyter_backend('trame')
 p = s.render()
