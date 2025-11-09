@@ -167,6 +167,7 @@ class Solver_SingleLayer():
         self.fields = dict()
         self.eps_exy = eps_exy
         self.eps_ez = eps_z
+        self.v_src = None
         
         # field shapes
         self.fshape = dict(
@@ -202,6 +203,7 @@ class Solver_SingleLayer():
         self.cell_loc = (gx_h, gy_h, gz_h)
         # location of grid edges
         self.edge_loc = (gx, gy, gz)
+    
 
     def add_v_probe(self, name, x, y):
         """
@@ -210,19 +212,20 @@ class Solver_SingleLayer():
 
         self.v_probes[name] = dict(x=x, y=y)
 
-    def add_i_probe(self, name, x, y):
+    def add_i_probe(self, name, x, y, axis=None):
         """
         Add a current probe. Current flowing inside the cells given at (x, y) is measured, one of which must be a slice.
         Slice endpoint is inclusive.
         """
         # get the axis the current is oriented along
-        if isinstance(x, slice):
-            axis = "y"
-        elif isinstance(y, slice):
-            axis = "x"
-        else:
-            raise ValueError("Either x or y of a current probe must be a slice.")
-            
+        if axis is None:
+            if isinstance(x, slice):
+                axis = "y"
+            elif isinstance(y, slice):
+                axis = "x"
+            else:
+                raise ValueError("Either x or y of a current probe must be a slice if axis is not specified.")
+                
         self.i_probes[name] = dict(x=x, y=y, axis=axis)
 
     def add_field_monitor(self, name: str, field: str, axis: str, position: int, t_step: int):
@@ -297,11 +300,14 @@ class Solver_SingleLayer():
             # current cells
             yi_1 = r_y - np.argmin(self.pattern[xv, r_y-1::-1])
             yi_2 = r_y + np.argmin(self.pattern[xv, r_y:]) - 1
-            print("x", xv, yi_1, yi_2)
-            
+
             self.add_i_probe(name + "_i1", xv - 1, slice(yi_1, yi_2))
             self.add_i_probe(name + "_i2", xv, slice(yi_1, yi_2))
             self.add_v_probe(name + "_v", xv, yv)
+
+            # voltage probe across resistor
+            self.add_v_probe(name + "_rv", r_x, r_y)
+            self.add_i_probe(name + "_ri", r_x, r_y, axis="z")
 
             # a = conv.m_in(0.001)
             # if direction[1] == "+":
@@ -313,6 +319,13 @@ class Solver_SingleLayer():
         #     xv, yv = r_x, r_y + ref_plane
         # elif direction == "y-":
         #     xv, yv = r_x, r_y - ref_plane
+
+        # u0_c1 = u0 * 0.9
+
+        # self.Db["hy_x"][r_x - 1, r_y, r_z] = self.dt / u0_c1
+        # self.Db["hy_x"][r_x, r_y, r_z] = self.dt / u0_c1
+        # self.Db["hx_y"][r_x, r_y - 1, r_z] = self.dt / u0_c1
+        # self.Db["hx_y"][r_x, r_y, r_z] = self.dt / u0_c1
             
         # add to port list
         self.ports[name] = dict(
@@ -320,11 +333,10 @@ class Solver_SingleLayer():
         )
 
 
-            
-            
     def run(self, port, v_waveform):
 
         Nt = len(v_waveform)
+        self.v_src = v_waveform
 
         # numpy type for the field values
         dtype_ = np.float32
@@ -486,8 +498,8 @@ class Solver_SingleLayer():
             # add resistive voltage source
             # Vs_a is already divided by sub_z, so we don't need to split the voltage among each ez component
             
-            ez_x[src_x, src_y, src_z] -= (Vs_a) * (v_waveform[n + 1])
-            ez_y[src_x, src_y, src_z] -= (Vs_a) * (v_waveform[n + 1])
+            ez_x[src_x, src_y, src_z] -= (Vs_a) * (v_waveform[n])
+            ez_y[src_x, src_y, src_z] -= (Vs_a) * (v_waveform[n])
             ez = ez_x + ez_y
 
             # ez_x[src_x, src_y, 0] -= (Vs_a) * (v_waveform[n])
@@ -567,7 +579,19 @@ class Solver_SingleLayer():
                     # hz components on the sides of the trace.
                     hz_p = (-hz[x, y.start - 1, ms_z] + hz[x, y.stop + 1, ms_z]) * dz_h[ms_z - 1]
                     self.i_probes[name]["values"][n + 1] = np.sum(hy_p) + hz_p
-                    
+
+                elif axis == "z":
+                     
+                    # sample fields in the center of the substrate along z. If the middle falls on a integer cell edge,
+                    # average the two fields above and below it
+                    z_mid = self.ms_z / 2
+                    zp = slice(int(z_mid - 1), int(z_mid + 1)) if z_mid % 1 == 0 else int(np.floor(z_mid))
+
+                    ix = (np.mean(hx[x, y-1, zp]) - np.mean(hx[x, y, zp])) * dx_h[x - 1]
+                    iy = (-np.mean(hy[x-1, y, zp]) + np.mean(hy[x, y, zp])) * dy_h[y - 1]
+
+                    self.i_probes[name]["values"][n + 1] = ix + iy
+    
                 # else:  # axis == "y"
                 #     # hx components below and above the trace. For current the +y direction, the h components below the trace are
                 #     # negative, above are positive
@@ -849,29 +873,36 @@ class Solver_SingleLayer():
         return plotter
 
     def animate_fields(
-        self, filename, monitor_name: str, view="xz", vmax=30, vmin=-20, zoom=1.3, el=10, az=0, opacity="linear"
+        self, filename, monitor_name: list, view="xz", vmax=30, vmin=-20, zoom=1.3, el=10, az=0, opacity="linear"
     ):
 
+        monitor_name = np.atleast_1d(monitor_name)
         plotter = self.render()
-        monitor = self.fields[monitor_name]
-        field = monitor["values"]
-        slc = monitor["slc"]
-        t_step = monitor["t_step"]
+        field_meshes = []
 
-        field = np.where(np.abs(field) < 1e-12, 1e-12, field)
-        field_db = np.clip(20 * np.log10(np.abs(field)), vmin, vmax)
-        
-        nframe = len(field)
+        for i, m_name in enumerate(monitor_name):
 
-        floc_m = self.floc[monitor["field"]]
-        floc_in = [conv.in_m(f) for f in floc_m]
-        # slice each axis of grid locations, forcing integer indices into slices
-        g = [floc_in[i][s] if isinstance(s, slice) else floc_in[i][s: s+1] for i, s in enumerate(slc)]
+            monitor = self.fields[m_name]
+            field = monitor["values"]
+            slc = monitor["slc"]
+            t_step = monitor["t_step"]
+
+            field = np.where(np.abs(field) < 1e-12, 1e-12, field)
+            field_db = np.clip(20 * np.log10(np.abs(field)), vmin, vmax)
         
-        fmesh = pv.RectilinearGrid(*g)
-        fmesh.point_data['values'] = field_db[0].flatten(order="F")
-        
-        plotter.add_mesh(fmesh, cmap="jet", scalars="values", clim=[vmin, vmax], show_scalar_bar=False, opacity=opacity)
+            nframe = len(field)
+
+            floc_m = self.floc[monitor["field"]]
+            floc_in = [conv.in_m(f) for f in floc_m]
+            # slice each axis of grid locations, forcing integer indices into slices
+            g = [floc_in[i][s] if isinstance(s, slice) else floc_in[i][s: s+1] for i, s in enumerate(slc)]
+            
+            fmesh = pv.RectilinearGrid(*g)
+            fmesh.point_data['values'] = field_db[0].flatten(order="F")
+            
+            plotter.add_mesh(fmesh, cmap="jet", scalars="values", clim=[vmin, vmax], show_scalar_bar=False, opacity=opacity[i])
+
+            field_meshes += [(fmesh, field_db)]
 
         plotter.add_axes()
         plotter.camera_position = view
@@ -886,68 +917,55 @@ class Solver_SingleLayer():
         plotter.open_gif(filename)
 
         for n in range(nframe):
-            fmesh.point_data["values"][:] = field_db[n].flatten(order="F")
+            for m, f in field_meshes:
+                m.point_data["values"][:] = f[n].flatten(order="F")
+                
             plotter.add_title(f"t={n * t_step * self.dt * 1e9:.2f}ns")
-            plotter.render()
+            # plotter.render()
             plotter.write_frame()
 
         # Closes and finalizes movie
         plotter.close()
 
-
-    def get_sparameters(self, z0=50):
-
+            
+    def get_sparameters(self, z0=50, source_port=1):
+        """
+        Returns a column of the sparameter matrix excited by a single port.
+        """
         nports = len(self.ports)
         nfrequency = len(self.frequency)
-        # matrix for entering voltage waves (A) and exiting waves (B) from each port
-        A = np.zeros((nfrequency, nports), dtype=np.complex128)
+
+        # exiting waves (B) from each port
         B = np.zeros((nfrequency, nports), dtype=np.complex128)
+
+        ports = np.arange(1, nports+1)
+        exit_ports = np.array([p for p in ports if p != source_port])
+
+        # source port S11
+        name = f"p{source_port}"
+
+        src_vp = s.v_probes[f"{name}_rv"]["values"]
+        src_vp_i = s.i_probes[f"{name}_ri"]["values"] * z0
         
-        for i in range(nports):
-            name = f"p{i+1}"
+        A = utils.dtft(self.v_src, s.frequency, 1 / s.dt) * np.exp(1j * 2 * np.pi * s.frequency * s.dt)
+        V = utils.dtft(src_vp, s.frequency, 1 / s.dt)
+        Vi = utils.dtft(src_vp_i, s.frequency, 1 / s.dt)
+        
+        B[:, source_port-1] = V - (A)
 
-            # voltage and current probes at port
-            vp = self.v_probes[name + "_v"]["values"]
-            i_1 = self.i_probes[name + "_i1"]["values"]
-            i_2 = self.i_probes[name + "_i2"]["values"]
+        for p in exit_ports:
+            name = f"p{p}"
 
-            ip = (i_1 + i_2) / 2
-
-            # current direction is defined going into the port, if port inward direction is negative,
-            # invert the sign
-            if self.ports[name]["direction"][1] == "-":
-                ip = -ip
-
-            # convert to frequency domain
-            Vp = utils.dtft(vp, s.frequency, 1 / s.dt)
-            Ip = utils.dtft(ip, s.frequency, 1 / s.dt)
-
-            # alternative method (instead of averaging currents) of time delaying the current
-            # input to be at the same spatial point as the voltage probe.
-            # phi_d = np.angle(I1_2 / I1_1)
-            # td = phi_d / (frequency * 2 * np.pi)
-            # I1_d = I1_1 * np.exp(1j * (td / 2) * 2 * np.pi * frequency)
-            
+            # voltage across port resistor
+            vp = -s.i_probes[f"{name}_ri"]["values"] * z0
             # h-fields are 1/2 time step ahead of the e-fields. Delay current so they are at the same time step
-            Ip = Ip * np.exp(-1j * 2 * np.pi * s.frequency * s.dt / 2)
-
-            # foward and reverse voltage waves
-            A[:, i] = (Vp + z0 * Ip) / (2 * np.sqrt(z0))
-            B[:, i] = (Vp - np.conj(z0) * Ip) / (2 * np.sqrt(z0))
-
-        # s-parameter matrix
-        # broadcast A across rows, and B across columns
-        A_full = A[:, None, :]
-        B_full = B[..., None]
-        S = B_full / A_full
-
-        return S
+            Vp = utils.dtft(vp, s.frequency, 1 / s.dt)
+            # Vp = Vp * np.exp(-1j * 2 * np.pi * s.frequency * s.dt / 2)
+        
+            B[:, p-1] = Vp
+        
+        return B / A[..., None]
             
-
-            
-            
-            
-
 
 frequency: np.ndarray = np.arange(5e9, 15e9, 10e6)
 
@@ -955,7 +973,7 @@ frequency: np.ndarray = np.arange(5e9, 15e9, 10e6)
 # command pallet
 
 f0 = 10e9
-Nz = 20
+Nz = 25
 
 ms_z = 2
 eps_z = np.ones(Nz) * e0
@@ -970,9 +988,9 @@ p1_x, p1_y = 10, Ny//2
 p2_x, p2_y = Nx-10, Ny//2
 
 pattern = np.zeros((Nx, Ny), dtype=np.int32)
-pattern[p1_x:, p1_y-1:p1_y+1] = 1
+pattern[p1_x:p2_x, p1_y-1:p1_y+1] = 1
 
-w = 0.01
+w = 0.04
 d = 0.02
 dx0 = conv.m_in(0.02)
 dy0 = conv.m_in(0.02)
@@ -994,18 +1012,19 @@ dy[p1_y+2] = (conv.m_in((w/2)) + dy0) / 2
 s = Solver_SingleLayer(frequency, pattern, dx, dy, dz, eps_z, ms_z=ms_z)
 
 s.add_port(1, "x+", p1_x, p1_y, r0=50, ref_plane=5)
-s.add_port(2, "x-", p2_x, p2_y, r0=None, ref_plane=5)
+s.add_port(2, "x-", p2_x, p2_y, r0=50, ref_plane=5)
 
-s.add_field_monitor("ez_ms", "ez", "z", ms_z, 20)
-s.add_field_monitor("ez_xz", "ez", "y", p1_y, 20)
+s.add_field_monitor("ez_ms", "ez", "z", ms_z, 15)
+s.add_field_monitor("ez_xz", "ez", "y", p1_y, 15)
+s.add_field_monitor("ez_yz", "ez", "x", 50, 15)
 
 # s.add_xPML(d_pml=10, side="lower")
-s.add_xPML(d_pml=10, side="upper")
-# s.add_yPML(d_pml=10, side="lower")
-# s.add_yPML(d_pml=10, side="upper")
+# s.add_xPML(d_pml=10, side="upper")
+s.add_yPML(d_pml=5, side="lower")
+s.add_yPML(d_pml=5, side="upper")
 s.add_zPML(d_pml=5)
 
-pulse_n = 1600
+pulse_n = 1500
 # width of half pulse in time
 t_half = 4e-11  # (dt * (pulse_n // 8))
 # center of the pulse in time
@@ -1032,8 +1051,9 @@ s.run("p1", vsrc)
 
 S = s.get_sparameters()
 
-S11 = S[:, 0, 0]
-S21 = S[:, 1, 0]
+
+S11 = S[:, 0]
+S21 = S[:, 1]
 
 
 msline50 = rfn.elements.MSLine(
@@ -1058,6 +1078,7 @@ fig, ax = plt.subplots()
 ref_s11 = msline50(conv.in_m((Nx - 20) * dx0)).evaluate(frequency)["s"].sel(b=1, a=1)
 ax.plot(frequency/1e9, conv.db20_lin(S11))
 ax.plot(frequency/1e9, conv.db20_lin(ref_s11))
+ax.set_ylim([-50, 0])
 
 fig, ax = plt.subplots()
 ax.plot(frequency/1e9, conv.db20_lin(S21))
@@ -1066,7 +1087,7 @@ pv.set_jupyter_backend('trame')
 p = s.render()
 p.show()
 
-p = s.animate_fields("msline_2.gif", "ez_xz", el=20, zoom=1.3, vmin=-20, vmax=20, az=30, view="xz", opacity=None)
+p = s.animate_fields("msline_2.gif", ["ez_ms", "ez_yz"], el=30, zoom=1.4, vmin=-20, vmax=20, az=40, view="xz", opacity=[0.8, 1])
 ipyimage(filename='msline_2.gif')
 
 
