@@ -310,7 +310,7 @@ class Solver_SingleLayer():
             self.add_v_probe(name + "_rv", r_x, r_y)
             self.add_i_probe(name + "_ri", r_x, r_y, axis="z")
 
-            # a = conv.m_in(0.001)
+            # a = conv.m_in(0.01)
             # if direction[1] == "+":
             #     self.Db["hy_x"][r_x - 1, r_y, r_z] = (2 * self.dt) / (u0 * np.log(self.dx[r_x - 1] / a))
             # else:
@@ -321,7 +321,7 @@ class Solver_SingleLayer():
         # elif direction == "y-":
         #     xv, yv = r_x, r_y - ref_plane
 
-        # u0_c1 = u0 * 0.9
+        # u0_c1 = u0 * 0.4
 
         # self.Db["hy_x"][r_x - 1, r_y, r_z] = self.dt / u0_c1
         # self.Db["hy_x"][r_x, r_y, r_z] = self.dt / u0_c1
@@ -883,12 +883,22 @@ class Solver_SingleLayer():
         return plotter
 
     def plot_fields(
-        self, monitor_name: list, view="xz", vmax=30, vmin=-20, zoom=1.3, el=10, az=0, opacity="linear", gif_file=None
+        self,
+        monitor_name: list,
+        view="xz",
+        vmax=30, vmin=-20,
+        zoom=1.3, 
+        el=10, az=0,
+        opacity="linear",
+        gif_file=None,
+        linear=False, 
+        cmap="jet"
     ):
 
         monitor_name = np.atleast_1d(monitor_name)
         plotter = self.render()
         field_meshes = []
+        field_actors = []
 
         for i, m_name in enumerate(monitor_name):
 
@@ -898,7 +908,10 @@ class Solver_SingleLayer():
             t_step = monitor["t_step"]
 
             field = np.where(np.abs(field) < 1e-12, 1e-12, field)
-            field_db = np.clip(20 * np.log10(np.abs(field)), vmin, vmax).reshape(len(field), -1, order="F")
+            if linear:
+                field_v = np.clip(field, vmin, vmax).reshape(len(field), -1, order="F")
+            else:
+                field_v = np.clip(20 * np.log10(np.abs(field)), vmin, vmax).reshape(len(field), -1, order="F")
         
             nframe = len(field)
 
@@ -908,11 +921,14 @@ class Solver_SingleLayer():
             g = [floc_in[i][s] if isinstance(s, slice) else floc_in[i][s: s+1] for i, s in enumerate(slc)]
             
             fmesh = pv.RectilinearGrid(*g)
-            fmesh.point_data['values'] = field_db[0].flatten(order="F")
+            fmesh.point_data['values'] = field_v[0]
             
-            plotter.add_mesh(fmesh, cmap="jet", scalars="values", clim=[vmin, vmax], show_scalar_bar=False, opacity=opacity[i])
+            actor = plotter.add_mesh(
+                fmesh, cmap=cmap, scalars="values", clim=[vmin, vmax], show_scalar_bar=False, opacity=opacity[i]
+            )
 
-            field_meshes += [(fmesh, field_db)]
+            field_meshes += [(fmesh, field_v)]
+            field_actors += [actor]
 
         plotter.add_axes()
         plotter.camera_position = view
@@ -921,7 +937,7 @@ class Solver_SingleLayer():
         plotter.camera.zoom(zoom)
         
         plotter.add_scalar_bar(
-            title="Ez [dB]\n", vertical=False, label_font_size=11, title_font_size=14
+            title="E [dB]\n" if linear else "E [V/m]\n", vertical=False, label_font_size=11, title_font_size=14
         )
         
 
@@ -944,6 +960,15 @@ class Solver_SingleLayer():
             style="modern",
             fmt="%0.2f ns"
         )
+
+        def set_field_visible(value):
+            for m in field_actors:
+                m.SetVisibility(value)
+            
+        # add checkbox to turn off field visibiliy
+        plotter.add_checkbox_button_widget(set_field_visible, value=True, position=(10, 10), size=30, border_size=0)
+        plotter.add_text("Field Visibility", position=(45, 15), font_size=9)
+
 
         if gif_file:
             plotter.open_gif(gif_file)
@@ -1006,29 +1031,29 @@ frequency: np.ndarray = np.arange(5e9, 15e9, 10e6)
 # command pallet
 
 f0 = 10e9
-Nz = 25
+Nz = 40
 
-ms_z = 2
+ms_z = 4
 eps_z = np.ones(Nz) * e0
 eps_z[:ms_z] = 3.66 * e0
 
 
 Nx = 120
-Ny = 30
+Ny = 40
 
-p1_x, p1_y = 10, (Ny//2) - 2
-p2_x, p2_y = 10, (Ny//2) + 1
+p1_x, p1_y = 10, (Ny//2) - 3
+p2_x, p2_y = 10, (Ny//2) + 3
 
 pattern = np.zeros((Nx, Ny), dtype=np.int32)
-pattern[p1_x:, p1_y-1:p1_y+1] = 1
-pattern[p2_x:, p2_y-1:p2_y+1] = 1
+pattern[p1_x:, p1_y-2:p1_y+2] = 1
+pattern[p2_x:, p2_y-2:p2_y+2] = 1
 
-w = 0.040
+w = 0.020
 d = 0.02
-sp = 0.01
+sp = 0.005
 
-dx0 = conv.m_in(0.02)
-dy0 = conv.m_in(0.02)
+dx0 = conv.m_in(0.005)
+dy0 = conv.m_in(0.005)
 dz0 = conv.m_in(d/ms_z)
 
 dx = np.ones(Nx) * dx0
@@ -1038,28 +1063,38 @@ dz = np.ones(Nz) * dz0
 # line appears to be slightly too low in impedance, I think because the edge of PEC is approximated by the Yee grid,
 # rather than make the mesh drastically smaller, compensate the line width.
 # This appears to be independent of dz or dx, and only a function of dy adjacent to the trace.
-dy[p1_y-1:p1_y+1] = conv.m_in(w/2 - (sp/5))
-dy[p2_y-1:p2_y+1] = conv.m_in(w/2 - (sp/5))
-dy[p1_y+1] = conv.m_in(sp)
+dy[p1_y-2:p1_y+2] = conv.m_in(w/4)
+dy[p2_y-2:p2_y+2] = conv.m_in(w/4)
+
+dy[p1_y-2] = conv.m_in(w/4 - dy0/5)
+dy[p1_y+1] = conv.m_in(w/4 - dy0/5)
+
+dy[p2_y-2] = conv.m_in(w/4 - dy0/5)
+dy[p2_y+1] = conv.m_in(w/4 - dy0/5)
 
 print(conv.in_m(dy))
 
 # space width on both sides of the traces
-dy[p1_y-2] = conv.m_in(sp)
-dy[p2_y+1] = conv.m_in(sp)
+# dy[p1_y-3] = conv.m_in(sp)
+# dy[p2_y+4] = conv.m_in(sp)
 
 # taper the spacing up to the default
-dy[p2_y+2] = (conv.m_in(sp) + dy0) / 2
-dy[p1_y-3] = (conv.m_in(sp) + dy0) / 2
+# dy[p2_y+2] = (conv.m_in(sp/2) + dy0) / 2
+# dy[p1_y-3] = (conv.m_in(sp/2) + dy0) / 2
 
-# plt.stem(conv.in_m(dy))
+# dy[p1_y+2] = conv.m_in(sp)
+
+plt.stem(conv.in_m(dy))
+
+# plt.pcolormesh(pattern.T)
 
 s = Solver_SingleLayer(frequency, pattern, dx, dy, dz, eps_z, ms_z=ms_z)
 
-s.add_port(1, "x+", p1_x, p1_y, r0=50, ref_plane=5)
-s.add_port(2, "x+", p2_x, p2_y, r0=50, ref_plane=5)
+s.add_port(1, "x+", p1_x, p1_y, r0=50, ref_plane=15)
+s.add_port(2, "x+", p2_x, p2_y, r0=50, ref_plane=15)
 
-s.add_field_monitor("ey_ms", "ey", "z", ms_z, 15)
+s.add_field_monitor("ey_ms", "ey", "z", ms_z, 10)
+s.add_field_monitor("ey_zx", "ey", "x", Nx//2, 10)
 
 # s.add_xPML(d_pml=10, side="lower")
 s.add_xPML(d_pml=10, side="upper")
@@ -1096,17 +1131,21 @@ Vp = utils.dtft(vp, s.frequency, 1 / s.dt)
 Ip = utils.dtft(ip, s.frequency, 1 / s.dt)
 Ip = Ip * np.exp(-1j * 2 * np.pi * s.frequency * s.dt / 2)
 
+Zp = (Vp / Ip)
 
 fig, ax = plt.subplots()
 ax.plot(frequency, conv.z_gamma(S11).real)
-plt.plot(frequency, (Vp / Ip).real)
+plt.plot(frequency, Zp.real)
 ax.set_ylim([0, 120])
 mplm.line_marker(x=10e9)
 mplm.axis_marker(y=49)
 
+S11z = conv.gamma_z(Zp)
 fig, ax = plt.subplots()
 rfn.plots.draw_smithchart(ax)
 plt.plot(S11.real, S11.imag)
+plt.plot(S11z.real, S11z.imag)
+plt.show()
 
 
 
@@ -1123,8 +1162,8 @@ pv.set_jupyter_backend('trame')
 # p.camera.zoom(2)
 # p.show()
 
-p = s.plot_fields(["ey_ms"], el=0, zoom=1.1, vmin=-20, vmax=20, az=0, view="xy", opacity=[0.8])
-p.show()
+p = s.plot_fields(["ey_ms", "ey_zx"], el=0, zoom=1.1, vmin=-5, vmax=5, az=0, view="xy", opacity=[0.8, 1], linear=True, cmap="RdBu")
+p.show(title="EM Solver")
 # ipyimage(filename='msline_2.gif')
 
 
