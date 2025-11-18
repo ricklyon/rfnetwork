@@ -21,37 +21,6 @@ u0 = const.u0
 e0 = const.e0
 c0 = const.c0
 
-sbox_h = 0.5
-sbox_w = 0.5
-sbox_len = 2.5
-
-sub_h = 0.02
-ms_x = (-1, 1)
-ms_y = 0
-ms_w = 0.04
-
-substrate = pv.Cube(center=(0, 0, sub_h/2), x_length=sbox_len, y_length=sbox_w, z_length=sub_h)
-
-sbox = pv.Cube(center=(0, 0, sbox_h/2), x_length=sbox_len, y_length=sbox_w, z_length=sbox_h)
-
-ms_trace = pv.Rectangle([
-    (ms_x[0], ms_y - ms_w/2, sub_h),
-    (ms_x[0], ms_y + ms_w/2, sub_h),
-    (ms_x[1], ms_y + ms_w/2, sub_h)
-])
-
-port1_face = pv.Rectangle([
-    (ms_x[0], ms_y - ms_w/2, sub_h),
-    (ms_x[0], ms_y + ms_w/2, sub_h),
-    (ms_x[0], ms_y + ms_w/2, 0),
-])
-
-port2_face = pv.Rectangle([
-    (ms_x[1], ms_y - ms_w/2, sub_h),
-    (ms_x[1], ms_y + ms_w/2, sub_h),
-    (ms_x[1], ms_y + ms_w/2, 0),
-])
-
 
 
 class SolverMesh():
@@ -60,12 +29,11 @@ class SolverMesh():
         self.substrate = dict()
         self.pec_face = dict()
         self.styles = dict()
-        self.ports = [None] * nports
+        self.port_face = [None] * nports
         self.bounding_box = bounding_box
 
         self.sbox_max = np.max(bounding_box.points, axis=0)
         self.sbox_min = np.min(bounding_box.points, axis=0)
-
 
     def add_substrate(self, name, obj, er: float, **kwargs):
         self.substrate[name] = (obj, er)
@@ -76,7 +44,7 @@ class SolverMesh():
         self.styles[name] = kwargs
 
     def add_lumped_port(self, number, face):
-        self.ports[number - 1] = face
+        self.port_face[number - 1] = face
 
     def point_to_idx(self, p, mode="edge"):
 
@@ -172,6 +140,19 @@ class SolverMesh():
             hz=(gx_h, gy_h, gz)
         )
 
+        # field shapes
+        Nx, Ny, Nz = self.n_cells
+        self.fshape = dict(
+            ex=(Nx, Ny+1, Nz+1),
+            ey=(Nx+1, Ny, Nz+1),
+            ez=(Nx+1, Ny+1, Nz),
+            hx=(Nx+1, Ny, Nz),
+            hy=(Nx, Ny+1, Nz),
+            hz=(Nx, Ny, Nz+1)
+        )
+        
+
+
     def mesh(self):
 
         s.create_grid()
@@ -190,16 +171,6 @@ class SolverMesh():
         Da_0 = 1  # (2 * u0 - (sigm_0 * dt)) / (2 * u0 + (sigm_0 * dt))
         Db_0 = dt / u0
 
-        # coefficient in front of the previous time values of E
-        Ca_ex = np.ones((Nx, Ny+1, Nz+1)) * Ca_0
-        Ca_ey = np.ones((Nx+1, Ny, Nz+1)) * Ca_0
-        Ca_ez = np.ones((Nx+1, Ny+1, Nz)) * Ca_0
-
-        # coefficient in front of the difference terms of H
-        Cb_ex = np.ones((Nx, Ny+1, Nz+1)) * Cb_0
-        Cb_ey = np.ones((Nx+1, Ny, Nz+1)) * Cb_0
-        Cb_ez = np.ones((Nx+1, Ny+1, Nz)) * Cb_0
-
         # substrate
         # ez components are on the edge of the x/y cell boundaries, average epsilon from the adjacent cells
         dx0, dx1 = dx[:-1][..., None, None], dx[1:][..., None, None]
@@ -212,12 +183,26 @@ class SolverMesh():
         # average epsilon cells adjacent to y edges
         eps_y = (eps[:, :-1] * (dy0/2) + eps[:, 1:] * (dy1/2)) / (dy0/2 + dy1/2)
 
+        self.eps_ex = np.ones(self.fshape["ex"]) * e0
+        self.eps_ey = np.ones(self.fshape["ey"]) * e0
+        self.eps_ez = np.ones(self.fshape["ez"]) * e0
+
         # ey component is on the y and z edge of the cell
-        Cb_ex[:, 1:-1, 1:-1] = dt / ((eps_y[..., :-1] * (dz0/2) + eps_y[..., 1:] * (dz1/2)) / (dz0/2 + dz1/2))
+        self.eps_ex[:, 1:-1, 1:-1] = ((eps_y[..., :-1] * (dz0/2) + eps_y[..., 1:] * (dz1/2)) / (dz0/2 + dz1/2))
         # ey component is on the x and z edge of the cell
-        Cb_ey[1:-1, :, 1:-1] = dt / ((eps_x[..., :-1] * (dz0/2) + eps_x[..., 1:] * (dz1/2)) / (dz0/2 + dz1/2))
+        self.eps_ey[1:-1, :, 1:-1] = ((eps_x[..., :-1] * (dz0/2) + eps_x[..., 1:] * (dz1/2)) / (dz0/2 + dz1/2))
         # ez component is on the x and y edge of the cell, average eps from adjacent cells on both axis
-        Cb_ez[1:-1, 1:-1] = dt / ((eps_x[:, :-1] * (dy0/2) + eps_x[:, 1:] * (dy1/2)) / (dy0/2 + dy1/2))
+        self.eps_ez[1:-1, 1:-1] = ((eps_x[:, :-1] * (dy0/2) + eps_x[:, 1:] * (dy1/2)) / (dy0/2 + dy1/2))
+
+        # coefficient in front of the previous time values of E
+        Ca_ex = np.ones((Nx, Ny+1, Nz+1)) * Ca_0
+        Ca_ey = np.ones((Nx+1, Ny, Nz+1)) * Ca_0
+        Ca_ez = np.ones((Nx+1, Ny+1, Nz)) * Ca_0
+        
+        # coefficient in front of the difference terms of H
+        Cb_ex = dt / self.eps_ex
+        Cb_ey = dt / self.eps_ey
+        Cb_ez = dt / self.eps_ez
 
         # PEC pattern
         for name, pec in self.pec_face.items():
@@ -228,8 +213,8 @@ class SolverMesh():
             x0, y0, z0 = self.point_to_idx(np.min(pec.points, axis=0))
             x1, y1, z1 = self.point_to_idx(np.max(pec.points, axis=0))
     
-            x0_c, y0_c, z0_c = self.point_to_idx(np.min(pec.points, axis=0))
-            x1_c, y1_c, z1_c = self.point_to_idx(np.max(pec.points, axis=0))
+            x0_c, y0_c, z0_c = self.point_to_idx(np.min(pec.points, axis=0), mode="cell")
+            x1_c, y1_c, z1_c = self.point_to_idx(np.max(pec.points, axis=0), mode="cell")
     
             # get width of pec in cell units
             idx_d = np.array([x1, y1, z1]) - np.array([x0, y0, z0])
@@ -300,6 +285,60 @@ class SolverMesh():
             hz_y = np.ones((Nx, Ny, Nz+1)) * Db_0,
         )
 
+    def setup_ports(self):
+        r0 = 50
+        face = self.port_face[0]
+
+        self.ports = [None] * len(self.port_face)
+        
+        for i, face in enumerate(self.port_face):
+    
+            if face.n_cells > 1 or face.faces[0] != 4:
+                raise ValueError("Only rectangular port faces are supported.")
+            
+            x0, y0, z0 = self.point_to_idx(np.min(face.points, axis=0))
+            x1, y1, z1 = self.point_to_idx(np.max(face.points, axis=0))
+    
+            x0_c, y0_c, z0_c = self.point_to_idx(np.min(face.points, axis=0), mode="cell")
+            x1_c, y1_c, z1_c = self.point_to_idx(np.max(face.points, axis=0), mode="cell")
+    
+            # get width of pec in cell units
+            idx_d = np.array([x1, y1, z1]) - np.array([x0, y0, z0])
+    
+            if np.count_nonzero(idx_d) != 2:
+                raise ValueError("Port face must be on cartesian grid, and must be 2D.")
+                
+            # face is normal to the x-axis, Resistor is represented by the Ez components
+            if (idx_d[0] == 0):
+    
+                # width of resistor cell centered around the ez component, ez is on the x/y edges
+                dx_r = self.dx_h[x0-1]
+                dy_r = self.dy_h[y0-1: y1][..., None]
+                # z axis is in center of cell
+                dz_r = self.dz[z0: z1][None]
+        
+                # epsilon of resistor cells
+                eps_r = self.eps_ez[x0, y0: y1+1, z0: z1]
+        
+                # resistance of each cell is spilt so the combined reistance of all cells equals r0
+                r_cell = r0 * (eps_r.shape[0] / eps_r.shape[1])
+        
+                rterm = (r_cell * dx_r * dy_r)
+                denom = (eps_r / self.dt) + (dz_r / (2 * rterm))
+
+                ez_idx = tuple([x0, slice(y0, y1+1), slice(z0_c, z1_c)])
+                
+                self.Ca["ez_x"][ez_idx] = ((eps_r / self.dt) - (dz_r / (2 * rterm))) / denom
+                self.Cb["ez_x"][ez_idx] = 1 / (denom)
+        
+                self.Ca["ez_y"][ez_idx] = ((eps_r / self.dt) - (dz_r / (2 * rterm))) / denom
+                self.Cb["ez_y"][ez_idx] = 1 / (denom)
+
+                self.ports[i] = dict(idx=ez_idx, Vs_a=1 / (denom * rterm * eps_r.shape[1]))
+        
+            else:
+                raise ValueError(f"Port face is not 2D")
+
     def render(self) -> pv.Plotter:
         """
         Plot the model geometry
@@ -316,7 +355,6 @@ class SolverMesh():
         # add grid
         plotter.add_mesh(grid, style="wireframe", line_width=0.05, color="k", opacity=0.05)
 
-        
         # add substrates
         for name, (sub, er) in self.substrate.items():
             plotter.add_mesh(sub, **self.styles[name])
@@ -326,10 +364,10 @@ class SolverMesh():
             plotter.add_mesh(pec, **self.styles[name])
 
         # add ports
-        for port_face in self.ports:
+        for port_face in self.port_face:
             plotter.add_mesh(port_face, color="pink", opacity=0.5)
 
-        plotter.show_grid(n_zlabels=2, font_size=9)
+        plotter.show_grid(font_size=9)
 
         return plotter
 
@@ -389,7 +427,36 @@ class SolverMesh():
         
         return plotter
 
+sbox_h = 0.5
+sbox_w = 0.5
+sbox_len = 2.5
 
+sub_h = 0.02
+ms_x = (-1, 1)
+ms_y = 0
+ms_w = 0.04
+
+substrate = pv.Cube(center=(0, 0, sub_h/2), x_length=sbox_len, y_length=sbox_w, z_length=sub_h)
+
+sbox = pv.Cube(center=(0, 0, sbox_h/2), x_length=sbox_len, y_length=sbox_w, z_length=sbox_h)
+
+ms_trace = pv.Rectangle([
+    (ms_x[0], ms_y - ms_w/2, sub_h),
+    (ms_x[0], ms_y + ms_w/2, sub_h),
+    (ms_x[1], ms_y + ms_w/2, sub_h)
+])
+
+port1_face = pv.Rectangle([
+    (ms_x[0], ms_y - ms_w/2, sub_h),
+    (ms_x[0], ms_y + ms_w/2, sub_h),
+    (ms_x[0], ms_y + ms_w/2, 0),
+])
+
+port2_face = pv.Rectangle([
+    (ms_x[1], ms_y - ms_w/2, sub_h),
+    (ms_x[1], ms_y + ms_w/2, sub_h),
+    (ms_x[1], ms_y + ms_w/2, 0),
+])
 
 s = SolverMesh(sbox, nports=2)
 s.add_substrate("sub", substrate, er=3.66, opacity=0.0)
@@ -398,12 +465,17 @@ s.add_lumped_port(1, port1_face)
 s.add_lumped_port(2, port2_face)
 
 s.mesh()
+s.setup_ports()
 
 # s.render().show()
 
-p = s.plot_cooeficients("ez_y", "b", "x", 0.02, point_size=15, cmap="brg", vmin=0)
-p.camera_position = "yz"
+p = s.plot_cooeficients("ez_x", "a", "x", -1.0, point_size=15, cmap="brg", vmin=-1)
+p.camera_position = "xz"
+p.camera.zoom(1.8)
+p.show_grid(font_size=10, grid=True, use_3d_text=False, location="default")
 p.show()
+
+self = s
 
 
 
