@@ -14,6 +14,7 @@ import matplotlib
 # matplotlib.use("qt5agg")
 
 pv.set_jupyter_backend("trame")
+np.set_printoptions(suppress=True)
 
 sys.argv = sys.argv[0:1]
 
@@ -54,7 +55,8 @@ class SolverMesh():
         grid = [self.g_edges[i] if m == "edge" else self.g_cells[i] for i, m in enumerate(mode)]
         for i, g in enumerate(grid):
             diff = (g - p[i])
-            idx += [np.argmax(diff >= -1e-6) if diff[-1] > 0 else len(g)]
+            # if no cell is above the point, return the length of the axis, otherwise return the first cell that is larger than the point.
+            idx += [np.argmax(diff >= -1e-3) if diff[-1] > 0 else len(g)]
 
         return tuple(idx)
     
@@ -153,9 +155,9 @@ class SolverMesh():
         
 
 
-    def mesh(self):
+    def mesh(self, d0):
 
-        s.create_grid()
+        s.create_grid(d0)
         
         dx, dy, dz = self.d_cells
         Nx, Ny, Nz = self.n_cells
@@ -163,7 +165,7 @@ class SolverMesh():
         # compute maximum time step that ensures convergence, use freespace propagation speed as worst case
         length_min = np.array([np.min(dx), np.min(dy), np.min(dz)])
         dmin = 1 / np.sqrt(((1 / length_min)**2).sum())
-        dt = 0.95 * (dmin / const.c0)
+        dt = 0.95 * (dmin / const.c0_in)
         self.dt = dt
         
         Ca_0 = 1  # (2 * e0 - (sig_0 * dt)) / (2 * e0 + (sig_0 * dt))
@@ -291,6 +293,9 @@ class SolverMesh():
 
         self.ports = [None] * len(self.port_face)
         
+        dx, dy, dz = [conv.m_in(d) for d in self.d_cells]
+        dx_h, dy_h, dz_h = [conv.m_in(d) for d in self.dh_cells]
+        
         for i, face in enumerate(self.port_face):
     
             if face.n_cells > 1 or face.faces[0] != 4:
@@ -312,10 +317,10 @@ class SolverMesh():
             if (idx_d[0] == 0):
     
                 # width of resistor cell centered around the ez component, ez is on the x/y edges
-                dx_r = self.dx_h[x0-1]
-                dy_r = self.dy_h[y0-1: y1][..., None]
+                dx_r = dx_h[x0-1]
+                dy_r = dy_h[y0-1: y1][..., None]
                 # z axis is in center of cell
-                dz_r = self.dz[z0: z1][None]
+                dz_r = dz[z0: z1][None]
         
                 # epsilon of resistor cells
                 eps_r = self.eps_ez[x0, y0: y1+1, z0: z1]
@@ -339,6 +344,245 @@ class SolverMesh():
             else:
                 raise ValueError(f"Port face is not 2D")
 
+    
+    def run(self, ports, v_waveforms):
+
+        if isinstance(ports, int):
+            ports = [ports]
+
+        v_waveforms = np.atleast_2d(v_waveforms)
+            
+        Nt = len(v_waveforms[0])
+        self.v_src = v_waveforms
+
+        # numpy type for the field values
+        dtype_ = np.float32
+        dx, dy, dz = [conv.m_in(d) for d in self.d_cells]
+        dx_h, dy_h, dz_h = [conv.m_in(d) for d in self.dh_cells]
+        Nx, Ny, Nz = len(dx), len(dy), len(dz)
+
+        # field values
+        ex_y = np.zeros((Nx, Ny+1, Nz+1), dtype=dtype_)
+        ex_z = np.zeros((Nx, Ny+1, Nz+1), dtype=dtype_)
+        
+        ey_z = np.zeros((Nx+1, Ny, Nz+1), dtype=dtype_)
+        ey_x = np.zeros((Nx+1, Ny, Nz+1), dtype=dtype_)
+        
+        ez_x = np.zeros((Nx+1, Ny+1, Nz), dtype=dtype_)
+        ez_y = np.zeros((Nx+1, Ny+1, Nz), dtype=dtype_)
+        
+        hx_y = np.zeros((Nx+1, Ny, Nz), dtype=dtype_)
+        hx_z = np.zeros((Nx+1, Ny, Nz), dtype=dtype_)
+        
+        hy_z = np.zeros((Nx, Ny+1, Nz), dtype=dtype_)
+        hy_x = np.zeros((Nx, Ny+1, Nz), dtype=dtype_)
+        
+        hz_x = np.zeros((Nx, Ny, Nz+1), dtype=dtype_)
+        hz_y = np.zeros((Nx, Ny, Nz+1), dtype=dtype_)
+
+        dx_inv = 1 / dx[:, None, None]
+        dy_inv = 1 / dy[None, :, None]
+        dz_inv = 1 / dz[None, None, :]
+
+        dx_h_inv = 1 / dx_h[:, None, None]
+        dy_h_inv = 1 / dy_h[None, :, None]
+        dz_h_inv = 1 / dz_h[None, None, :]
+        
+        # ex coefficients, edges along y and z do not get updated
+        Ca_ex_y = self.Ca["ex_y"][:, 1:-1, 1:-1]
+        Ca_ex_z = self.Ca["ex_z"][:, 1:-1, 1:-1]
+        
+        Cb_ex_y = self.Cb["ex_y"][:, 1:-1, 1:-1] * dy_h_inv
+        Cb_ex_z = -self.Cb["ex_z"][:, 1:-1, 1:-1] * dz_h_inv
+
+        # ey coefficients, edges along x and z do not get updated
+        Ca_ey_z = self.Ca["ey_z"][1:-1, :, 1:-1]
+        Ca_ey_x = self.Ca["ey_x"][1:-1, :, 1:-1]
+        
+        Cb_ey_z = self.Cb["ey_z"][1:-1, :, 1:-1] * dz_h_inv
+        Cb_ey_x = -self.Cb["ey_x"][1:-1, :, 1:-1] * dx_h_inv
+
+        # ez coefficients, edges along x and y do not get updated
+        Ca_ez_x = self.Ca["ez_x"][1:-1, 1:-1, :]
+        Ca_ez_y = self.Ca["ez_y"][1:-1, 1:-1, :]
+        
+        Cb_ez_x = self.Cb["ez_x"][1:-1, 1:-1, :] * dx_h_inv
+        Cb_ez_y = -self.Cb["ez_y"][1:-1, 1:-1, :] * dy_h_inv
+
+        # hx coefficients
+        Da_hx_y = self.Da["hx_y"]
+        Da_hx_z = self.Da["hx_z"]
+        
+        Db_hx_y = -self.Db["hx_y"] * dy_inv
+        Db_hx_z = self.Db["hx_z"] * dz_inv
+
+        # hy coefficients
+        Da_hy_z = self.Da["hy_z"]
+        Da_hy_x = self.Da["hy_x"]
+        
+        Db_hy_z = -self.Db["hy_z"] * dz_inv
+        Db_hy_x = self.Db["hy_x"] * dx_inv
+
+        # hz coefficients
+        Da_hz_x = self.Da["hz_x"]
+        Da_hz_y = self.Da["hz_y"]
+        
+        Db_hz_x = -self.Db["hz_x"] * dx_inv
+        Db_hz_y = self.Db["hz_y"] * dy_inv
+
+        # initialize port voltages
+        for i, p in enumerate(self.ports):
+            self.ports[i]["v_probe"] = np.zeros(Nt, dtype=dtype_)
+
+        for i, p in enumerate(ports):
+            self.ports[p-1]["src"] = v_waveforms[i].copy()
+
+        hx = hx_y
+        hy = hy_z
+        hz = hz_x
+        
+        # loop over each time step
+        for n in range(Nt - 1):
+
+            # grid starts at bottom left corner. A half-cell is placed in front of each component so all field values have 
+            # the same number of values. The extra half cell components are not updated.
+
+            ###########
+            # ex update
+            # edges along y and z do not get updated
+            ex_yd = Cb_ex_y * np.diff(hz, axis=1)[:, :, 1:-1]
+            ex_zd = Cb_ex_z * np.diff(hy, axis=2)[:, 1:-1, :]
+
+            # in PML
+            ex_y[:, 1:-1, 1:-1] = (Ca_ex_y * ex_y[:, 1:-1, 1:-1]) + ex_yd
+            ex_z[:, 1:-1, 1:-1] = (Ca_ex_z * ex_z[:, 1:-1, 1:-1]) + ex_zd
+            ex = ex_y + ex_z
+            # normal region
+            # ex = Ca_ex * ex[:, 1:-1, 1:-1] + (ex_zd + ex_yd)
+
+            # ex[:, 1:-1, 1:-1] = (Ca_ex * ex[:, 1:-1, 1:-1]) + Cb_ex * (
+            #     (np.diff(hz, axis=1) * dy_h_inv)[:, :, 1:-1] - 
+            #     (np.diff(hy, axis=2) * dz_h_inv)[:, 1:-1, :]
+            # )
+
+            ###########
+            # ey update
+            # edges along x and z do not get updated
+            ey_zd = Cb_ey_z * np.diff(hx, axis=2)[1:-1, :, :]
+            ey_xd = Cb_ey_x * np.diff(hz, axis=0)[:, :, 1:-1]
+
+            # in PML
+            ey_z[1:-1, :, 1:-1] = (Ca_ey_z * ey_z[1:-1, :, 1:-1]) + ey_zd
+            ey_x[1:-1, :, 1:-1] = (Ca_ey_x * ey_x[1:-1, :, 1:-1]) + ey_xd
+            ey = ey_z + ey_x
+            # normal region
+            # ey = Ca_ey * ey[:, 1:-1, 1:-1] + (ey_zd + ey_xd)
+            
+            # ey[1:-1, :, 1:-1] = (Ca_ey * ey[1:-1, :, 1:-1]) + Cb_ey * (
+            #     (np.diff(hx, axis=2) * dz_h_inv)[1:-1, :, :] - 
+            #     (np.diff(hz, axis=0) * dx_h_inv)[:, :, 1:-1]
+            # )
+
+            ###########
+            # ez update
+            # edges along x and y do not get updated
+            ez_xd = Cb_ez_x * np.diff(hy, axis=0)[:, 1:-1, :]
+            ez_yd = Cb_ez_y * np.diff(hx, axis=1)[1:-1, :, :]
+
+            # in PML
+            ez_x[1:-1, 1:-1, :] = (Ca_ez_x * ez_x[1:-1, 1:-1, :]) + ez_xd
+            ez_y[1:-1, 1:-1, :] = (Ca_ez_y * ez_y[1:-1, 1:-1, :]) + ez_yd
+            ez = ez_x + ez_y
+            # normal region
+            # ez = Ca_ez * ez[:, 1:-1, 1:-1] + (ez_xd + ez_yd)
+            
+            # ez[1:-1, 1:-1, :] = (Ca_ez * ez[1:-1, 1:-1, :]) + Cb_ez * (
+            #     (np.diff(hy, axis=0) * dx_h_inv)[:, 1:-1, :] - 
+            #     (np.diff(hx, axis=1) * dy_h_inv)[1:-1, :, :]
+            # )
+
+            ############
+            # add resistive voltage source
+            # Vs_a is already divided by sub_z, so we don't need to split the voltage among each ez component
+
+            for i, p in enumerate(ports):
+                p_idx, Vs_a, v_probe, v_src = self.ports[p-1].values()
+
+                ez_x[p_idx] -= (Vs_a) * (v_src[n]) #+ v_src[n + 1]) / 2
+                ez_y[p_idx] -= (Vs_a) * (v_src[n]) # + v_src[n + 1]) / 2
+
+                ez = ez_x + ez_y
+
+            # update port probes
+            for i, p in enumerate(self.ports):
+                
+                # update port voltage values for ports normal to x
+                p_x, p_y, p_z = p["idx"]
+
+                # sum voltage along z axis
+                v_port = -np.sum(ez[p_idx] * dz[p_z][None], axis=-1)
+                # if port spans three ez components along y, use the center voltage, otherwise average the two endpoints
+                # to approximate the voltage in the center
+                port_len = len(v_port)
+                if len(v_port) % 2 != 0:
+                    self.ports[i]["v_probe"][n+1] = v_port[port_len // 2]
+                else:
+                    self.ports[i]["v_probe"][n+1] = np.mean(v_port[(port_len // 2) - 1: (port_len // 2) + 1])
+                
+
+            ###########
+            # hx update
+            hx_yd = Db_hx_y * np.diff(ez, axis=1)
+            hx_zd = Db_hx_z * np.diff(ey, axis=2)
+
+            # in PML
+            hx_y = Da_hx_y * hx_y + hx_yd
+            hx_z = Da_hx_z * hx_z + hx_zd
+            hx = hx_y + hx_z
+            # normal region
+            # hx +=  (hx_y + hx_z)
+            
+            # hx = (hx) + (
+            #     self.Db["hx_ey"] * (np.diff(ey, axis=2) * dz_inv) - 
+            #     self.Db["hx_ez"] * (np.diff(ez, axis=1) * dy_inv)
+            # )
+
+            ###########
+            # hy update
+            hy_zd = Db_hy_z * np.diff(ex, axis=2)
+            hy_xd = Db_hy_x * np.diff(ez, axis=0)
+
+            # in PML
+            hy_z = Da_hy_z * hy_z + hy_zd
+            hy_x = Da_hy_x * hy_x + hy_xd
+            hy = hy_z + hy_x
+            # normal region
+            # hy +=  (hy_z + hy_x)
+            
+            # hy = (hy) + (
+            #     self.Db["hy_ez"]  * (np.diff(ez, axis=0) * dx_inv) - 
+            #     self.Db["hy_ex"]  * (np.diff(ex, axis=2) * dz_inv)
+            # )
+
+            ###########
+            # hz update
+            hz_xd = Db_hz_x * np.diff(ey, axis=0) 
+            hz_yd = Db_hz_y * np.diff(ex, axis=1)
+
+            # in PML
+            hz_x = Da_hz_x * hz_x + hz_xd
+            hz_y = Da_hz_y * hz_y + hz_yd
+            hz = hz_x + hz_y
+            # normal region
+            # hz += (hz_x + hz_y)
+            
+            # hz = (hz) + (
+            #     self.Db["hz_ex"]  * (np.diff(ex, axis=1) * dy_inv) - 
+            #     self.Db["hz_ey"]  * (np.diff(ey, axis=0) * dx_inv)
+            # )
+                
+            
+        
     def render(self) -> pv.Plotter:
         """
         Plot the model geometry
@@ -398,7 +642,7 @@ class SolverMesh():
         mode = "edge" if values.shape[axis_i] > self.n_cells[axis_i] else "cell"
         idx[axis_i] = self.point_to_idx(pos_full, mode=mode)[axis_i]
 
-        field, direction = component[:2], component[3]
+        field = component[:2]
         
         floc = self.floc[field]
 
@@ -427,6 +671,45 @@ class SolverMesh():
         
         return plotter
 
+    def get_sparameters(self, frequency, z0=50, source_port=1):
+        """
+        Returns a column of the sparameter matrix excited by a single port.
+        """
+        nports = len(self.ports)
+        nfrequency = len(frequency)
+
+        # exiting waves (B) from each port
+        B = np.zeros((nfrequency, nports), dtype=np.complex128)
+
+        ports = np.arange(1, nports+1)
+
+        # source port probe
+        src_vp = s.ports[source_port-1]["v_probe"]
+        # source port applied voltage
+        src_applied = s.ports[source_port-1]["src"]
+
+        # plt.plot(src_applied)
+        # plt.plot(src_vp)
+        # source port S11
+        A = utils.dtft(src_applied, frequency, 1 / s.dt) #* np.exp(-1j * 2 * np.pi * frequency * 3 * s.dt / 2)
+        V = utils.dtft(src_vp, frequency, 1 / s.dt)
+        
+        B[:, source_port-1] = V - (A)
+
+        exit_ports = np.array([p for p in ports if p != source_port])
+        # for p in exit_ports:
+        #     name = f"p{p}"
+
+        #     # voltage across port resistor
+        #     vp = -s.i_probes[f"{name}_ri"]["values"] * z0
+        #     # h-fields are 1/2 time step ahead of the e-fields. Delay current so they are at the same time step
+        #     Vp = utils.dtft(vp, s.frequency, 1 / s.dt)
+        #     Vp = Vp * np.exp(-1j * 2 * np.pi * s.frequency * s.dt / 2)
+        
+        #     B[:, p-1] = Vp
+        
+        return B / A[..., None]
+        
 sbox_h = 0.5
 sbox_w = 0.5
 sbox_len = 2.5
@@ -464,20 +747,50 @@ s.add_pec_face("ms1", ms_trace, color="gold")
 s.add_lumped_port(1, port1_face)
 s.add_lumped_port(2, port2_face)
 
-s.mesh()
+s.mesh(d0=0.010)
 s.setup_ports()
 
-# s.render().show()
+s.render().show()
+print(s.Nx, s.Ny, s.Nz)
 
-p = s.plot_cooeficients("ez_x", "a", "x", -1.0, point_size=15, cmap="brg", vmin=-1)
-p.camera_position = "xz"
-p.camera.zoom(1.8)
-p.show_grid(font_size=10, grid=True, use_3d_text=False, location="default")
-p.show()
+# p = s.plot_cooeficients("ez_x", "a", "y", 0, point_size=15, cmap="brg", vmin=-1)
+# p.show()
+# p.camera_position = "xz"
+# p.camera.zoom(1.8)
+# p.show_grid(font_size=10, grid=True, use_3d_text=False, location="default")
+# p.show()
 
 self = s
 
+f0 = 10e9
+pulse_n = 1800
+# width of half pulse in time
+t_half = (s.dt * 100)
+# center of the pulse in time
+t0 = (s.dt * 300)
 
+t = np.linspace(0, s.dt * pulse_n, pulse_n)
+vsrc = 1e-2 * (np.sin(2* np.pi * f0 * (t)) * np.exp(-((t - t0) / t_half)**2)).astype(np.float32)
+# plt.plot(vsrc)
 
+ports = 1
+v_waveforms = [vsrc]
 
+s.run(1, vsrc)
+
+plt.plot(vsrc)
+plt.plot(s.ports[0]["v_probe"])
+
+frequency: np.ndarray = np.arange(5e9, 15e9, 10e6)
+
+sdata = s.get_sparameters(frequency)
+S11 = sdata[:, 0]
+
+fig, ax = plt.subplots()
+ax.plot(frequency/1e9, conv.db20_lin(S11))
+
+fig, ax = plt.subplots()
+rfn.plots.draw_smithchart(ax)
+plt.plot(S11.real, S11.imag)
+plt.show()
 
