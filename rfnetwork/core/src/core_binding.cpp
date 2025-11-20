@@ -347,12 +347,58 @@ static PyObject * cascade_self_ndata_bind(PyObject *self, PyObject *args)
     return PyLong_FromLong(0);
 }
 
+static PyObject* solver_run(PyObject* self, PyObject* args) {
+
+    PyObject *coefficients;
+    PyObject *fields;
+    PyObject *ports;
+
+    // Parse arguments: expecting a single Python object
+    if (!PyArg_ParseTuple(args, "OOO", &coefficients, &fields, &ports)) {
+        return PyLong_FromLong(1);
+    }
+
+    if (!PyDict_Check(coefficients)) {
+        PyErr_SetString(PyExc_TypeError, "Expected a coefficients dictionary");
+        return PyLong_FromLong(1);
+    }
+
+    if (!PyDict_Check(fields)) {
+        PyErr_SetString(PyExc_TypeError, "Expected a fields dictionary");
+        return PyLong_FromLong(1);
+    }
+
+    if (!PyList_Check(ports)) {
+        PyErr_SetString(PyExc_TypeError, "Expected a port list");
+        return PyLong_FromLong(1);
+    }
+
+
+    Py_ssize_t n = PyList_Size(ports);
+    printf("Port length: %zd\n", n);
+
+    for (Py_ssize_t i = 0; i < n; i++) {
+        PyObject *item = PyList_GetItem(ports, i);
+    }
+
+    PyObject* Ca_ex_y_py = PyDict_GetItemString(coefficients, "Ca_ex_y");
+    PyArrayObject* Ca_ex_y = (PyArrayObject*) Ca_ex_y_py;
+
+    PyObject* ex_py = PyDict_GetItemString(fields, "ex");
+    PyArrayObject* ex = (PyArrayObject*) ex_py;
+
+    std::cout << PyArray_NDIM(Ca_ex_y) << "\n";
+    std::cout << PyArray_NDIM(ex) << "\n";
+
+    return PyLong_FromLong(0);
+}
 
 static PyMethodDef moduleMethods[] = {
     {"connect_other",  connect_other_bind, METH_VARARGS, ""},
     {"connect_self",  connect_self_bind, METH_VARARGS, ""},
     {"cascade_ndata",  cascade_ndata_bind, METH_VARARGS, ""},
     {"cascade_self_ndata",  cascade_self_ndata_bind, METH_VARARGS, ""},
+    {"solver_run",  solver_run, METH_VARARGS, ""},
     {NULL, NULL, 0, NULL}        /* Sentinel */
 };
 
