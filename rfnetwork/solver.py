@@ -68,7 +68,8 @@ class SolverMesh():
         """
         edges = [np.array([], dtype=np.float32) for i in range(3)]
         objects = [self.bounding_box] + list(self.pec_face.values()) + [sub[0] for sub in self.substrate.values()]
-        
+        dtype_ = np.float32
+
         for obj in objects:
             # round points to minimum precision supported by the mesh
             p_edges = np.around(obj.points.T, decimals=3).astype(np.float32)
@@ -106,7 +107,7 @@ class SolverMesh():
         
         self.grid_mesh = pv.RectilinearGrid(gx, gy, gz)
         # cell widths
-        dx, dy, dz = np.diff(gx), np.diff(gy), np.diff(gz)
+        dx, dy, dz = np.diff(gx).astype(dtype_), np.diff(gy), np.diff(gz)
         # number of cells along each axis
         self.n_cells = len(dx), len(dy), len(dz)
 
@@ -165,6 +166,7 @@ class SolverMesh():
         Build FDTD coefficients for all grid cells.
         """
         s.init_grid(d0)
+        dtype_ = np.float32
         
         dx, dy, dz = self.d_cells
         Nx, Ny, Nz = self.n_cells
@@ -192,9 +194,9 @@ class SolverMesh():
         # average epsilon cells adjacent to y edges
         eps_y = (eps[:, :-1] * (dy0/2) + eps[:, 1:] * (dy1/2)) / (dy0/2 + dy1/2)
 
-        self.eps_ex = np.ones(self.fshape["ex"]) * e0
-        self.eps_ey = np.ones(self.fshape["ey"]) * e0
-        self.eps_ez = np.ones(self.fshape["ez"]) * e0
+        self.eps_ex = np.ones(self.fshape["ex"], dtype=dtype_) * e0
+        self.eps_ey = np.ones(self.fshape["ey"], dtype=dtype_) * e0
+        self.eps_ez = np.ones(self.fshape["ez"], dtype=dtype_) * e0
 
         # ey component is on the y and z edge of the cell
         self.eps_ex[:, 1:-1, 1:-1] = ((eps_y[..., :-1] * (dz0/2) + eps_y[..., 1:] * (dz1/2)) / (dz0/2 + dz1/2))
@@ -204,9 +206,9 @@ class SolverMesh():
         self.eps_ez[1:-1, 1:-1] = ((eps_x[:, :-1] * (dy0/2) + eps_x[:, 1:] * (dy1/2)) / (dy0/2 + dy1/2))
 
         # coefficient in front of the previous time values of E
-        Ca_ex = np.ones((Nx, Ny+1, Nz+1)) * Ca_0
-        Ca_ey = np.ones((Nx+1, Ny, Nz+1)) * Ca_0
-        Ca_ez = np.ones((Nx+1, Ny+1, Nz)) * Ca_0
+        Ca_ex = np.ones((Nx, Ny+1, Nz+1), dtype=dtype_) * Ca_0
+        Ca_ey = np.ones((Nx+1, Ny, Nz+1), dtype=dtype_) * Ca_0
+        Ca_ez = np.ones((Nx+1, Ny+1, Nz), dtype=dtype_) * Ca_0
         
         # coefficient in front of the difference terms of H
         Cb_ex = dt / self.eps_ex
@@ -277,21 +279,21 @@ class SolverMesh():
         )
 
         self.Da = dict(
-            hx_y = np.ones((Nx+1, Ny, Nz)) * Da_0,
-            hx_z = np.ones((Nx+1, Ny, Nz)) * Da_0,
-            hy_z = np.ones((Nx, Ny+1, Nz)) * Da_0,
-            hy_x = np.ones((Nx, Ny+1, Nz)) * Da_0,
-            hz_x = np.ones((Nx, Ny, Nz+1)) * Da_0,
-            hz_y = np.ones((Nx, Ny, Nz+1)) * Da_0,
+            hx_y = np.ones((Nx+1, Ny, Nz), dtype=dtype_) * Da_0,
+            hx_z = np.ones((Nx+1, Ny, Nz), dtype=dtype_) * Da_0,
+            hy_z = np.ones((Nx, Ny+1, Nz), dtype=dtype_) * Da_0,
+            hy_x = np.ones((Nx, Ny+1, Nz), dtype=dtype_) * Da_0,
+            hz_x = np.ones((Nx, Ny, Nz+1), dtype=dtype_) * Da_0,
+            hz_y = np.ones((Nx, Ny, Nz+1), dtype=dtype_) * Da_0,
         )
         
         self.Db = dict(
-            hx_y = np.ones((Nx+1, Ny, Nz)) * Db_0,
-            hx_z = np.ones((Nx+1, Ny, Nz)) * Db_0,
-            hy_z = np.ones((Nx, Ny+1, Nz)) * Db_0,
-            hy_x = np.ones((Nx, Ny+1, Nz)) * Db_0,
-            hz_x = np.ones((Nx, Ny, Nz+1)) * Db_0,
-            hz_y = np.ones((Nx, Ny, Nz+1)) * Db_0,
+            hx_y = np.ones((Nx+1, Ny, Nz), dtype=dtype_) * Db_0,
+            hx_z = np.ones((Nx+1, Ny, Nz), dtype=dtype_) * Db_0,
+            hy_z = np.ones((Nx, Ny+1, Nz), dtype=dtype_) * Db_0,
+            hy_x = np.ones((Nx, Ny+1, Nz), dtype=dtype_) * Db_0,
+            hz_x = np.ones((Nx, Ny, Nz+1), dtype=dtype_) * Db_0,
+            hz_y = np.ones((Nx, Ny, Nz+1), dtype=dtype_) * Db_0,
         )
 
     def init_ports(self, r0=50):
@@ -364,8 +366,8 @@ class SolverMesh():
 
         # numpy type for the field values
         dtype_ = np.float32
-        dx, dy, dz = [conv.m_in(d) for d in self.d_cells]
-        dx_h, dy_h, dz_h = [conv.m_in(d) for d in self.dh_cells]
+        dx, dy, dz = [conv.m_in(d).astype(dtype_) for d in self.d_cells]
+        dx_h, dy_h, dz_h = [conv.m_in(d).astype(dtype_) for d in self.dh_cells]
         Nx, Ny, Nz = len(dx), len(dy), len(dz)
 
         dx_inv = 1 / dx[:, None, None]
@@ -406,25 +408,25 @@ class SolverMesh():
 
         coefficients = dict(
             # ex coefficients, edges along y and z do not get updated
-            Ca_ex_y = self.Ca["ex_y"][:, 1:-1, 1:-1],
-            Ca_ex_z = self.Ca["ex_z"][:, 1:-1, 1:-1],
+            Ca_ex_y = np.array(self.Ca["ex_y"][:, 1:-1, 1:-1], order="C", dtype=dtype_),
+            Ca_ex_z = np.array(self.Ca["ex_z"][:, 1:-1, 1:-1], order="C", dtype=dtype_),
             
-            Cb_ex_y = self.Cb["ex_y"][:, 1:-1, 1:-1] * dy_h_inv,
-            Cb_ex_z = -self.Cb["ex_z"][:, 1:-1, 1:-1] * dz_h_inv,
+            Cb_ex_y = np.array(self.Cb["ex_y"][:, 1:-1, 1:-1] * dy_h_inv, order="C", dtype=dtype_),
+            Cb_ex_z = np.array(-self.Cb["ex_z"][:, 1:-1, 1:-1] * dz_h_inv, order="C", dtype=dtype_),
 
             # ey coefficients, edges along x and z do not get updated
-            Ca_ey_z = self.Ca["ey_z"][1:-1, :, 1:-1],
-            Ca_ey_x = self.Ca["ey_x"][1:-1, :, 1:-1],
+            Ca_ey_z = np.array(self.Ca["ey_z"][1:-1, :, 1:-1], order="C", dtype=dtype_),
+            Ca_ey_x = np.array(self.Ca["ey_x"][1:-1, :, 1:-1], order="C", dtype=dtype_),
             
-            Cb_ey_z = self.Cb["ey_z"][1:-1, :, 1:-1] * dz_h_inv,
-            Cb_ey_x = -self.Cb["ey_x"][1:-1, :, 1:-1] * dx_h_inv,
+            Cb_ey_z = np.array(self.Cb["ey_z"][1:-1, :, 1:-1] * dz_h_inv, order="C", dtype=dtype_),
+            Cb_ey_x = np.array(-self.Cb["ey_x"][1:-1, :, 1:-1] * dx_h_inv, order="C", dtype=dtype_),
 
             # ez coefficients, edges along x and y do not get updated
-            Ca_ez_x = self.Ca["ez_x"][1:-1, 1:-1, :],
-            Ca_ez_y = self.Ca["ez_y"][1:-1, 1:-1, :],
+            Ca_ez_x = np.array(self.Ca["ez_x"][1:-1, 1:-1, :], order="C", dtype=dtype_),
+            Ca_ez_y = np.array(self.Ca["ez_y"][1:-1, 1:-1, :], order="C", dtype=dtype_),
             
-            Cb_ez_x = self.Cb["ez_x"][1:-1, 1:-1, :] * dx_h_inv,
-            Cb_ez_y = -self.Cb["ez_y"][1:-1, 1:-1, :] * dy_h_inv,
+            Cb_ez_x = np.array(self.Cb["ez_x"][1:-1, 1:-1, :] * dx_h_inv, order="C", dtype=dtype_),
+            Cb_ez_y = np.array(-self.Cb["ez_y"][1:-1, 1:-1, :] * dy_h_inv, order="C", dtype=dtype_),
 
             # hx coefficients
             Da_hx_y = self.Da["hx_y"],
@@ -453,10 +455,10 @@ class SolverMesh():
             self.ports[i]["v_probe"] = np.zeros(Nt, dtype=dtype_)
 
         for i, p in enumerate(ports):
-            self.ports[p-1]["src"] = v_waveforms[i].copy()
+            self.ports[p-1]["src"] = v_waveforms[i].copy().astype(dtype_)
 
         
-        core_func.solver_run(coefficients, fields, self.ports)
+        core_func.solver_run(coefficients, fields, self.ports, Nx, Ny, Nz)
 
             
         

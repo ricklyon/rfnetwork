@@ -4,6 +4,7 @@
 #include <numpy/arrayobject.h>
 
 #include "connect.h"
+#include "solver.h"
 
 #include <stdio.h>
 #include <cstdint>
@@ -15,8 +16,6 @@
 
 #define DATA_NDIM 3
 
-#define COMPLEX_DOUBLE_TYPE 15
-
 void array_data_shape(PyArrayObject* array, int * shape) 
 {
     int ndim = PyArray_NDIM(array);           // Number of dimensions
@@ -27,7 +26,7 @@ void array_data_shape(PyArrayObject* array, int * shape)
         throw std::runtime_error("Invalid data array. Wrong number of dimensions.");
     }
 
-    if (PyArray_TYPE(array) != COMPLEX_DOUBLE_TYPE)
+    if (PyArray_TYPE(array) != NPY_CDOUBLE)
     {
         throw std::runtime_error("Invalid data array. Must be complex double type.");
     }
@@ -40,8 +39,52 @@ void array_data_shape(PyArrayObject* array, int * shape)
     for (int i = 0; i < DATA_NDIM; ++i) {
         shape[i] = (int) npy_shape[i];
     }
-
 }
+
+int coeff_index(const char* value)
+{
+    for (int i = 0; i < N_COEFF; i++) {
+        if (strcmp(COEFF_NAMES[i], value) == 0)
+            return i;
+    }
+    std::ostringstream oss;
+    oss << "Coefficient value " << value << " not found.";
+    throw std::runtime_error(oss.str());
+    return -1;
+}
+
+int field_index(const char* value)
+{
+    for (int i = 0; i < N_FIELDS; i++) {
+        if (strcmp(FIELD_NAMES[i], value) == 0)
+            return i;
+    }
+    std::ostringstream oss;
+    oss << "Coefficient value " << value << " not found.";
+    throw std::runtime_error(oss.str());
+    return -1;
+}
+
+void check_solver_array(PyArrayObject* array, const char * name) 
+{
+    if (PyArray_NDIM(array) != DATA_NDIM)
+    {
+        throw std::runtime_error("Invalid data array. Wrong number of dimensions.");
+    }
+
+    if (PyArray_TYPE(array) != NPY_FLOAT)
+    {
+        throw std::runtime_error("Invalid data array. Must be float type.");
+    }
+
+    if (!(PyArray_FLAGS(array) & NPY_ARRAY_C_CONTIGUOUS))
+    {
+        std::ostringstream oss;
+        oss << "Invalid data array " << name << ". Must be row ordered (C-style)";
+        throw std::runtime_error(oss.str());
+    }
+}
+
 
 static PyObject * connect_other_bind(PyObject *self, PyObject *args)
 {
@@ -352,9 +395,13 @@ static PyObject* solver_run(PyObject* self, PyObject* args) {
     PyObject *coefficients;
     PyObject *fields;
     PyObject *ports;
+    
+    int Nx;
+    int Ny;
+    int Nz;
 
     // Parse arguments: expecting a single Python object
-    if (!PyArg_ParseTuple(args, "OOO", &coefficients, &fields, &ports)) {
+    if (!PyArg_ParseTuple(args, "OOOIII", &coefficients, &fields, &ports, &Nx, &Ny, &Nz)) {
         return PyLong_FromLong(1);
     }
 
@@ -373,7 +420,6 @@ static PyObject* solver_run(PyObject* self, PyObject* args) {
         return PyLong_FromLong(1);
     }
 
-
     Py_ssize_t n = PyList_Size(ports);
     printf("Port length: %zd\n", n);
 
@@ -381,14 +427,36 @@ static PyObject* solver_run(PyObject* self, PyObject* args) {
         PyObject *item = PyList_GetItem(ports, i);
     }
 
-    PyObject* Ca_ex_y_py = PyDict_GetItemString(coefficients, "Ca_ex_y");
-    PyArrayObject* Ca_ex_y = (PyArrayObject*) Ca_ex_y_py;
+    // initialize a new list for fields and coefficient pointers
+    float* field_arr[N_FIELDS] = {nullptr}; 
+    float* coeff_arr[N_COEFF] = {nullptr}; 
 
-    PyObject* ex_py = PyDict_GetItemString(fields, "ex");
-    PyArrayObject* ex = (PyArrayObject*) ex_py;
+    PyObject* py_arr;
+    PyArrayObject* arr;
 
-    std::cout << PyArray_NDIM(Ca_ex_y) << "\n";
-    std::cout << PyArray_NDIM(ex) << "\n";
+    // populate field list
+    for (int i = 0; i < N_FIELDS; i++) {
+        // get the field array from the python dictionary and cast as a numpy array
+        py_arr = PyDict_GetItemString(fields, FIELD_NAMES[i]);
+        arr = (PyArrayObject*) py_arr;
+        // check shape and dimensions
+        check_solver_array(arr, FIELD_NAMES[i]);
+        // add pointer to the array to the field list
+        field_arr[i] = (float *) PyArray_DATA(arr);
+    }
+
+    // populate coefficient list
+    for (int i = 0; i < N_COEFF; i++) {
+        // get the field array from the python dictionary and cast as a numpy array
+        py_arr = PyDict_GetItemString(coefficients, COEFF_NAMES[i]);
+        arr = (PyArrayObject*) py_arr;
+        // check shape and dimensions
+        check_solver_array(arr, COEFF_NAMES[i]);
+        // add pointer to the array to the field list
+        coeff_arr[i] = (float *) PyArray_DATA(arr);
+    }
+
+    std::cout << field_arr[2][5] << "\n";
 
     return PyLong_FromLong(0);
 }
