@@ -28,7 +28,7 @@ struct SolverConfig {
 
 int solver_run(SolverConfig * sc);
 
-int solver_efield(SolverConfig * sc, int x_start, int x_stop);
+int solver_update_ex(SolverConfig * sc, int x_start, int x_stop);
 
 int solver_coeff_index(const char* value);
 

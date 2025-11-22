@@ -63,20 +63,69 @@ int solver_field_index(const char* value)
 
 int solver_run(SolverConfig * sc)
 {
-    solver_efield(sc, 0, 2);
+    solver_update_ex(sc, 0, sc->Nx);
+    return 0;
 }
 
-int solver_efield(SolverConfig * sc, int x_start, int x_stop)
+// update Ex components, starting with the x-axis index x_start, and ending with x_stop (stop index is not inclusive)
+int solver_update_ex(SolverConfig * sc, int x_start, int x_stop)
 {
-    float * ex_y_p = sc->field[0];
+    int Nx = sc->Nx;
     int Ny = sc->Ny;
     int Nz = sc->Nz;
 
+    float * ex_y_p = sc->field[solver_field_index("ex_y")];
+    float * ex_z_p = sc->field[solver_field_index("ex_z")];
+    float * ex_p = sc->field[solver_field_index("ex")];
+
+    float * hz_p = sc->field[solver_field_index("hz")];
+    float * hy_p = sc->field[solver_field_index("hz")];
+
+    float * Cb_ex_y_p = sc->field[solver_coeff_index("Cb_ex_y")];
+    float * Cb_ex_z_p = sc->field[solver_coeff_index("Cb_ex_z")];
+
+    float * Ca_ex_y_p = sc->field[solver_coeff_index("Ca_ex_y")];
+    float * Ca_ex_z_p = sc->field[solver_coeff_index("Ca_ex_z")];
+
     // get a single slice of the field along the x axis
-    int x = x_start;
-    MatrixFloatType ex_y (ex_y_p + (x * (Ny + 1) * (Nz + 1)), Ny + 1, Nz + 1);
+    for (int x = x_start; x < x_stop; x++)
+    {
+        MatrixFloatType ex_y (ex_y_p + (x * (Ny + 1) * (Nz + 1)), Ny + 1, Nz + 1);
+        MatrixFloatType ex_z (ex_z_p + (x * (Ny + 1) * (Nz + 1)), Ny + 1, Nz + 1);
+        MatrixFloatType ex   (ex_p   + (x * (Ny + 1) * (Nz + 1)), Ny + 1, Nz + 1);
 
-    std::cout << "Ny " << Ny << "\n";
-    ex_y.setConstant(3);
+        MatrixFloatType hz (hz_p + (x * (Ny) * (Nz + 1)), Ny, Nz + 1);
+        MatrixFloatType hy (hy_p + (x * (Ny + 1) * (Nz)), Ny + 1, Nz);
 
+        MatrixFloatType Cb_ex_y (Cb_ex_y_p + (x * (Ny - 1) * (Nz - 1)), Ny - 1, Nz - 1);
+        MatrixFloatType Cb_ex_z (Cb_ex_z_p + (x * (Ny - 1) * (Nz - 1)), Ny - 1, Nz - 1);
+
+        MatrixFloatType Ca_ex_y (Ca_ex_y_p + (x * (Ny - 1) * (Nz - 1)), Ny - 1, Nz - 1);
+        MatrixFloatType Ca_ex_z (Ca_ex_z_p + (x * (Ny - 1) * (Nz - 1)), Ny - 1, Nz - 1);
+        
+        // update ex_y
+        // ex_y[:, 1:-1, 1:-1] = (Ca_ex_y * ex_y[:, 1:-1, 1:-1]) + ex_yd
+        ex_y.block(1, 1, Ny -1, Nz -1) = (ex_y.block(1, 1, Ny -1, Nz -1).array() * Ca_ex_y.array()).matrix();
+
+        // difference terms for hz along y
+        // ex_yd = Cb_ex_y * np.diff(hz, axis=1)[:, :, 1:-1]
+        ex_y.block(1, 1, Ny -1, Nz -1) += (
+            Cb_ex_y.array() * (hz.bottomRows(Ny-1) - hz.topRows(Ny-1)).middleCols(1, Nz-2).array()
+        ).matrix();
+
+        // update ex_z
+        // ex_z[:, 1:-1, 1:-1] = (Ca_ex_z * ex_z[:, 1:-1, 1:-1]) + ex_zd
+        ex_z.block(1, 1, Ny -1, Nz -1) = (ex_z.block(1, 1, Ny -1, Nz -1).array() * Ca_ex_z.array()).matrix();
+
+        // difference terms for hy along z
+        // ex_zd = Cb_ex_z * np.diff(hy, axis=2)[:, 1:-1, :]
+        ex_z.block(1, 1, Ny -1, Nz -1) += (
+            Cb_ex_z.array() * (hy.rightCols(Nz-1) - hy.leftCols(Nz-1)).middleRows(1, Ny-2).array()
+        ).matrix();
+
+        // combine split components
+        ex = ex_y + ex_z;
+    }
+
+    return 0;
 }
