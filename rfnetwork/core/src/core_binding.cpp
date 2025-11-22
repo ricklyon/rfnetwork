@@ -42,27 +42,6 @@ void array_data_shape(PyArrayObject* array, int * shape)
     }
 }
 
-void check_solver_array(PyArrayObject* array, const char * name) 
-{
-    if (PyArray_NDIM(array) != DATA_NDIM)
-    {
-        throw std::runtime_error("Invalid data array. Wrong number of dimensions.");
-    }
-
-    if (PyArray_TYPE(array) != NPY_FLOAT)
-    {
-        throw std::runtime_error("Invalid data array. Must be float type.");
-    }
-
-    if (!(PyArray_FLAGS(array) & NPY_ARRAY_C_CONTIGUOUS))
-    {
-        std::ostringstream oss;
-        oss << "Invalid data array " << name << ". Must be row ordered (C-style)";
-        throw std::runtime_error(oss.str());
-    }
-}
-
-
 static PyObject * connect_other_bind(PyObject *self, PyObject *args)
 {
     PyObject * s1;
@@ -405,39 +384,9 @@ static PyObject* solver_run(PyObject* self, PyObject* args) {
     //     PyObject *item = PyList_GetItem(ports, i);
     // }
 
-    // initialize a new struct for solver fields and config settings
-    SolverConfig sc;
-    PyObject* py_arr;
-    PyArrayObject* arr;
+    solver_init(fields, coefficients, Nx, Ny, Nz, Nt);
 
-    // populate field list
-    for (int i = 0; i < N_FIELDS; i++) {
-        // get the field array from the python dictionary and cast as a numpy array
-        py_arr = PyDict_GetItemString(fields, FIELD_NAMES[i]);
-        arr = (PyArrayObject*) py_arr;
-        // check shape and dimensions
-        check_solver_array(arr, FIELD_NAMES[i]);
-        // add pointer to the array to the field list
-        sc.field[i] = (float *) PyArray_DATA(arr);
-    }
-
-    // populate coefficient list
-    for (int i = 0; i < N_COEFF; i++) {
-        // get the field array from the python dictionary and cast as a numpy array
-        py_arr = PyDict_GetItemString(coefficients, COEFF_NAMES[i]);
-        arr = (PyArrayObject*) py_arr;
-        // check shape and dimensions
-        check_solver_array(arr, COEFF_NAMES[i]);
-        // add pointer to the array to the field list
-        sc.coeff[i] = (float *) PyArray_DATA(arr);
-    }
-
-    sc.Nx = Nx;
-    sc.Ny = Ny;
-    sc.Nz = Nz;
-    sc.Nt = Nt;
-
-    solver_run(&sc);
+    // solver_run(&sc);
 
     return PyLong_FromLong(0);
 }

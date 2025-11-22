@@ -7,8 +7,119 @@
 #define N_FIELDS 18
 #define N_COEFF 24
 
-extern const char* FIELD_NAMES[];
-extern const char* COEFF_NAMES[];
+struct Field_Ex {
+    float * ex_y;
+    float * ex_z;
+    float * ex;
+    int Nx;
+    int Ny;
+    int Nz;
+    int NyNz;
+};
+
+struct Field_Ey {
+    float * ey_z;
+    float * ey_x;
+    float * ey;
+    int Nx;
+    int Ny;
+    int Nz;
+    int NyNz;
+};
+
+struct Field_Ez {
+    float * ez_x;
+    float * ez_y;
+    float * ez;
+    int Nx;
+    int Ny;
+    int Nz;
+    int NyNz;
+};
+
+struct Field_Hx {
+    float * hx_y;
+    float * hx_z;
+    float * hx;
+    int Nx;
+    int Ny;
+    int Nz;
+    int NyNz;
+};
+
+struct Field_Hy {
+    float * hy_z;
+    float * hy_x;
+    float * hy;
+    int Nx;
+    int Ny;
+    int Nz;
+    int NyNz;
+};
+
+struct Field_Hz {
+    float * hz_x;
+    float * hz_y;
+    float * hz;
+    int Nx;
+    int Ny;
+    int Nz;
+    int NyNz;
+};
+
+struct Coeff_Ex {
+    float * Ca_ex_y;
+    float * Ca_ex_z;
+    float * Cb_ex_y;
+    float * Cb_ex_z;
+    int Nx;
+    int Ny;
+    int Nz;
+    int NyNz;
+};
+
+struct Coeff_Ey {
+    float * Ca_ey_z;
+    float * Ca_ey_x;
+    float * Cb_ey_z;
+    float * Cb_ey_x;
+    int Nx;
+    int Ny;
+    int Nz;
+    int NyNz;
+};
+
+struct Coeff_Ez {
+    float * Ca_ez_x;
+    float * Ca_ez_y;
+    float * Cb_ez_x;
+    float * Cb_ez_y;
+    int Nx;
+    int Ny;
+    int Nz;
+    int NyNz;
+};
+
+struct Coeff_Hx {
+    float * Da_hx_y;
+    float * Da_hx_z;
+    float * Db_hx_y;
+    float * Db_hx_z;
+};
+
+struct Coeff_Hy {
+    float * Da_hy_z;
+    float * Da_hy_x;
+    float * Db_hy_z;
+    float * Db_hy_x;
+};
+
+struct Coeff_Hz {
+    float * Da_hz_x;
+    float * Da_hz_y;
+    float * Db_hz_x;
+    float * Db_hz_y;
+};
 
 struct Port {
     int *  idx;
@@ -17,21 +128,9 @@ struct Port {
     float * v_probe;
 };
 
-struct SolverConfig {
-    float* field[N_FIELDS] = {nullptr}; 
-    float* coeff[N_COEFF] = {nullptr}; 
-    int Nx;
-    int Ny;
-    int Nz;
-    int Nt;
-};
+int solver_init(PyObject * fields, PyObject * coefficients, int Nx, int Ny, int Nz, int Nt);
 
-int solver_run(SolverConfig * sc);
+int solver_update_ex(int x_start, int x_stop);
 
-int solver_update_ex(SolverConfig * sc, int x_start, int x_stop);
-
-int solver_coeff_index(const char* value);
-
-int solver_field_index(const char* value);
 
 #endif /* SOLVER_H */
