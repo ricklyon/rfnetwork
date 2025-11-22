@@ -7,24 +7,8 @@
 #define N_FIELDS 18
 #define N_COEFF 24
 
-const char* FIELD_NAMES[]  = {
-    "ex_y", "ex_z", "ex", 
-    "ey_z", "ey_x", "ey", 
-    "ez_x", "ez_y", "ez", 
-    "hx_y", "hx_z", "hx", 
-    "hy_z", "hy_x", "hy", 
-    "hz_x", "hz_y", "hz", 
-};
-
-const char* COEFF_NAMES[] = {
-    "Ca_ex_y", "Ca_ex_z", "Cb_ex_y", "Cb_ex_z",
-    "Ca_ey_z", "Ca_ey_x", "Cb_ey_z", "Cb_ey_x",
-    "Ca_ez_x", "Ca_ez_y", "Cb_ez_x", "Cb_ez_y",
-    "Da_hx_y", "Da_hx_z", "Db_hx_y", "Db_hx_z",
-    "Da_hy_z", "Da_hy_x", "Db_hy_z", "Db_hy_x",
-    "Da_hz_x", "Da_hz_y", "Db_hz_x", "Db_hz_y",
-};
-
+extern const char* FIELD_NAMES[];
+extern const char* COEFF_NAMES[];
 
 struct Port {
     int *  idx;
@@ -33,5 +17,21 @@ struct Port {
     float * v_probe;
 };
 
+struct SolverConfig {
+    float* field[N_FIELDS] = {nullptr}; 
+    float* coeff[N_COEFF] = {nullptr}; 
+    int Nx;
+    int Ny;
+    int Nz;
+    int Nt;
+};
+
+int solver_run(SolverConfig * sc);
+
+int solver_efield(SolverConfig * sc, int x_start, int x_stop);
+
+int solver_coeff_index(const char* value);
+
+int solver_field_index(const char* value);
 
 #endif /* SOLVER_H */

@@ -16,6 +16,7 @@
 
 #define DATA_NDIM 3
 
+
 void array_data_shape(PyArrayObject* array, int * shape) 
 {
     int ndim = PyArray_NDIM(array);           // Number of dimensions
@@ -39,30 +40,6 @@ void array_data_shape(PyArrayObject* array, int * shape)
     for (int i = 0; i < DATA_NDIM; ++i) {
         shape[i] = (int) npy_shape[i];
     }
-}
-
-int coeff_index(const char* value)
-{
-    for (int i = 0; i < N_COEFF; i++) {
-        if (strcmp(COEFF_NAMES[i], value) == 0)
-            return i;
-    }
-    std::ostringstream oss;
-    oss << "Coefficient value " << value << " not found.";
-    throw std::runtime_error(oss.str());
-    return -1;
-}
-
-int field_index(const char* value)
-{
-    for (int i = 0; i < N_FIELDS; i++) {
-        if (strcmp(FIELD_NAMES[i], value) == 0)
-            return i;
-    }
-    std::ostringstream oss;
-    oss << "Coefficient value " << value << " not found.";
-    throw std::runtime_error(oss.str());
-    return -1;
 }
 
 void check_solver_array(PyArrayObject* array, const char * name) 
@@ -139,8 +116,8 @@ static PyObject * connect_other_bind(PyObject *self, PyObject *args)
     int s2_b = s2_shape[1];
     int s2_a = s2_shape[2];
 
-    int b_len = s1_b + s2_b;
-    int a_len = s1_a + s2_a;
+    // int b_len = s1_b + s2_b;
+    // int a_len = s1_a + s2_a;
 
     // noise data
     char * c1_data = NULL;
@@ -399,9 +376,10 @@ static PyObject* solver_run(PyObject* self, PyObject* args) {
     int Nx;
     int Ny;
     int Nz;
+    int Nt;
 
     // Parse arguments: expecting a single Python object
-    if (!PyArg_ParseTuple(args, "OOOIII", &coefficients, &fields, &ports, &Nx, &Ny, &Nz)) {
+    if (!PyArg_ParseTuple(args, "OOOIIII", &coefficients, &fields, &ports, &Nx, &Ny, &Nz, &Nt)) {
         return PyLong_FromLong(1);
     }
 
@@ -423,14 +401,12 @@ static PyObject* solver_run(PyObject* self, PyObject* args) {
     Py_ssize_t n = PyList_Size(ports);
     printf("Port length: %zd\n", n);
 
-    for (Py_ssize_t i = 0; i < n; i++) {
-        PyObject *item = PyList_GetItem(ports, i);
-    }
+    // for (Py_ssize_t i = 0; i < n; i++) {
+    //     PyObject *item = PyList_GetItem(ports, i);
+    // }
 
-    // initialize a new list for fields and coefficient pointers
-    float* field_arr[N_FIELDS] = {nullptr}; 
-    float* coeff_arr[N_COEFF] = {nullptr}; 
-
+    // initialize a new struct for solver fields and config settings
+    SolverConfig sc;
     PyObject* py_arr;
     PyArrayObject* arr;
 
@@ -442,7 +418,7 @@ static PyObject* solver_run(PyObject* self, PyObject* args) {
         // check shape and dimensions
         check_solver_array(arr, FIELD_NAMES[i]);
         // add pointer to the array to the field list
-        field_arr[i] = (float *) PyArray_DATA(arr);
+        sc.field[i] = (float *) PyArray_DATA(arr);
     }
 
     // populate coefficient list
@@ -453,10 +429,15 @@ static PyObject* solver_run(PyObject* self, PyObject* args) {
         // check shape and dimensions
         check_solver_array(arr, COEFF_NAMES[i]);
         // add pointer to the array to the field list
-        coeff_arr[i] = (float *) PyArray_DATA(arr);
+        sc.coeff[i] = (float *) PyArray_DATA(arr);
     }
 
-    std::cout << field_arr[2][5] << "\n";
+    sc.Nx = Nx;
+    sc.Ny = Ny;
+    sc.Nz = Nz;
+    sc.Nt = Nt;
+
+    solver_run(&sc);
 
     return PyLong_FromLong(0);
 }

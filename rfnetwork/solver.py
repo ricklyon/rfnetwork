@@ -457,8 +457,10 @@ class SolverMesh():
         for i, p in enumerate(ports):
             self.ports[p-1]["src"] = v_waveforms[i].copy().astype(dtype_)
 
-        
-        core_func.solver_run(coefficients, fields, self.ports, Nx, Ny, Nz)
+        Nt = 100
+        core_func.solver_run(coefficients, fields, self.ports, Nx, Ny, Nz, Nt)
+
+        print(fields["ex_y"])
 
             
         
