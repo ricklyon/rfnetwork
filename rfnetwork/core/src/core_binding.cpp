@@ -377,8 +377,7 @@ static PyObject* solver_run(PyObject* self, PyObject* args) {
         return PyLong_FromLong(1);
     }
 
-    Py_ssize_t n = PyList_Size(ports);
-    printf("Port length: %zd\n", n);
+    // Py_ssize_t n = PyList_Size(ports);
 
     // for (Py_ssize_t i = 0; i < n; i++) {
     //     PyObject *item = PyList_GetItem(ports, i);

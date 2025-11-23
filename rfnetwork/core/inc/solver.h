@@ -131,6 +131,12 @@ struct Port {
 int solver_init(PyObject * fields, PyObject * coefficients, int Nx, int Ny, int Nz, int Nt);
 
 int solver_update_ex(int x_start, int x_stop);
+int solver_update_ey(int x_start, int x_stop);
+int solver_update_ez(int x_start, int x_stop);
+
+int solver_update_hx(int x_start, int x_stop);
+int solver_update_hy(int x_start, int x_stop);
+int solver_update_hz(int x_start, int x_stop);
 
 
 #endif /* SOLVER_H */
