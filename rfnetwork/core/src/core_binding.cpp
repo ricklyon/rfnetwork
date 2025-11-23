@@ -350,7 +350,8 @@ static PyObject* solver_run(PyObject* self, PyObject* args) {
 
     PyObject *coefficients;
     PyObject *fields;
-    PyObject *ports;
+    PyObject *probes;
+    PyObject *sources;
     
     int Nx;
     int Ny;
@@ -358,7 +359,7 @@ static PyObject* solver_run(PyObject* self, PyObject* args) {
     int Nt;
 
     // Parse arguments: expecting a single Python object
-    if (!PyArg_ParseTuple(args, "OOOIIII", &coefficients, &fields, &ports, &Nx, &Ny, &Nz, &Nt)) {
+    if (!PyArg_ParseTuple(args, "OOOOIIII", &coefficients, &fields, &sources, &probes, &Nx, &Ny, &Nz, &Nt)) {
         return PyLong_FromLong(1);
     }
 
@@ -372,20 +373,19 @@ static PyObject* solver_run(PyObject* self, PyObject* args) {
         return PyLong_FromLong(1);
     }
 
-    if (!PyList_Check(ports)) {
-        PyErr_SetString(PyExc_TypeError, "Expected a port list");
+    if (!PyList_Check(probes)) {
+        PyErr_SetString(PyExc_TypeError, "Expected a probes list");
         return PyLong_FromLong(1);
     }
 
-    // Py_ssize_t n = PyList_Size(ports);
+    if (!PyList_Check(sources)) {
+        PyErr_SetString(PyExc_TypeError, "Expected a sources list");
+        return PyLong_FromLong(1);
+    }
 
-    // for (Py_ssize_t i = 0; i < n; i++) {
-    //     PyObject *item = PyList_GetItem(ports, i);
-    // }
+    solver_init(fields, coefficients, Nx, Ny, Nz);
 
-    solver_init(fields, coefficients, Nx, Ny, Nz, Nt);
-
-    // solver_run(&sc);
+    solver_run(sources, Nt);
 
     return PyLong_FromLong(0);
 }

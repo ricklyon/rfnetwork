@@ -128,7 +128,9 @@ struct Port {
     float * v_probe;
 };
 
-int solver_init(PyObject * fields, PyObject * coefficients, int Nx, int Ny, int Nz, int Nt);
+int solver_init(PyObject * fields, PyObject * coefficients, int Nx, int Ny, int Nz);
+
+int solver_run(PyObject * sources, int Nt);
 
 int solver_update_ex(int x_start, int x_stop);
 int solver_update_ey(int x_start, int x_stop);

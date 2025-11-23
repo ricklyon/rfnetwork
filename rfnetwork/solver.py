@@ -12,6 +12,7 @@ from core import core_func
 
 import sys
 import matplotlib
+from itertools import product
 # matplotlib.use("qt5agg")
 
 pv.set_jupyter_backend("trame")
@@ -334,7 +335,7 @@ class SolverMesh():
                 # epsilon of resistor cells
                 eps_r = self.eps_ez[x0, y0: y1+1, z0: z1]
         
-                # resistance of each cell is spilt so the combined reistance of all cells equals r0
+                # resistance of each cell is spilt so the combined resistance of all cells equals r0
                 r_cell = r0 * (eps_r.shape[0] / eps_r.shape[1])
         
                 rterm = (r_cell * dx_r * dy_r)
@@ -348,7 +349,7 @@ class SolverMesh():
                 self.Ca["ez_y"][ez_idx] = ((eps_r / self.dt) - (dz_r / (2 * rterm))) / denom
                 self.Cb["ez_y"][ez_idx] = 1 / (denom)
 
-                self.ports[i] = dict(idx=ez_idx, Vs_a=1 / (denom * rterm * eps_r.shape[1]))
+                self.ports[i] = dict(idx=ez_idx, Vs_a=1 / (denom * rterm * eps_r.shape[1]), component="ez")
         
             else:
                 raise ValueError(f"Port face is not 2D")
@@ -362,7 +363,6 @@ class SolverMesh():
         v_waveforms = np.atleast_2d(v_waveforms)
             
         Nt = len(v_waveforms[0])
-        self.v_src = v_waveforms
 
         # numpy type for the field values
         dtype_ = np.float32
@@ -450,18 +450,29 @@ class SolverMesh():
             Db_hz_y = self.Db["hz_y"] * dy_inv,
         )
 
-        # initialize port voltages
-        for i, p in enumerate(self.ports):
-            self.ports[i]["v_probe"] = np.zeros(Nt, dtype=dtype_)
-
+        sources = []
         for i, p in enumerate(ports):
-            self.ports[p-1]["src"] = v_waveforms[i].copy().astype(dtype_)
+            idx, Vs_a, component = self.ports[p-1].values()
 
-        Nt = 100
-        print(Ny, Nz)
-        core_func.solver_run(coefficients, fields, self.ports, Nx, Ny, Nz, Nt)
+            # convert slice indices to a list of values
+            idx_list = [list(np.arange(v.start, v.stop)) if isinstance(v, slice) else [v] for v in idx]
 
-        print(fields["ex"][0])
+            # create a list of sources for each ez component, with the integer index and scalar waveform data
+            Vs_a_flt = Vs_a.flatten()
+            for j, idx_j in enumerate(product(*idx_list)):
+                values = np.array(-Vs_a_flt[j] * v_waveforms[i], dtype=dtype_, order="C")
+                sources.append(dict(values=values, idx=[int(id) for id in idx_j], component=component))
+
+
+        print(Nx, Ny, Nz)
+        probes = []
+        core_func.solver_run(coefficients, fields, sources, probes, Nx, Ny, Nz, 40)
+        # print(fields["ez"])
+
+        plt.figure()
+        plt.plot(fields["ex"][:, 13, 2])
+
+        # plt.plot(sources[0]["values"])
 
             
         

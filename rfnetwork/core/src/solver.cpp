@@ -82,7 +82,44 @@ float * get_solver_array(PyObject * dict, const char * name, int Nx, int Ny, int
     return (float *) PyArray_DATA(array);
 }
 
-int solver_init(PyObject * fields, PyObject * coefficients, int Nx, int Ny, int Nz, int Nt)
+// get the array of a source from a python dictionary. Validate the shape
+// matches Nt
+float * get_source_array(PyObject * dict, int Nt) 
+{
+    PyObject* py_arr = PyDict_GetItemString(dict, "values");
+    PyArrayObject* array = (PyArrayObject*) py_arr;
+    // get array shape
+    npy_intp * npy_shape = PyArray_SHAPE(array);  
+
+    std::ostringstream oss;
+
+    if (PyArray_NDIM(array) != 1)
+    {
+        throw std::runtime_error("Invalid source array. Wrong number of dimensions.");
+    }
+
+    if (PyArray_TYPE(array) != NPY_FLOAT)
+    {
+        throw std::runtime_error("Invalid data array. Must be float type.");
+    }
+
+    if (!(PyArray_FLAGS(array) & NPY_ARRAY_C_CONTIGUOUS))
+    {
+        oss << "Invalid source array. Must be row ordered (C-style)";
+        throw std::runtime_error(oss.str());
+    }
+
+    if (((int) npy_shape[0]) < Nt)
+    {
+        oss << "Invalid data source array shape. Expected shape greater or equal to " << Nt;
+        throw std::runtime_error(oss.str());
+    }
+    
+
+    return (float *) PyArray_DATA(array);
+}
+
+int solver_init(PyObject * fields, PyObject * coefficients, int Nx, int Ny, int Nz)
 {
     // initialize ex pointers
     Ex.Nx = Nx;
@@ -183,17 +220,74 @@ int solver_init(PyObject * fields, PyObject * coefficients, int Nx, int Ny, int 
     Dz.Da_hz_x = get_solver_array(coefficients, "Da_hz_x", Hz.Nx, Hz.Ny, Hz.Nz);
     Dz.Da_hz_y = get_solver_array(coefficients, "Da_hz_y", Hz.Nx, Hz.Ny, Hz.Nz);
 
-    solver_update_ex(0, Ex.Nx);
-    solver_update_ey(0, Ey.Nx);
-    solver_update_ez(0, Ez.Nx);
+    return 0;
+}
 
-    solver_update_hx(0, Hx.Nx);
-    solver_update_hy(0, Hy.Nx);
-    solver_update_hz(0, Hz.Nx);
+int solver_run(PyObject * sources, int Nt)
+{
+    int n_sources = (int) PyList_Size(sources);
 
-    std::cout << Ex.Nx << "\n";
+    // vector of waveform values for each source
+    std::vector<float*> source_values(n_sources); 
+
+    // vector of pointer offsets used to index each source component
+    std::vector<int> source_offsets(n_sources); 
+
+    // get waveform data for each component where a source is present
+    for (int s = 0; s < n_sources; s++) {
+        
+        // verify each item in the list is a python dictionary
+        PyObject *source_dict = PyList_GetItem(sources, s);
+        if (!PyDict_Check(source_dict)) {
+            throw std::runtime_error("Expected a list of source dictionaries");
+        }
+
+        // get waveform data
+        source_values[s] = get_source_array(source_dict, Nt);
+
+        // get component indices for ez
+        PyObject* py_idx = PyDict_GetItemString(source_dict, "idx");
+
+        source_offsets[s] = (
+            ((int) PyLong_AsLong(PyList_GetItem(py_idx, 0)) * Ez.NyNz) + 
+            ((int) PyLong_AsLong(PyList_GetItem(py_idx, 1)) * Ez.Nz) +
+            ((int) PyLong_AsLong(PyList_GetItem(py_idx, 2)))
+        );
+    }
+
+    float * ez_x_src;
+    float * ez_y_src;
+    float * ez_src;
+
+    for (int t = 0; t < Nt; t++)
+    {
+        solver_update_ex(0, Ex.Nx);
+        solver_update_ey(0, Ey.Nx);
+        solver_update_ez(0, Ez.Nx);
+
+        // update sources
+        for (int s = 0; s < n_sources; s++)
+        {   
+            // index the ez component of the source
+            ez_x_src = Ez.ez_x + source_offsets[s];
+            *ez_x_src = (*ez_x_src) + source_values[s][t];
+
+            ez_y_src = Ez.ez_y + source_offsets[s];
+            *ez_y_src = (*ez_y_src) + source_values[s][t];
+
+            ez_src = Ez.ez + source_offsets[s];
+            *ez_src = (*ez_x_src) + (*ez_y_src);
+        }
+        
+        solver_update_hx(0, Hx.Nx);
+        solver_update_hy(0, Hy.Nx);
+        solver_update_hz(0, Hz.Nx);
+    }
+
+    std::cout << "Done\n";
 
     return 0;
+
 }
 
 // update Ex components, starting with the x-axis index x_start, and ending with x_stop (stop index is not inclusive)
