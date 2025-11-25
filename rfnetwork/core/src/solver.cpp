@@ -225,6 +225,7 @@ int solver_init(PyObject * fields, PyObject * coefficients, int Nx, int Ny, int 
 
 int solver_run(PyObject * sources, int Nt)
 {
+    std::cout << Nt << "\n";
     int n_sources = (int) PyList_Size(sources);
 
     // vector of waveform values for each source
@@ -277,6 +278,10 @@ int solver_run(PyObject * sources, int Nt)
 
             ez_src = Ez.ez + source_offsets[s];
             *ez_src = (*ez_x_src) + (*ez_y_src);
+
+            // put the resulting total voltage in the source_values array once the value is used for this
+            // time step.
+            source_values[s][t] = *ez_src;
         }
         
         solver_update_hx(0, Hx.Nx);
@@ -298,6 +303,17 @@ int solver_update_ex(int x_start, int x_stop)
     // number of updated field components
     int Ny = Cx.Ny;
     int Nz = Cx.Nz;
+
+    // std::cout << "Ex\n";
+    // std::cout << Ex.Nx << " " << Ex.Ny << " " << Ex.Nz << "\n";
+    // std::cout << Cx.Nx << " " << Cx.Ny << " " << Cx.Nz << "\n";
+    // std::cout << Ex.NyNz << "\n";
+    // std::cout << Cx.NyNz << "\n";
+
+    // std::cout << Hz.Nx << " " << Hz.Ny << " " << Hz.Nz << "\n";
+    // std::cout << Hy.Nx << " " << Hy.Ny << " " << Hy.Nz << "\n";
+    // std::cout << Hz.NyNz << "\n";
+
 
     // operate on a single slice of the field on the x axis
     for (int x = x_start; x < x_stop; x++)
@@ -321,24 +337,25 @@ int solver_update_ex(int x_start, int x_stop)
         
         // update ex_y
         // ex_y[:, 1:-1, 1:-1] = (Ca_ex_y * ex_y[:, 1:-1, 1:-1]) + ex_yd
-        ex_y.block(1, 1, Ny, Nz) = (ex_y.block(1, 1, Ny, Nz).array() * Ca_ex_y.array()).matrix();
+        ex_y.block(1, 1, Ny, Nz) = Ca_ex_y.cwiseProduct(ex_y.block(1, 1, Ny, Nz));
 
         // ex_yd = Cb_ex_y * np.diff(hz, axis=1)[:, :, 1:-1]
         ex_y.block(1, 1, Ny, Nz) += (
-            Cb_ex_y.array() * (hz.bottomRows(Ny) - hz.topRows(Ny)).middleCols(1, Nz-1).array()
-        ).matrix();
+            Cb_ex_y.cwiseProduct((hz.bottomRows(Ny) - hz.topRows(Ny)).block(0, 1, Ny, Nz))
+        );
 
         // update ex_z
         // ex_z[:, 1:-1, 1:-1] = (Ca_ex_z * ex_z[:, 1:-1, 1:-1]) + ex_zd
-        ex_z.block(1, 1, Ny, Nz) = (ex_z.block(1, 1, Ny -1, Nz -1).array() * Ca_ex_z.array()).matrix();
+        ex_z.block(1, 1, Ny, Nz) = Ca_ex_z.cwiseProduct(ex_z.block(1, 1, Ny, Nz));
 
         // ex_zd = Cb_ex_z * np.diff(hy, axis=2)[:, 1:-1, :]
         ex_z.block(1, 1, Ny, Nz) += (
-            Cb_ex_z.array() * (hy.rightCols(Nz) - hy.leftCols(Nz)).middleRows(1, Ny-1).array()
-        ).matrix();
+            Cb_ex_z.cwiseProduct((hy.rightCols(Nz) - hy.leftCols(Nz)).block(1, 0, Ny, Nz))
+        );
 
         // combine split components
         ex = ex_y + ex_z;
+
     }
 
     return 0;
@@ -383,21 +400,21 @@ int solver_update_ey(int x_start, int x_stop)
 
         // update ey_z
         // ey_z[1:-1, :, 1:-1] = (Ca_ey_z * ey_z[1:-1, :, 1:-1]) + ey_zd
-        ey_z.block(0, 1, Ny, Nz) = (ey_z.block(0, 1, Ny, Nz).array() * Ca_ey_z.array()).matrix();
+        ey_z.block(0, 1, Ny, Nz) = Ca_ey_z.cwiseProduct(ey_z.block(0, 1, Ny, Nz));
 
         // ey_zd = Cb_ey_z * np.diff(hx, axis=2)[1:-1, :, :]
         ey_z.block(0, 1, Ny, Nz) += (
-            Cb_ey_z.array() * (hx.rightCols(Nz) - hx.leftCols(Nz)).array()
-        ).matrix();
+            Cb_ey_z.cwiseProduct(hx.rightCols(Nz) - hx.leftCols(Nz))
+        );
 
         // update ey_x
         // ey_x[1:-1, :, 1:-1] = (Ca_ey_x * ey_x[1:-1, :, 1:-1]) + ey_xd
-        ey_x.block(0, 1, Ny, Nz) = (ey_x.block(0, 1, Ny, Nz).array() * Ca_ey_x.array()).matrix();
+        ey_x.block(0, 1, Ny, Nz) = Ca_ey_x.cwiseProduct(ey_x.block(0, 1, Ny, Nz));
 
         // ey_xd = Cb_ey_x * np.diff(hz, axis=0)[:, :, 1:-1]
         ey_x.block(0, 1, Ny, Nz) += (
-            Cb_ey_x.array() * (hz_1 - hz_0).middleCols(1, Nz-1).array()
-        ).matrix();
+            Cb_ey_x.cwiseProduct((hz_1 - hz_0).block(0, 1, Ny, Nz))
+        );
 
         // combine split components
         ey = ey_z + ey_x;
@@ -439,28 +456,28 @@ int solver_update_ez(int x_start, int x_stop)
         // ez coefficients
         x_offset = x * Cz.NyNz;
         MatrixFloatType Cb_ez_x (Cz.Cb_ez_x + x_offset, Ny, Nz);
-        MatrixFloatType Cb_ez_y (Cz.Cb_ez_x + x_offset, Ny, Nz);
+        MatrixFloatType Cb_ez_y (Cz.Cb_ez_y + x_offset, Ny, Nz);
 
         MatrixFloatType Ca_ez_x (Cz.Ca_ez_x + x_offset, Ny, Nz);
         MatrixFloatType Ca_ez_y (Cz.Ca_ez_y + x_offset, Ny, Nz);
 
         // update ez_x
         // ez_x[1:-1, 1:-1, :] = (Ca_ez_x * ez_x[1:-1, 1:-1, :]) + ez_xd
-        ez_x.block(1, 0, Ny, Nz) = (ez_x.block(1, 0, Ny, Nz).array() * Ca_ez_x.array()).matrix();
+        ez_x.block(1, 0, Ny, Nz) = Ca_ez_x.cwiseProduct(ez_x.block(1, 0, Ny, Nz));
 
         // ez_xd = Cb_ez_x * np.diff(hy, axis=0)[:, 1:-1, :]
         ez_x.block(1, 0, Ny, Nz) += (
-            Cb_ez_x.array() * (hy_1 - hy_0).middleRows(1, Ny-1).array()
-        ).matrix();
+            Cb_ez_x.cwiseProduct((hy_1 - hy_0).block(1, 0, Ny, Nz))
+        );
 
         // update ez_y
         // ez_y[1:-1, 1:-1, :] = (Ca_ez_y * ez_y[1:-1, 1:-1, :]) + ez_yd
-        ez_y.block(1, 0, Ny, Nz) = (ez_y.block(1, 0, Ny, Nz).array() * Ca_ez_y.array()).matrix();
+        ez_y.block(1, 0, Ny, Nz) = Ca_ez_y.cwiseProduct(ez_y.block(1, 0, Ny, Nz));
 
         // ez_yd = Cb_ez_y * np.diff(hx, axis=1)[1:-1, :, :]
         ez_y.block(1, 0, Ny, Nz) += (
-            Cb_ez_y.array() * (hx.bottomRows(Ny) - hx.topRows(Ny)).array()
-        ).matrix();
+            Cb_ez_y.cwiseProduct(hx.bottomRows(Ny) - hx.topRows(Ny))
+        );
 
         // combine split components
         ez = ez_x + ez_y;
@@ -501,21 +518,21 @@ int solver_update_hx(int x_start, int x_stop)
 
         // update hx_y
         // hx_y = Da_hx_y * hx_y + hx_yd
-        hx_y = (hx_y.array() * Da_hx_y.array()).matrix();
+        hx_y = Da_hx_y.cwiseProduct(hx_y);
 
         // hx_yd = Db_hx_y * np.diff(ez, axis=1)
         hx_y += (
-            Db_hx_y.array() * (ez.bottomRows(Ny) - ez.topRows(Ny)).array()
-        ).matrix();
+            Db_hx_y.cwiseProduct(ez.bottomRows(Ny) - ez.topRows(Ny))
+        );
 
         // update hx_z
         // hx_z = Da_hx_z * hx_z + hx_zd
-        hx_z = (hx_z.array() * Da_hx_z.array()).matrix();
+        hx_z = Da_hx_z.cwiseProduct(hx_z);
 
         // hx_zd = Db_hx_z * np.diff(ey, axis=2)
         hx_z += (
-            Db_hx_z.array() * (ey.rightCols(Nz) - ey.leftCols(Nz)).array()
-        ).matrix();
+            Db_hx_z.cwiseProduct(ey.rightCols(Nz) - ey.leftCols(Nz))
+        );
 
         // combine split components
         hx = hx_y + hx_z;
@@ -558,21 +575,21 @@ int solver_update_hy(int x_start, int x_stop)
 
         // update hy_z
         // hy_z = Da_hy_z * hy_z + hy_zd
-        hy_z = (hy_z.array() * Da_hy_z.array()).matrix();
+        hy_z = Da_hy_z.cwiseProduct(hy_z);
 
         // hy_zd = Db_hy_z * np.diff(ex, axis=2)
         hy_z += (
-            Db_hy_z.array() * (ex.rightCols(Nz) - ex.leftCols(Nz)).array()
-        ).matrix();
+            Db_hy_z.cwiseProduct(ex.rightCols(Nz) - ex.leftCols(Nz))
+        );
 
         // update hy_x
         // hy_x = Da_hy_x * hy_x + hy_xd
-        hy_x = (hy_x.array() * Da_hy_x.array()).matrix();
+        hy_x = Da_hy_x.cwiseProduct(hy_x);
 
         // hy_xd = Db_hy_x * np.diff(ez, axis=0)
         hy_x += (
-            Db_hy_x.array() * (ez_1 - ez_0).array()
-        ).matrix();
+            Db_hy_x.cwiseProduct(ez_1 - ez_0)
+        );
 
         // combine split components
         hy = hy_z + hy_x;
@@ -615,21 +632,21 @@ int solver_update_hz(int x_start, int x_stop)
 
         // update hz_x
         // hz_x = Da_hz_x * hz_x + hz_xd
-        hz_x = (hz_x.array() * Da_hz_x.array()).matrix();
+        hz_x = Da_hz_x.cwiseProduct(hz_x);
 
         // hz_xd = Db_hz_x * np.diff(ey, axis=0) 
         hz_x += (
-            Db_hz_x.array() * (ey_1 - ey_0).array()
-        ).matrix();
+            Db_hz_x.cwiseProduct(ey_1 - ey_0)
+        );
 
         // update hz_y
         // hz_y = Da_hz_y * hz_y + hz_yd
-        hz_y = (hz_y.array() * Da_hz_y.array()).matrix();
+        hz_y = Da_hz_y.cwiseProduct(hz_y);
 
         // hz_yd = Db_hz_y * np.diff(ex, axis=1)
         hz_y += (
-            Db_hz_y.array() * (ex.bottomRows(Ny) - ex.topRows(Ny)).array()
-        ).matrix();
+            Db_hz_y.cwiseProduct(ex.bottomRows(Ny) - ex.topRows(Ny))
+        );
 
         // combine split components
         hz = hz_x + hz_y;
