@@ -34,6 +34,7 @@ class SolverMesh():
         self.styles = dict()
         self.port_face = [None] * nports
         self.bounding_box = bounding_box
+        self.monitors=dict()
 
         self.sbox_max = np.max(bounding_box.points, axis=0)
         self.sbox_min = np.min(bounding_box.points, axis=0)
@@ -378,33 +379,6 @@ class SolverMesh():
         dy_h_inv = 1 / dy_h[None, :, None]
         dz_h_inv = 1 / dz_h[None, None, :]
 
-        # field values
-        fields = dict(
-            ex_y = np.zeros((Nx, Ny+1, Nz+1), dtype=dtype_),
-            ex_z = np.zeros((Nx, Ny+1, Nz+1), dtype=dtype_),
-            ex = np.zeros((Nx, Ny+1, Nz+1), dtype=dtype_),
-            
-            ey_z = np.zeros((Nx+1, Ny, Nz+1), dtype=dtype_),
-            ey_x = np.zeros((Nx+1, Ny, Nz+1), dtype=dtype_),
-            ey = np.zeros((Nx+1, Ny, Nz+1), dtype=dtype_),
-            
-            ez_x = np.zeros((Nx+1, Ny+1, Nz), dtype=dtype_),
-            ez_y = np.zeros((Nx+1, Ny+1, Nz), dtype=dtype_),
-            ez = np.zeros((Nx+1, Ny+1, Nz), dtype=dtype_),
-            
-            hx_y = np.zeros((Nx+1, Ny, Nz), dtype=dtype_),
-            hx_z = np.zeros((Nx+1, Ny, Nz), dtype=dtype_),
-            hx = np.zeros((Nx+1, Ny, Nz), dtype=dtype_),
-            
-            hy_z = np.zeros((Nx, Ny+1, Nz), dtype=dtype_),
-            hy_x = np.zeros((Nx, Ny+1, Nz), dtype=dtype_),
-            hy = np.zeros((Nx, Ny+1, Nz), dtype=dtype_),
-            
-            hz_x = np.zeros((Nx, Ny, Nz+1), dtype=dtype_),
-            hz_y = np.zeros((Nx, Ny, Nz+1), dtype=dtype_),
-            hz = np.zeros((Nx, Ny, Nz+1), dtype=dtype_),
-        )
-
 
         coefficients = dict(
             # ex coefficients, edges along y and z do not get updated
@@ -450,6 +424,35 @@ class SolverMesh():
             Db_hz_y = self.Db["hz_y"] * dy_inv,
         )
 
+
+        # field values
+        fields = dict(
+            ex_y = np.zeros((Nx, Ny+1, Nz+1), dtype=dtype_),
+            ex_z = np.zeros((Nx, Ny+1, Nz+1), dtype=dtype_),
+            ex = np.zeros((Nx, Ny+1, Nz+1), dtype=dtype_),
+            
+            ey_z = np.zeros((Nx+1, Ny, Nz+1), dtype=dtype_),
+            ey_x = np.zeros((Nx+1, Ny, Nz+1), dtype=dtype_),
+            ey = np.zeros((Nx+1, Ny, Nz+1), dtype=dtype_),
+            
+            ez_x = np.zeros((Nx+1, Ny+1, Nz), dtype=dtype_),
+            ez_y = np.zeros((Nx+1, Ny+1, Nz), dtype=dtype_),
+            ez = np.zeros((Nx+1, Ny+1, Nz), dtype=dtype_),
+            
+            hx_y = np.zeros((Nx+1, Ny, Nz), dtype=dtype_),
+            hx_z = np.zeros((Nx+1, Ny, Nz), dtype=dtype_),
+            hx = np.zeros((Nx+1, Ny, Nz), dtype=dtype_),
+            
+            hy_z = np.zeros((Nx, Ny+1, Nz), dtype=dtype_),
+            hy_x = np.zeros((Nx, Ny+1, Nz), dtype=dtype_),
+            hy = np.zeros((Nx, Ny+1, Nz), dtype=dtype_),
+            
+            hz_x = np.zeros((Nx, Ny, Nz+1), dtype=dtype_),
+            hz_y = np.zeros((Nx, Ny, Nz+1), dtype=dtype_),
+            hz = np.zeros((Nx, Ny, Nz+1), dtype=dtype_),
+        )
+
+        # initialize sources
         sources = []
         for i, p in enumerate(ports):
             idx, Vs_a, component = self.ports[p-1].values()
@@ -463,18 +466,88 @@ class SolverMesh():
                 values = np.array(-Vs_a_flt[j] * v_waveforms[i], dtype=dtype_, order="C")
                 sources.append(dict(values=values, idx=[int(id) for id in idx_j], component=component))
 
+        # initialize field monitors
+        monitors = []
 
-        print(Nx, Ny, Nz)
+        for k, m in self.monitors.items():
+
+            n_m = int(Nt / m["n_step"]) + 1
+            monitors.append(
+                dict(
+                    values=np.zeros(((n_m,) + m["shape"]), dtype=dtype_, order="C"), 
+                    axis=int(m["axis"]),
+                    position=int(m["axis"]),
+                    field=list(self.fshape.keys()).index(m["field"]),
+                    n_step=int(m["n_step"])
+                )
+            )
+
+
+
         probes = []
-        core_func.solver_run(coefficients, fields, sources, probes, Nx, Ny, Nz, 40)
-        # print(fields["ez"])
+        core_func.solver_run(coefficients, fields, sources, probes, monitors, Nx, Ny, Nz, Nt)
 
-        plt.figure()
-        plt.plot(fields["ex"][:, 13, 2])
+        # move monitor values back to the class variable
+        for i, (k, m) in enumerate(self.monitors.items()):
+            self.monitors[k]["values"] = monitors[i]["values"]
 
-        # plt.plot(sources[0]["values"])
 
-            
+        # data = fields["ex"][:, :, 3]
+        # plt.figure()
+        # im = plt.pcolormesh(np.abs(data))
+        # plt.colorbar()
+
+        # for k, v in coefficients.items():
+        #     print(np.any(np.isnan(v)))
+
+        # print(np.any(np.isnan(fields["ey"])))
+        # print(np.any(np.isnan(fields["ez"])))
+
+        # print(np.any(np.isnan(fields["hx"])))
+        # print(np.any(np.isnan(fields["hy"])))
+        # print(np.any(np.isnan(fields["hz"])))
+
+        # plt.figure()
+        # probe = sources[3]
+        # plt.plot(v_waveforms[0])
+        # plt.plot(-probe["values"] * dz[1])
+        # plt.ylim([-4, 4])
+
+        
+        # print(np.argmax(np.isnan(probe["values"])))
+        plt.show()
+
+    def add_field_monitor(self, name: str, field: str, axis: str, position: int, n_step: int):
+        """
+        Add field monitor along a slice through the 3D volume
+
+        Parameters
+        ----------
+        name : str
+        field : {'ex', 'ey', 'ez', 'hx', 'hy', 'hz'}
+        axis : {'x', 'y', 'z'}
+        position : int
+            index on axis of the slice
+        t_step : int, default: 1
+            number of time steps between each capture.
+        """
+
+        if field not in self.fshape.keys():
+            raise ValueError(f"Unsuported field: {field}. Expecting one of: {tuple(self.fshape.keys())}")
+        if axis not in ('x', 'y', 'z'):
+            raise ValueError(f"Unsupported axis: {axis}")
+
+        # get the spatial shape of the field slice
+        axis_i = dict(x=0, y=1, z=2)[axis]
+        shape = list(self.fshape[field])
+        axis_len = shape.pop(axis_i)
+
+        if (position < 0) or (position > self.fshape[field][axis_i] - 1):
+            raise ValueError(f"Position out of bounds, expecting value from 0 - {axis_len}")
+        
+        self.monitors[name] = dict(
+            field=field, axis=axis_i, position=position, n_step=n_step, shape=tuple(shape)
+        )
         
     def render(self) -> pv.Plotter:
         """
@@ -602,6 +675,115 @@ class SolverMesh():
         #     B[:, p-1] = Vp
         
         return B / A[..., None]
+    
+    def plot_monitor(
+        self,
+        monitor_name: list,
+        view="xz",
+        vmax=30, vmin=-20,
+        zoom=1.3, 
+        el=10, az=0,
+        opacity="linear",
+        gif_file=None,
+        linear=False, 
+        cmap="jet"
+    ):
+
+        monitor_name = np.atleast_1d(monitor_name)
+        plotter = self.render()
+        field_meshes = []
+        field_actors = []
+
+        for i, m_name in enumerate(monitor_name):
+
+            monitor = self.monitors[m_name]
+            
+            field = monitor["values"]
+            position = monitor["position"]
+            axis = monitor["axis"]
+            
+            n_step = monitor["n_step"]
+
+            slc = [slice(None)] * 3
+            slc[axis] = position
+
+            field = np.where(np.abs(field) < 1e-12, 1e-12, field)
+            if linear:
+                field_v = np.clip(field, vmin, vmax).reshape(len(field), -1, order="F")
+            else:
+                field_v = np.clip(20 * np.log10(np.abs(field)), vmin, vmax).reshape(len(field), -1, order="F")
+        
+            nframe = len(field)
+
+            floc_in = self.floc[monitor["field"]]
+
+            # slice each axis of grid locations, forcing integer indices into slices
+            g = [floc_in[i][s] if isinstance(s, slice) else floc_in[i][s: s+1] for i, s in enumerate(slc)]
+            
+            fmesh = pv.RectilinearGrid(*g)
+            fmesh.point_data['values'] = field_v[0]
+            
+            actor = plotter.add_mesh(
+                fmesh, cmap=cmap, scalars="values", clim=[vmin, vmax], show_scalar_bar=False, opacity=opacity[i]
+            )
+
+            field_meshes += [(fmesh, field_v)]
+            field_actors += [actor]
+
+        plotter.add_axes()
+        plotter.camera_position = view
+        plotter.camera.elevation += el
+        plotter.camera.azimuth += az
+        plotter.camera.zoom(zoom)
+        
+        plotter.add_scalar_bar(
+            title="E [dB]\n" if linear else "E [V/m]\n", vertical=False, label_font_size=11, title_font_size=14
+        )
+        
+
+        def callback(t):
+
+            n_t = (t * 1e-9) / self.dt
+            n_f = np.clip(int(n_t // n_step), 0, nframe-1)
+            
+            for m, f in field_meshes:
+                m.point_data["values"][:] = f[n_f]
+          
+        max_t_ns = nframe * n_step * self.dt * 1e9
+        
+        plotter.add_slider_widget(
+            callback,
+            [0, max_t_ns],
+            value=max_t_ns / 2,
+            title="Time Step",
+            interaction_event="always",
+            style="modern",
+            fmt="%0.2f ns"
+        )
+
+        def set_field_visible(value):
+            for m in field_actors:
+                m.SetVisibility(value)
+            
+        # add checkbox to turn off field visibiliy
+        plotter.add_checkbox_button_widget(set_field_visible, value=True, position=(10, 10), size=30, border_size=0)
+        plotter.add_text("Field Visibility", position=(45, 15), font_size=9)
+
+
+        if gif_file:
+            plotter.open_gif(gif_file)
+            for n in range(nframe):
+                for m, f in field_meshes:
+                    m.point_data["values"][:] = f[n].flatten(order="F")
+                    
+                plotter.add_title(f"t={n * n_step * self.dt * 1e9:.2f}ns")
+                # plotter.render()
+                plotter.write_frame()
+
+            # Closes and finalizes movie
+            plotter.close()
+        
+        return plotter
         
 sbox_h = 0.5
 sbox_w = 0.5
@@ -642,6 +824,7 @@ s.add_lumped_port(2, port2_face)
 
 s.mesh(d0=0.020)
 s.init_ports()
+s.add_field_monitor("mon1", "ez", "y", 15, 15)
 
 # s.render().show()
 # print(s.Nx, s.Ny, s.Nz)
@@ -660,7 +843,7 @@ pulse_n = 1800
 # width of half pulse in time
 t_half = (s.dt * 100)
 # center of the pulse in time
-t0 = (s.dt * 300)
+t0 = (s.dt * 350)
 
 t = np.linspace(0, s.dt * pulse_n, pulse_n)
 vsrc = 1e-2 * (np.sin(2* np.pi * f0 * (t)) * np.exp(-((t - t0) / t_half)**2)).astype(np.float32)
@@ -670,5 +853,8 @@ ports = 1
 v_waveforms = [vsrc]
 
 s.run(1, vsrc)
+
+p = s.plot_monitor(["mon1"], el=0, zoom=1.1, az=0, view="xy", opacity=[0.8, 1], linear=False, cmap="jet")
+p.show(title="EM Solver")
 
 

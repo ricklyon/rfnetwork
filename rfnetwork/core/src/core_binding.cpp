@@ -352,6 +352,7 @@ static PyObject* solver_run(PyObject* self, PyObject* args) {
     PyObject *fields;
     PyObject *probes;
     PyObject *sources;
+    PyObject *monitors;
     
     int Nx;
     int Ny;
@@ -359,7 +360,7 @@ static PyObject* solver_run(PyObject* self, PyObject* args) {
     int Nt;
 
     // Parse arguments: expecting a single Python object
-    if (!PyArg_ParseTuple(args, "OOOOIIII", &coefficients, &fields, &sources, &probes, &Nx, &Ny, &Nz, &Nt)) {
+    if (!PyArg_ParseTuple(args, "OOOOOIIII", &coefficients, &fields, &sources, &probes, &monitors, &Nx, &Ny, &Nz, &Nt)) {
         return PyLong_FromLong(1);
     }
 
@@ -370,6 +371,11 @@ static PyObject* solver_run(PyObject* self, PyObject* args) {
 
     if (!PyDict_Check(fields)) {
         PyErr_SetString(PyExc_TypeError, "Expected a fields dictionary");
+        return PyLong_FromLong(1);
+    }
+
+    if (!PyList_Check(monitors)) {
+        PyErr_SetString(PyExc_TypeError, "Expected a monitors list");
         return PyLong_FromLong(1);
     }
 
@@ -384,6 +390,7 @@ static PyObject* solver_run(PyObject* self, PyObject* args) {
     }
 
     solver_init(fields, coefficients, Nx, Ny, Nz);
+    solver_init_monitors(monitors, Nt);
 
     solver_run(sources, Nt);
 

@@ -121,14 +121,24 @@ struct Coeff_Hz {
     float * Db_hz_y;
 };
 
-struct Port {
-    int *  idx;
-    float * Vs_a;
-    float * src;
-    float * v_probe;
+struct Monitor {
+    float * values;
+    float * field;
+    int axis;
+    int position;
+    int n_step;
+    int N1;
+    int N2;
+    int Nx;
+    int Ny;
+    int Nz;
+    int NyNz;
+    int N1N2;
 };
 
 int solver_init(PyObject * fields, PyObject * coefficients, int Nx, int Ny, int Nz);
+
+int solver_init_monitors(PyObject * py_monitors, int Nt);
 
 int solver_run(PyObject * sources, int Nt);
 

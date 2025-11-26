@@ -24,6 +24,7 @@ using Eigen::MatrixXd;
 typedef Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> MatrixFloatType;
 
 #define DATA_NDIM 3
+#define MAX_MONITORS 20
 
 Field_Ex Ex;
 Field_Ey Ey;
@@ -40,6 +41,9 @@ Coeff_Ez Cz;
 Coeff_Hx Dx;
 Coeff_Hy Dy;
 Coeff_Hz Dz;
+
+Monitor monitors[MAX_MONITORS];
+int n_monitors = 0;
 
 // get the array of the given name from a python dictionary. Validate the shape
 // matches Nx, Ny, Nz
@@ -118,6 +122,7 @@ float * get_source_array(PyObject * dict, int Nt)
 
     return (float *) PyArray_DATA(array);
 }
+
 
 int solver_init(PyObject * fields, PyObject * coefficients, int Nx, int Ny, int Nz)
 {
@@ -223,10 +228,83 @@ int solver_init(PyObject * fields, PyObject * coefficients, int Nx, int Ny, int 
     return 0;
 }
 
+int solver_init_monitors(PyObject * py_monitors, int Nt)
+{
+    // initialize field monitors
+    n_monitors = (int) PyList_Size(py_monitors);
+
+    if (n_monitors > MAX_MONITORS)
+    {
+        throw std::runtime_error("Exceeded maximum number of monitors.");
+    }
+
+    // pointer to all field components
+    float * field_p[6] = {Ex.ex, Ey.ey, Ez.ez, Hx.hx, Hy.hy, Hz.hz};
+
+    // shapes of field components
+    int Nx[6] = {Ex.Nx, Ey.Nx, Ez.Nx, Hx.Nx, Hy.Nx, Hz.Nx};
+    int Ny[6] = {Ex.Ny, Ey.Ny, Ez.Ny, Hx.Ny, Hy.Ny, Hz.Ny};
+    int Nz[6] = {Ex.Nz, Ey.Nz, Ez.Nz, Hx.Nz, Hy.Nz, Hz.Nz};
+
+    PyObject* py_mon;
+
+    int n1;
+    int n2; 
+
+    for (int m = 0; m < n_monitors; m++)
+    {   
+        py_mon = PyList_GetItem(py_monitors, m);
+
+        // number of elements in time dimension
+        int n_step = PyLong_AsLong(PyDict_GetItemString(py_mon, "n_step"));
+        int Nm = (Nt / n_step) + 1;
+        
+        int axis = PyLong_AsLong(PyDict_GetItemString(py_mon, "axis"));
+        int field = PyLong_AsLong(PyDict_GetItemString(py_mon, "field"));
+        
+        if (axis == 0)
+        {
+            n1 = Ny[field];
+            n2 = Nz[field];
+        }
+        else if (axis == 1)
+        {
+            n1 = Nx[field];
+            n2 = Nz[field];
+        }
+        else
+        {
+            n1 = Nx[field];
+            n2 = Ny[field];
+        }
+
+        monitors[m].values = get_solver_array(py_mon, "values", Nm, n1, n2);
+        monitors[m].field = field_p[field];
+        monitors[m].position = PyLong_AsLong(PyDict_GetItemString(py_mon, "position"));
+        monitors[m].n_step = n_step;
+        monitors[m].axis = axis;
+        monitors[m].N1 = n1;
+        monitors[m].N2 = n2;
+        monitors[m].Nx = Nx[field];
+        monitors[m].Ny = Ny[field];
+        monitors[m].Nz = Nz[field];
+        monitors[m].NyNz = Ny[field] * Nz[field];
+        monitors[m].N1N2 = n1 * n2;
+
+    }
+
+
+    return 0;
+}
+
+
 int solver_run(PyObject * sources, int Nt)
 {
-    std::cout << Nt << "\n";
+    std::cout << "Nt " << Nt << "\n";
     int n_sources = (int) PyList_Size(sources);
+    
+    // std::cout << "n_sources " << n_sources << "\n";
+    // std::cout << "n_monitors " << n_monitors << "\n";
 
     // vector of waveform values for each source
     std::vector<float*> source_values(n_sources); 
@@ -260,6 +338,7 @@ int solver_run(PyObject * sources, int Nt)
     float * ez_y_src;
     float * ez_src;
 
+
     for (int t = 0; t < Nt; t++)
     {
         solver_update_ex(0, Ex.Nx);
@@ -287,6 +366,48 @@ int solver_run(PyObject * sources, int Nt)
         solver_update_hx(0, Hx.Nx);
         solver_update_hy(0, Hy.Nx);
         solver_update_hz(0, Hz.Nx);
+
+        // update monitors
+        for (int m = 0; m < n_monitors; m++)
+        {
+            Monitor mon = monitors[m];
+
+
+            if ((t > 0) && ((t % (mon.n_step)) != 0))
+            {
+                continue;
+            }
+
+            int m_n = t / mon.n_step;
+
+            MatrixFloatType m_values (mon.values + (m_n * (mon.N1N2)), mon.N1, mon.N2);
+            
+            if (mon.axis == 0)
+            {
+                MatrixFloatType m_field (mon.field + (mon.position * (mon.NyNz)), mon.Ny, mon.Nz);
+                m_values = m_field;
+            }
+
+            else if (mon.axis == 1)
+            {
+                for (int i = 0; i < mon.Nx; i++)
+                {
+                    MatrixFloatType m_field (mon.field + (i * (mon.NyNz)), mon.Ny, mon.Nz);
+                    m_values.row(i) = m_field.block(mon.position, 0, 1, mon.Nz);
+                }
+            }
+
+            else // (m.axis == 2)
+            {
+                for (int i = 0; i < mon.Nx; i++)
+                {
+                    MatrixFloatType m_field (mon.field + (i * (mon.NyNz)), mon.Ny, mon.Nz);
+                    m_values.row(i) = m_field.block(0, mon.position, mon.Ny, 1);
+                }
+            }
+            
+        }
+
     }
 
     std::cout << "Done\n";
