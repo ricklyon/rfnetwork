@@ -292,8 +292,6 @@ int solver_init_monitors(PyObject * py_monitors, int Nt)
         monitors[m].NyNz = Ny[field] * Nz[field];
         monitors[m].N1N2 = n1 * n2;
 
-        std::cout << "mon " << m << " " << monitors[m].axis << " " << monitors[m].position  << "\n";
-
     }
 
 
@@ -303,11 +301,8 @@ int solver_init_monitors(PyObject * py_monitors, int Nt)
 
 int solver_run(PyObject * sources, int Nt)
 {
-    std::cout << "Nt " << Nt << "\n";
     int n_sources = (int) PyList_Size(sources);
     
-    // std::cout << "n_sources " << n_sources << "\n";
-    // std::cout << "n_monitors " << n_monitors << "\n";
 
     // vector of waveform values for each source
     std::vector<float*> source_values(n_sources); 
@@ -413,8 +408,6 @@ int solver_run(PyObject * sources, int Nt)
 
     }
 
-    std::cout << "Done\n";
-
     return 0;
 
 }
@@ -428,17 +421,6 @@ int solver_update_ex(int x_start, int x_stop)
     int Ny = Cx.Ny;
     int Nz = Cx.Nz;
 
-    // std::cout << "Ex\n";
-    // std::cout << Ex.Nx << " " << Ex.Ny << " " << Ex.Nz << "\n";
-    // std::cout << Cx.Nx << " " << Cx.Ny << " " << Cx.Nz << "\n";
-    // std::cout << Ex.NyNz << "\n";
-    // std::cout << Cx.NyNz << "\n";
-
-    // std::cout << Hz.Nx << " " << Hz.Ny << " " << Hz.Nz << "\n";
-    // std::cout << Hy.Nx << " " << Hy.Ny << " " << Hy.Nz << "\n";
-    // std::cout << Hz.NyNz << "\n";
-
-
     // operate on a single slice of the field on the x axis
     for (int x = x_start; x < x_stop; x++)
     {   
@@ -451,7 +433,7 @@ int solver_update_ex(int x_start, int x_stop)
         MatrixFloatType hz (Hz.hz + (x * Hz.NyNz), Hz.Ny, Hz.Nz);
         MatrixFloatType hy (Hy.hy + (x * Hy.NyNz), Hy.Ny, Hy.Nz);
         
-        // ex coefficients
+        // ex coefficients have the same x index as ex
         x_offset = x * Cx.NyNz;
         MatrixFloatType Cb_ex_y (Cx.Cb_ex_y + x_offset, Ny, Nz);
         MatrixFloatType Cb_ex_z (Cx.Cb_ex_z + x_offset, Ny, Nz);
@@ -462,7 +444,7 @@ int solver_update_ex(int x_start, int x_stop)
         // update ex_y
         // ex_y[:, 1:-1, 1:-1] = (Ca_ex_y * ex_y[:, 1:-1, 1:-1]) + ex_yd
         ex_y.block(1, 1, Ny, Nz) = Ca_ex_y.cwiseProduct(ex_y.block(1, 1, Ny, Nz));
-
+        
         // ex_yd = Cb_ex_y * np.diff(hz, axis=1)[:, :, 1:-1]
         ex_y.block(1, 1, Ny, Nz) += (
             Cb_ex_y.cwiseProduct((hz.bottomRows(Ny) - hz.topRows(Ny)).block(0, 1, Ny, Nz))
@@ -514,8 +496,8 @@ int solver_update_ey(int x_start, int x_stop)
         MatrixFloatType hz_0 (Hz.hz + ((x - 1) * Hz.NyNz), Hz.Ny, Hz.Nz);
         MatrixFloatType hz_1 (Hz.hz + (x * Hz.NyNz), Hz.Ny, Hz.Nz);
 
-        // ey coefficients
-        x_offset = x * Cy.NyNz;
+        // ey coefficients start at ex=1, the pointer offset for the first slice of coefficients at x=0 should be 0
+        x_offset = (x - 1) * Cy.NyNz;
         MatrixFloatType Cb_ey_z (Cy.Cb_ey_z + x_offset, Ny, Nz);
         MatrixFloatType Cb_ey_x (Cy.Cb_ey_x + x_offset, Ny, Nz);
 
@@ -577,8 +559,8 @@ int solver_update_ez(int x_start, int x_stop)
         MatrixFloatType hy_0 (Hy.hy + ((x - 1) * Hy.NyNz), Hy.Ny, Hy.Nz);
         MatrixFloatType hy_1 (Hy.hy + (x * Hy.NyNz), Hy.Ny, Hy.Nz);
 
-        // ez coefficients
-        x_offset = x * Cz.NyNz;
+        // ez coefficients start at x=1, the pointer offset for the first slice of coefficients at x=0 should be 0
+        x_offset = (x - 1) * Cz.NyNz;
         MatrixFloatType Cb_ez_x (Cz.Cb_ez_x + x_offset, Ny, Nz);
         MatrixFloatType Cb_ez_y (Cz.Cb_ez_y + x_offset, Ny, Nz);
 

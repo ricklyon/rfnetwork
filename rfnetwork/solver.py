@@ -35,6 +35,7 @@ class SolverMesh():
         self.port_face = [None] * nports
         self.bounding_box = bounding_box
         self.monitors=dict()
+        self.slider_value = 0
 
         self.sbox_max = np.max(bounding_box.points, axis=0)
         self.sbox_min = np.min(bounding_box.points, axis=0)
@@ -489,31 +490,17 @@ class SolverMesh():
         for i, (k, m) in enumerate(self.monitors.items()):
             self.monitors[k]["values"] = monitors[i]["values"]
 
+        # # move port voltages back to the class variable
+        source_v = [s["values"] for s in sources]
 
-        # data = fields["ex"][:, :, 3]
-        # plt.figure()
-        # im = plt.pcolormesh(np.abs(data))
-        # plt.colorbar()
+        cur_source = 0
+        for p in (ports):
+            src_len = self.ports[p-1]["Vs_a"].size
+            src_shape = self.ports[p-1]["Vs_a"].shape
 
-        # for k, v in coefficients.items():
-        #     print(np.any(np.isnan(v)))
+            self.ports[p-1]["values"] = np.array(source_v[cur_source: cur_source + src_len]).reshape(src_shape + (Nt,))
+            cur_source += src_len
 
-        # print(np.any(np.isnan(fields["ey"])))
-        # print(np.any(np.isnan(fields["ez"])))
-
-        # print(np.any(np.isnan(fields["hx"])))
-        # print(np.any(np.isnan(fields["hy"])))
-        # print(np.any(np.isnan(fields["hz"])))
-
-        # plt.figure()
-        probe = sources[3]
-        # plt.plot(v_waveforms[0])
-        # plt.plot(-probe["values"])
-        # plt.ylim([-4, 4])
-
-        
-        # print(np.argmax(np.isnan(probe["values"])))
-        # plt.show()
 
     def add_field_monitor(self, name: str, field: str, axis: str, position: int, n_step: int):
         """
@@ -648,8 +635,8 @@ class SolverMesh():
 
         ports = np.arange(1, nports+1)
 
-        # source port probe
-        src_vp = s.ports[source_port-1]["v_probe"]
+        # source port probe, get middle ez components
+        src_vp = np.sum(s.ports[source_port-1]["values"][1] * conv.m_in(self.dz[:2])[..., None], axis=0)
         # source port applied voltage
         src_applied = s.ports[source_port-1]["src"]
 
@@ -753,10 +740,12 @@ class SolverMesh():
             # n_t = (t * 1e-9) / self.dt
             # n_f = np.clip(int(n_t // n_step), 0, nframe-1)
 
+            self.slider_value = n_t
+
             for m, f in field_meshes:
                 m.point_data["values"][:] = f[int(n_t // n_step)]
           
-        
+        self.slider_value = Nt // 2
         self.slider = plotter.add_slider_widget(
             callback,
             [0, Nt],
@@ -771,12 +760,23 @@ class SolverMesh():
             for m in field_actors:
                 m.SetVisibility(value)
 
-            
-        # add checkbox to turn off field visibiliy
+
+        def increment_left():
+            self.slider.GetRepresentation().SetValue(self.slider_value - 1)
+            callback(self.slider_value - 1)
+            plotter.render()
+
+        def increment_right():
+            self.slider.GetRepresentation().SetValue(self.slider_value + 1)
+            callback(self.slider_value + 1)
+            plotter.render()
+
+        # add checkbox to turn off field visibility
         plotter.add_checkbox_button_widget(set_field_visible, value=True, position=(10, 10), size=30, border_size=0)
         plotter.add_text("Field Visibility", position=(45, 15), font_size=9)
 
-        # plotter.add_key_event
+        plotter.add_key_event("Left", increment_left)
+        plotter.add_key_event("Right", increment_right)
 
 
         if gif_file:
@@ -835,9 +835,9 @@ s.add_lumped_port(2, port2_face)
 
 s.mesh(d0=0.020)
 s.init_ports()
-s.add_field_monitor("mon1", "ez", "y", 13, 2)
-s.add_field_monitor("mon2", "ez", "z", 2, 2)
-s.add_field_monitor("mon3", "ez", "x", s.Nx - 1, 2)
+s.add_field_monitor("mon1", "ez", "y", s.Ny // 2, 1)
+s.add_field_monitor("mon2", "ez", "z", 2, 1)
+s.add_field_monitor("mon3", "ez", "x", s.Nx // 2, 1)
 
 # s.render().show()
 # print(s.Nx, s.Ny, s.Nz)
@@ -869,15 +869,24 @@ s.run(1, vsrc)
 # p = s.plot_cooeficients("hy_x", "a", "x", 0, point_size=15, cmap="brg", vmin=-1)
 # p.show()
 
-p = s.plot_monitor(["mon1", "mon2", "mon3"], el=0, zoom=1.1, az=0, vmin=-5, vmax=5, view="xy", opacity=[0.8, 0.8, 0.8], linear=True, cmap="jet")
+p = s.plot_monitor(["mon2", "mon3"], el=0, zoom=1.1, az=0, vmin=-20, vmax=20, view="xy", opacity=[0.8, 0.8], linear=False, cmap="jet")
 p.show(title="EM Solver")
+
+
+frequency: np.ndarray = np.arange(5e9, 15e9, 10e6)
+
+# sdata = s.get_sparameters(frequency)
+# S11 = sdata[:, 0]
+
+# fig, ax = plt.subplots()
+# ax.plot(frequency/1e9, conv.db20_lin(S11))
+
+# fig, ax = plt.subplots()
+# rfn.plots.draw_smithchart(ax)
+# plt.plot(S11.real, S11.imag)
+# plt.show()
 
 
 # 
 # Nx, Ny, Nz = 126, 26, 26
 
-# monitor 0x 0 pos 1 0x59a5140
-# monitor 1x 0 pos 2 0x59a5140
-
-# monitor 1x 60 pos 2 0x59ce360
-# monitor 0x 60 pos 1 0x59ce360
