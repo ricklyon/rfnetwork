@@ -23,6 +23,7 @@ using Eigen::MatrixXd;
 
 typedef Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> MatrixFloatType;
 
+
 #define DATA_NDIM 3
 #define MAX_MONITORS 20
 
@@ -291,6 +292,8 @@ int solver_init_monitors(PyObject * py_monitors, int Nt)
         monitors[m].NyNz = Ny[field] * Nz[field];
         monitors[m].N1N2 = n1 * n2;
 
+        std::cout << "mon " << m << " " << monitors[m].axis << " " << monitors[m].position  << "\n";
+
     }
 
 
@@ -349,13 +352,13 @@ int solver_run(PyObject * sources, int Nt)
         for (int s = 0; s < n_sources; s++)
         {   
             // index the ez component of the source
-            ez_x_src = Ez.ez_x + source_offsets[s];
-            *ez_x_src = (*ez_x_src) + source_values[s][t];
+            ez_x_src = Ez.ez_x + (source_offsets[s]);
+            *ez_x_src = (*ez_x_src) + (source_values[s])[t];
 
-            ez_y_src = Ez.ez_y + source_offsets[s];
-            *ez_y_src = (*ez_y_src) + source_values[s][t];
+            ez_y_src = Ez.ez_y + (source_offsets[s]);
+            *ez_y_src = (*ez_y_src) + (source_values[s])[t];
 
-            ez_src = Ez.ez + source_offsets[s];
+            ez_src = Ez.ez + (source_offsets[s]);
             *ez_src = (*ez_x_src) + (*ez_y_src);
 
             // put the resulting total voltage in the source_values array once the value is used for this
@@ -393,7 +396,7 @@ int solver_run(PyObject * sources, int Nt)
                 for (int i = 0; i < mon.Nx; i++)
                 {
                     MatrixFloatType m_field (mon.field + (i * (mon.NyNz)), mon.Ny, mon.Nz);
-                    m_values.row(i) = m_field.block(mon.position, 0, 1, mon.Nz);
+                    m_values.row(i) = m_field.row(mon.position);
                 }
             }
 
@@ -402,7 +405,7 @@ int solver_run(PyObject * sources, int Nt)
                 for (int i = 0; i < mon.Nx; i++)
                 {
                     MatrixFloatType m_field (mon.field + (i * (mon.NyNz)), mon.Ny, mon.Nz);
-                    m_values.row(i) = m_field.block(0, mon.position, mon.Ny, 1);
+                    m_values.row(i) = m_field.col(mon.position);
                 }
             }
             

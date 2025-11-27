@@ -476,13 +476,11 @@ class SolverMesh():
                 dict(
                     values=np.zeros(((n_m,) + m["shape"]), dtype=dtype_, order="C"), 
                     axis=int(m["axis"]),
-                    position=int(m["axis"]),
+                    position=int(m["position"]),
                     field=list(self.fshape.keys()).index(m["field"]),
                     n_step=int(m["n_step"])
                 )
             )
-
-
 
         probes = []
         core_func.solver_run(coefficients, fields, sources, probes, monitors, Nx, Ny, Nz, Nt)
@@ -508,14 +506,14 @@ class SolverMesh():
         # print(np.any(np.isnan(fields["hz"])))
 
         # plt.figure()
-        # probe = sources[3]
+        probe = sources[3]
         # plt.plot(v_waveforms[0])
-        # plt.plot(-probe["values"] * dz[1])
+        # plt.plot(-probe["values"])
         # plt.ylim([-4, 4])
 
         
         # print(np.argmax(np.isnan(probe["values"])))
-        plt.show()
+        # plt.show()
 
     def add_field_monitor(self, name: str, field: str, axis: str, position: int, n_step: int):
         """
@@ -542,8 +540,9 @@ class SolverMesh():
         shape = list(self.fshape[field])
         axis_len = shape.pop(axis_i)
 
-        if (position < 0) or (position > self.fshape[field][axis_i] - 1):
-            raise ValueError(f"Position out of bounds, expecting value from 0 - {axis_len}")
+        if (position < 0) or (position > axis_len - 1):
+            raise ValueError(f"Position out of bounds, expecting value from 0 - {axis_len - 1}")
+        
         
         self.monitors[name] = dict(
             field=field, axis=axis_i, position=position, n_step=n_step, shape=tuple(shape)
@@ -680,7 +679,7 @@ class SolverMesh():
         self,
         monitor_name: list,
         view="xz",
-        vmax=30, vmin=-20,
+        vmax=None, vmin=None,
         zoom=1.3, 
         el=10, az=0,
         opacity="linear",
@@ -709,9 +708,16 @@ class SolverMesh():
 
             field = np.where(np.abs(field) < 1e-12, 1e-12, field)
             if linear:
-                field_v = np.clip(field, vmin, vmax).reshape(len(field), -1, order="F")
+                field_v = field
             else:
-                field_v = np.clip(20 * np.log10(np.abs(field)), vmin, vmax).reshape(len(field), -1, order="F")
+                field_v = 20 * np.log10(np.abs(field))
+                
+            if vmin is None:
+                vmin = np.nanmin(field_v)
+            if vmax is None:
+                vmax = np.nanmax(field_v)
+
+            field_v = np.clip(field_v, vmin, vmax).reshape(len(field), -1, order="F")
         
             nframe = len(field)
 
@@ -740,34 +746,37 @@ class SolverMesh():
             title="E [dB]\n" if linear else "E [V/m]\n", vertical=False, label_font_size=11, title_font_size=14
         )
         
+        Nt = nframe * n_step
 
-        def callback(t):
+        def callback(n_t):
 
-            n_t = (t * 1e-9) / self.dt
-            n_f = np.clip(int(n_t // n_step), 0, nframe-1)
-            
+            # n_t = (t * 1e-9) / self.dt
+            # n_f = np.clip(int(n_t // n_step), 0, nframe-1)
+
             for m, f in field_meshes:
-                m.point_data["values"][:] = f[n_f]
+                m.point_data["values"][:] = f[int(n_t // n_step)]
           
-        max_t_ns = nframe * n_step * self.dt * 1e9
         
-        plotter.add_slider_widget(
+        self.slider = plotter.add_slider_widget(
             callback,
-            [0, max_t_ns],
-            value=max_t_ns / 2,
+            [0, Nt],
+            value=Nt // 2,
             title="Time Step",
             interaction_event="always",
             style="modern",
-            fmt="%0.2f ns"
+            fmt="%0.0f"
         )
 
         def set_field_visible(value):
             for m in field_actors:
                 m.SetVisibility(value)
+
             
         # add checkbox to turn off field visibiliy
         plotter.add_checkbox_button_widget(set_field_visible, value=True, position=(10, 10), size=30, border_size=0)
         plotter.add_text("Field Visibility", position=(45, 15), font_size=9)
+
+        # plotter.add_key_event
 
 
         if gif_file:
@@ -776,7 +785,7 @@ class SolverMesh():
                 for m, f in field_meshes:
                     m.point_data["values"][:] = f[n].flatten(order="F")
                     
-                plotter.add_title(f"t={n * n_step * self.dt * 1e9:.2f}ns")
+                plotter.add_title(f"n={n * n_step}")
                 # plotter.render()
                 plotter.write_frame()
 
@@ -784,6 +793,8 @@ class SolverMesh():
             plotter.close()
         
         return plotter
+    
+
         
 sbox_h = 0.5
 sbox_w = 0.5
@@ -824,13 +835,14 @@ s.add_lumped_port(2, port2_face)
 
 s.mesh(d0=0.020)
 s.init_ports()
-s.add_field_monitor("mon1", "ez", "y", 15, 15)
+s.add_field_monitor("mon1", "ez", "y", 13, 2)
+s.add_field_monitor("mon2", "ez", "z", 2, 2)
+s.add_field_monitor("mon3", "ez", "x", s.Nx - 1, 2)
 
 # s.render().show()
 # print(s.Nx, s.Ny, s.Nz)
 
-# p = s.plot_cooeficients("ez_x", "a", "y", 0, point_size=15, cmap="brg", vmin=-1)
-# p.show()
+
 # p.camera_position = "xz"
 # p.camera.zoom(1.8)
 # p.show_grid(font_size=10, grid=True, use_3d_text=False, location="default")
@@ -854,7 +866,18 @@ v_waveforms = [vsrc]
 
 s.run(1, vsrc)
 
-p = s.plot_monitor(["mon1"], el=0, zoom=1.1, az=0, view="xy", opacity=[0.8, 1], linear=False, cmap="jet")
+# p = s.plot_cooeficients("hy_x", "a", "x", 0, point_size=15, cmap="brg", vmin=-1)
+# p.show()
+
+p = s.plot_monitor(["mon1", "mon2", "mon3"], el=0, zoom=1.1, az=0, vmin=-5, vmax=5, view="xy", opacity=[0.8, 0.8, 0.8], linear=True, cmap="jet")
 p.show(title="EM Solver")
 
 
+# 
+# Nx, Ny, Nz = 126, 26, 26
+
+# monitor 0x 0 pos 1 0x59a5140
+# monitor 1x 0 pos 2 0x59a5140
+
+# monitor 1x 60 pos 2 0x59ce360
+# monitor 0x 60 pos 1 0x59ce360
