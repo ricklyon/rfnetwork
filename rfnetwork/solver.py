@@ -357,7 +357,7 @@ class SolverMesh():
                 raise ValueError(f"Port face is not 2D")
 
     
-    def run(self, ports, v_waveforms):
+    def run(self, ports, v_waveforms, n_threads=4):
 
         if isinstance(ports, int):
             ports = [ports]
@@ -456,7 +456,10 @@ class SolverMesh():
         # initialize sources
         sources = []
         for i, p in enumerate(ports):
-            idx, Vs_a, component = self.ports[p-1].values()
+            port = self.ports[p-1]
+            idx, Vs_a, component = port["idx"], port["Vs_a"], port["component"]
+
+            self.ports[p-1]["src"] = v_waveforms[i].copy()
 
             # convert slice indices to a list of values
             idx_list = [list(np.arange(v.start, v.stop)) if isinstance(v, slice) else [v] for v in idx]
@@ -465,7 +468,9 @@ class SolverMesh():
             Vs_a_flt = Vs_a.flatten()
             for j, idx_j in enumerate(product(*idx_list)):
                 values = np.array(-Vs_a_flt[j] * v_waveforms[i], dtype=dtype_, order="C")
-                sources.append(dict(values=values, idx=[int(id) for id in idx_j], component=component))
+                sources.append(
+                    dict(values=values, idx=[int(id) for id in idx_j], component=component)
+                )
 
         # initialize field monitors
         monitors = []
@@ -484,21 +489,23 @@ class SolverMesh():
             )
 
         probes = []
-        core_func.solver_run(coefficients, fields, sources, probes, monitors, Nx, Ny, Nz, Nt)
+        core_func.solver_run(coefficients, fields, sources, probes, monitors, Nx, Ny, Nz, Nt, n_threads)
 
         # move monitor values back to the class variable
         for i, (k, m) in enumerate(self.monitors.items()):
             self.monitors[k]["values"] = monitors[i]["values"]
 
-        # # move port voltages back to the class variable
-        source_v = [s["values"] for s in sources]
+        # get the voltages at each source components
+        src_v = [s["values"] for s in sources]
 
+        # move the measured source voltages back to the class variable for the associated port
         cur_source = 0
         for p in (ports):
+            # get the number of components associated with this port
             src_len = self.ports[p-1]["Vs_a"].size
             src_shape = self.ports[p-1]["Vs_a"].shape
 
-            self.ports[p-1]["values"] = np.array(source_v[cur_source: cur_source + src_len]).reshape(src_shape + (Nt,))
+            self.ports[p-1]["values"] = np.array(src_v[cur_source: cur_source + src_len]).reshape(src_shape + (Nt,))
             cur_source += src_len
 
 
@@ -634,9 +641,10 @@ class SolverMesh():
         B = np.zeros((nfrequency, nports), dtype=np.complex128)
 
         ports = np.arange(1, nports+1)
+        z_idx = self.ports[source_port-1]["idx"][2]
 
         # source port probe, get middle ez components
-        src_vp = np.sum(s.ports[source_port-1]["values"][1] * conv.m_in(self.dz[:2])[..., None], axis=0)
+        src_vp = -np.sum(s.ports[source_port-1]["values"][1] * conv.m_in(self.dz[z_idx])[..., None], axis=0)
         # source port applied voltage
         src_applied = s.ports[source_port-1]["src"]
 
@@ -648,7 +656,7 @@ class SolverMesh():
         
         B[:, source_port-1] = V - (A)
 
-        exit_ports = np.array([p for p in ports if p != source_port])
+        # exit_ports = np.array([p for p in ports if p != source_port])
         # for p in exit_ports:
         #     name = f"p{p}"
 
@@ -835,9 +843,9 @@ s.add_lumped_port(2, port2_face)
 
 s.mesh(d0=0.020)
 s.init_ports()
-s.add_field_monitor("mon1", "ez", "y", s.Ny // 2, 1)
-s.add_field_monitor("mon2", "ez", "z", 2, 1)
-s.add_field_monitor("mon3", "ez", "x", s.Nx // 2, 1)
+s.add_field_monitor("mon1", "ez", "y", s.Ny // 2, 10)
+s.add_field_monitor("mon2", "ez", "z", 2, 10)
+s.add_field_monitor("mon3", "ez", "x", s.Nx // 2, 10)
 
 # s.render().show()
 # print(s.Nx, s.Ny, s.Nz)
@@ -864,27 +872,27 @@ vsrc = 1e-2 * (np.sin(2* np.pi * f0 * (t)) * np.exp(-((t - t0) / t_half)**2)).as
 ports = 1
 v_waveforms = [vsrc]
 
-s.run(1, vsrc)
+s.run(1, vsrc, n_threads=4)
 
 # p = s.plot_cooeficients("hy_x", "a", "x", 0, point_size=15, cmap="brg", vmin=-1)
 # p.show()
 
-p = s.plot_monitor(["mon2", "mon3"], el=0, zoom=1.1, az=0, vmin=-20, vmax=20, view="xy", opacity=[0.8, 0.8], linear=False, cmap="jet")
+p = s.plot_monitor(["mon2", "mon3"], el=0, zoom=1.1, az=0, vmin=-20, vmax=20, view="xy", opacity=[0.8, 1], linear=False, cmap="jet")
 p.show(title="EM Solver")
 
 
 frequency: np.ndarray = np.arange(5e9, 15e9, 10e6)
 
-# sdata = s.get_sparameters(frequency)
-# S11 = sdata[:, 0]
+sdata = s.get_sparameters(frequency)
+S11 = sdata[:, 0]
 
-# fig, ax = plt.subplots()
-# ax.plot(frequency/1e9, conv.db20_lin(S11))
+fig, ax = plt.subplots()
+ax.plot(frequency/1e9, conv.db20_lin(S11))
 
-# fig, ax = plt.subplots()
-# rfn.plots.draw_smithchart(ax)
-# plt.plot(S11.real, S11.imag)
-# plt.show()
+fig, ax = plt.subplots()
+rfn.plots.draw_smithchart(ax)
+plt.plot(S11.real, S11.imag)
+plt.show()
 
 
 # 

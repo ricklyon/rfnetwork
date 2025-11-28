@@ -299,11 +299,10 @@ int solver_init_monitors(PyObject * py_monitors, int Nt)
 }
 
 
-int solver_run(PyObject * sources, int Nt)
+int solver_run(PyObject * sources, int Nt, int n_threads)
 {
     int n_sources = (int) PyList_Size(sources);
     
-
     // vector of waveform values for each source
     std::vector<float*> source_values(n_sources); 
 
@@ -336,34 +335,103 @@ int solver_run(PyObject * sources, int Nt)
     float * ez_y_src;
     float * ez_src;
 
-
-    for (int t = 0; t < Nt; t++)
+    // error check number of threads
+    if (n_threads < 0 || n_threads > 8)
     {
-        solver_update_ex(0, Ex.Nx);
-        solver_update_ey(0, Ey.Nx);
-        solver_update_ez(0, Ez.Nx);
+        throw std::runtime_error("Invalid number of threads.");
+    }
+
+    std::thread threads[n_threads];
+
+    // number of x slices computed by each thread
+    int n_batch = Ex.Nx / n_threads;
+    // remainder of batch size
+    int r_batch = Ex.Nx % n_threads;
+
+    int x_start_th[n_threads];
+    int x_stop_th[n_threads];
+
+    // divide up the x slices into batches for each thread. The slices indicate the cells to compute
+    // values for. Components that have an extra index on the x axis (ey, ez, and hx) are not updated on the edges and 
+    // we only need to iterate over the number of cells. 
+    // (hy is actually updated, but is always non-zero since ey and ez are not updated.)
+    for (int t = 0; t < n_threads; t++)
+    {
+        if (t < 1)
+        {
+            x_start_th[t] = 0;
+        }
+        else 
+        {
+            x_start_th[t] = x_stop_th[t-1];
+        }
+        // add 1 to the batch size until the remainder is removed
+        if (r_batch > 0)
+        {
+            x_stop_th[t] =  x_start_th[t] + n_batch + 1;
+            r_batch -= 1;
+        }
+        else
+        {
+            x_stop_th[t] =  x_start_th[t] + n_batch;
+        }
+    }
+
+    for (int n = 0; n < Nt; n++)
+    {
+        if (n_threads > 1)
+        {
+            for (int t = 0; t < n_threads; t++)
+            {   
+                threads[t] = std::thread(solver_update_e, x_start_th[t], x_stop_th[t]);
+            }
+
+            // wait for all threads to complete
+            for (int t = 0; t < n_threads; t++)
+            {
+                threads[t].join();
+            }
+        }
+        else 
+        {
+            solver_update_e(0, Ex.Nx);
+        }
 
         // update sources
         for (int s = 0; s < n_sources; s++)
         {   
             // index the ez component of the source
             ez_x_src = Ez.ez_x + (source_offsets[s]);
-            *ez_x_src = (*ez_x_src) + (source_values[s])[t];
+            *ez_x_src = (*ez_x_src) + (source_values[s])[n];
 
             ez_y_src = Ez.ez_y + (source_offsets[s]);
-            *ez_y_src = (*ez_y_src) + (source_values[s])[t];
+            *ez_y_src = (*ez_y_src) + (source_values[s])[n];
 
             ez_src = Ez.ez + (source_offsets[s]);
             *ez_src = (*ez_x_src) + (*ez_y_src);
 
             // put the resulting total voltage in the source_values array once the value is used for this
             // time step.
-            source_values[s][t] = *ez_src;
+            source_values[s][n] = *ez_src;
         }
         
-        solver_update_hx(0, Hx.Nx);
-        solver_update_hy(0, Hy.Nx);
-        solver_update_hz(0, Hz.Nx);
+        if (n_threads > 1)
+        {
+            for (int t = 0; t < n_threads; t++)
+            {   
+                threads[t] = std::thread(solver_update_h, x_start_th[t], x_stop_th[t]);
+            }
+
+            // wait for all threads to complete
+            for (int t = 0; t < n_threads; t++)
+            {
+                threads[t].join();
+            }
+        }
+        else 
+        {
+            solver_update_h(0, Ex.Nx);
+        }
 
         // update monitors
         for (int m = 0; m < n_monitors; m++)
@@ -371,12 +439,12 @@ int solver_run(PyObject * sources, int Nt)
             Monitor mon = monitors[m];
 
 
-            if ((t > 0) && ((t % (mon.n_step)) != 0))
+            if ((n > 0) && ((n % (mon.n_step)) != 0))
             {
                 continue;
             }
 
-            int m_n = t / mon.n_step;
+            int m_n = n / mon.n_step;
 
             MatrixFloatType m_values (mon.values + (m_n * (mon.N1N2)), mon.N1, mon.N2);
             
@@ -412,10 +480,25 @@ int solver_run(PyObject * sources, int Nt)
 
 }
 
+int solver_update_e(int x_start, int x_stop)
+{
+    solver_update_ex(x_start, x_stop);
+    solver_update_ey(x_start, x_stop);
+    solver_update_ez(x_start, x_stop);
+    return 0;
+}
+
+int solver_update_h(int x_start, int x_stop)
+{
+    solver_update_hx(x_start, x_stop);
+    solver_update_hy(x_start, x_stop);
+    solver_update_hz(x_start, x_stop);
+    return 0;
+}
+
 // update Ex components, starting with the x-axis index x_start, and ending with x_stop (stop index is not inclusive)
 int solver_update_ex(int x_start, int x_stop)
 {
-    
     int x_offset;
     // number of updated field components
     int Ny = Cx.Ny;
