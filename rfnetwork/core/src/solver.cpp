@@ -14,6 +14,7 @@
 #include <math.h>
 #include <iostream>
 #include <thread>
+#include <condition_variable>
 
 #include "solver.h"
 
@@ -26,6 +27,8 @@ typedef Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::R
 
 #define DATA_NDIM 3
 #define MAX_MONITORS 20
+#define MAX_SOURCES 20
+#define MAX_THREADS 20
 
 Field_Ex Ex;
 Field_Ey Ey;
@@ -45,6 +48,23 @@ Coeff_Hz Dz;
 
 Monitor monitors[MAX_MONITORS];
 int n_monitors = 0;
+
+Source sources[MAX_SOURCES];
+int n_sources = 0;
+
+std::thread threads[MAX_THREADS];
+
+std::condition_variable cv_e;
+std::mutex mutex_e; 
+
+std::condition_variable cv_h;
+std::mutex mutex_h; 
+
+std::condition_variable cv;
+std::mutex mutex; 
+
+int e_updates = 0;
+int h_updates = 0;
 
 // get the array of the given name from a python dictionary. Validate the shape
 // matches Nx, Ny, Nz
@@ -125,7 +145,7 @@ float * get_source_array(PyObject * dict, int Nt)
 }
 
 
-int solver_init(PyObject * fields, PyObject * coefficients, int Nx, int Ny, int Nz)
+int solver_init_fields(PyObject * fields, PyObject * coefficients, int Nx, int Ny, int Nz)
 {
     // initialize ex pointers
     Ex.Nx = Nx;
@@ -294,46 +314,52 @@ int solver_init_monitors(PyObject * py_monitors, int Nt)
 
     }
 
-
     return 0;
 }
 
-
-int solver_run(PyObject * sources, int Nt, int n_threads)
+int solver_init_sources(PyObject * py_sources, int Nt)
 {
-    int n_sources = (int) PyList_Size(sources);
-    
-    // vector of waveform values for each source
-    std::vector<float*> source_values(n_sources); 
+    n_sources = (int) PyList_Size(py_sources);
 
-    // vector of pointer offsets used to index each source component
-    std::vector<int> source_offsets(n_sources); 
+    if (n_sources > MAX_SOURCES)
+    {
+        throw std::runtime_error("Exceeded maximum number of sources.");
+    }
 
     // get waveform data for each component where a source is present
-    for (int s = 0; s < n_sources; s++) {
-        
+    for (int s = 0; s < n_sources; s++) 
+    {
+
         // verify each item in the list is a python dictionary
-        PyObject *source_dict = PyList_GetItem(sources, s);
+        PyObject * source_dict = PyList_GetItem(py_sources, s);
         if (!PyDict_Check(source_dict)) {
             throw std::runtime_error("Expected a list of source dictionaries");
         }
 
         // get waveform data
-        source_values[s] = get_source_array(source_dict, Nt);
+        sources[s].values = get_source_array(source_dict, Nt);
 
         // get component indices for ez
         PyObject* py_idx = PyDict_GetItemString(source_dict, "idx");
 
-        source_offsets[s] = (
+        int offset = (
             ((int) PyLong_AsLong(PyList_GetItem(py_idx, 0)) * Ez.NyNz) + 
             ((int) PyLong_AsLong(PyList_GetItem(py_idx, 1)) * Ez.Nz) +
             ((int) PyLong_AsLong(PyList_GetItem(py_idx, 2)))
         );
+        
+        sources[s].ez = Ez.ez + offset;
+        sources[s].ez_x = Ez.ez_x + offset;
+        sources[s].ez_y = Ez.ez_y + offset;
+
+        sources[s].x_idx = (int) PyLong_AsLong(PyList_GetItem(py_idx, 0));
     }
 
-    float * ez_x_src;
-    float * ez_y_src;
-    float * ez_src;
+    return 0;
+}
+
+int solver_run(int Nt, int n_threads)
+{
 
     // error check number of threads
     if (n_threads < 0 || n_threads > 8)
@@ -341,15 +367,13 @@ int solver_run(PyObject * sources, int Nt, int n_threads)
         throw std::runtime_error("Invalid number of threads.");
     }
 
-    std::thread threads[n_threads];
-
     // number of x slices computed by each thread
     int n_batch = Ex.Nx / n_threads;
     // remainder of batch size
     int r_batch = Ex.Nx % n_threads;
 
-    int x_start_th[n_threads];
-    int x_stop_th[n_threads];
+    int x_start_th = 0;
+    int x_stop_th = 0;
 
     // divide up the x slices into batches for each thread. The slices indicate the cells to compute
     // values for. Components that have an extra index on the x axis (ey, ez, and hx) are not updated on the edges and 
@@ -357,143 +381,157 @@ int solver_run(PyObject * sources, int Nt, int n_threads)
     // (hy is actually updated, but is always non-zero since ey and ez are not updated.)
     for (int t = 0; t < n_threads; t++)
     {
-        if (t < 1)
-        {
-            x_start_th[t] = 0;
-        }
-        else 
-        {
-            x_start_th[t] = x_stop_th[t-1];
-        }
+        x_start_th = x_stop_th;
+        
         // add 1 to the batch size until the remainder is removed
         if (r_batch > 0)
         {
-            x_stop_th[t] =  x_start_th[t] + n_batch + 1;
+            x_stop_th =  x_start_th + n_batch + 1;
             r_batch -= 1;
         }
         else
         {
-            x_stop_th[t] =  x_start_th[t] + n_batch;
+            x_stop_th =  x_start_th + n_batch;
         }
+
+        threads[t] = std::thread(solver_thread, x_start_th, x_stop_th, Nt, t);
     }
+
+    // start controller thread
+    std::thread control_th = std::thread(solver_controller, Nt, n_threads);
+
+    // wait for all threads to complete
+    for (int t = 0; t < n_threads; t++)
+    {
+        threads[t].join();
+    }
+
+    control_th.join();
+
+    return 0;
+}
+
+void solver_controller(int Nt, int n_threads)
+{
+    std::cout << "Starting Solver\n";
+    std::unique_lock<std::mutex> lock(mutex);
+    
+    for (int n = 0; n < Nt; n++)
+    {
+        // wait until all threads have signaled they are done with e field updates
+        cv.wait(lock, [n_threads] { return e_updates == n_threads; });
+        std::cout << "n (e-field)" << n << "\n";
+        // reset e update counter and signal to threads that they can move on to h updates
+        e_updates = 0;
+        cv_e.notify_all();
+
+        cv.wait(lock, [n_threads] { return h_updates == n_threads; });
+        std::cout << "n (h-field)" << n << "\n";
+        // reset h update counter and signal to threads that they can move on to e updates
+        h_updates = 0;
+        cv_h.notify_all();
+    }
+
+}
+
+void solver_thread(int x_start, int x_stop, int Nt, int thread_idx)
+{
+
+    std::cout << "Starting Thread " << thread_idx << " " << x_start << " " << x_stop << "\n";
+
+    std::unique_lock<std::mutex> lock_e(mutex_e);
+    std::unique_lock<std::mutex> lock_h(mutex_h);
+
+    // std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+
+    
 
     for (int n = 0; n < Nt; n++)
     {
-        if (n_threads > 1)
-        {
-            for (int t = 0; t < n_threads; t++)
-            {   
-                threads[t] = std::thread(solver_update_e, x_start_th[t], x_stop_th[t]);
-            }
+        std::cout << "n " << n << "\n";
+        solver_update_ex(x_start, x_stop);
+        solver_update_ey(x_start, x_stop);
+        solver_update_ez(x_start, x_stop);
 
-            // wait for all threads to complete
-            for (int t = 0; t < n_threads; t++)
-            {
-                threads[t].join();
-            }
-        }
-        else 
-        {
-            solver_update_e(0, Ex.Nx);
-        }
+        std::cout << "E-field " << thread_idx << " " << n << "\n";
 
         // update sources
         for (int s = 0; s < n_sources; s++)
         {   
-            // index the ez component of the source
-            ez_x_src = Ez.ez_x + (source_offsets[s]);
-            *ez_x_src = (*ez_x_src) + (source_values[s])[n];
-
-            ez_y_src = Ez.ez_y + (source_offsets[s]);
-            *ez_y_src = (*ez_y_src) + (source_values[s])[n];
-
-            ez_src = Ez.ez + (source_offsets[s]);
-            *ez_src = (*ez_x_src) + (*ez_y_src);
-
-            // put the resulting total voltage in the source_values array once the value is used for this
-            // time step.
-            source_values[s][n] = *ez_src;
-        }
-        
-        if (n_threads > 1)
-        {
-            for (int t = 0; t < n_threads; t++)
-            {   
-                threads[t] = std::thread(solver_update_h, x_start_th[t], x_stop_th[t]);
-            }
-
-            // wait for all threads to complete
-            for (int t = 0; t < n_threads; t++)
-            {
-                threads[t].join();
-            }
-        }
-        else 
-        {
-            solver_update_h(0, Ex.Nx);
-        }
-
-        // update monitors
-        for (int m = 0; m < n_monitors; m++)
-        {
-            Monitor mon = monitors[m];
-
-
-            if ((n > 0) && ((n % (mon.n_step)) != 0))
+            if ((sources[s].x_idx < x_start) || (sources[s].x_idx >= x_stop))
             {
                 continue;
             }
+            // index the ez component of the source
+            *(sources[s].ez_x) = *(sources[s].ez_x) + (sources[s].values)[n];
 
-            int m_n = n / mon.n_step;
+            *(sources[s].ez_y) = *(sources[s].ez_y) + (sources[s].values)[n];
 
-            MatrixFloatType m_values (mon.values + (m_n * (mon.N1N2)), mon.N1, mon.N2);
-            
-            if (mon.axis == 0)
-            {
-                MatrixFloatType m_field (mon.field + (mon.position * (mon.NyNz)), mon.Ny, mon.Nz);
-                m_values = m_field;
-            }
+            *(sources[s].ez)  = *(sources[s].ez_x) + *(sources[s].ez_y);
 
-            else if (mon.axis == 1)
-            {
-                for (int i = 0; i < mon.Nx; i++)
-                {
-                    MatrixFloatType m_field (mon.field + (i * (mon.NyNz)), mon.Ny, mon.Nz);
-                    m_values.row(i) = m_field.row(mon.position);
-                }
-            }
-
-            else // (m.axis == 2)
-            {
-                for (int i = 0; i < mon.Nx; i++)
-                {
-                    MatrixFloatType m_field (mon.field + (i * (mon.NyNz)), mon.Ny, mon.Nz);
-                    m_values.row(i) = m_field.col(mon.position);
-                }
-            }
-            
+            // put the resulting total voltage in the source_values array once the value is used for this
+            // time step.
+            (sources[s].values)[n] = *(sources[s].ez);
         }
+
+        // notify controller that e updates are done for this thread
+        e_updates++;
+        cv.notify_all(); 
+        // wait for all threads to complete before moving on to h fields
+        cv_e.wait(lock_e);
+        
+        solver_update_hx(x_start, x_stop);
+        solver_update_hy(x_start, x_stop);
+        solver_update_hz(x_start, x_stop);
+
+        // notify controller that h updates are done for this thread
+        h_updates++;
+        cv.notify_all(); 
+        // wait for all threads to complete before moving on to e fields
+        cv_h.wait(lock_h);
+
+           // update monitors
+    //     for (int m = 0; m < n_monitors; m++)
+    //     {
+    //         Monitor mon = monitors[m];
+
+    //         if ((n > 0) && ((n % (mon.n_step)) != 0))
+    //         {
+    //             continue;
+    //         }
+
+    //         int m_n = n / mon.n_step;
+
+    //         MatrixFloatType m_values (mon.values + (m_n * (mon.N1N2)), mon.N1, mon.N2);
+            
+    //         if (mon.axis == 0)
+    //         {
+    //             MatrixFloatType m_field (mon.field + (mon.position * (mon.NyNz)), mon.Ny, mon.Nz);
+    //             m_values = m_field;
+    //         }
+
+    //         else if (mon.axis == 1)
+    //         {
+    //             for (int i = 0; i < mon.Nx; i++)
+    //             {
+    //                 MatrixFloatType m_field (mon.field + (i * (mon.NyNz)), mon.Ny, mon.Nz);
+    //                 m_values.row(i) = m_field.row(mon.position);
+    //             }
+    //         }
+
+    //         else // (m.axis == 2)
+    //         {
+    //             for (int i = 0; i < mon.Nx; i++)
+    //             {
+    //                 MatrixFloatType m_field (mon.field + (i * (mon.NyNz)), mon.Ny, mon.Nz);
+    //                 m_values.row(i) = m_field.col(mon.position);
+    //             }
+    //         }
+            
+    //     }
 
     }
 
-    return 0;
-
-}
-
-int solver_update_e(int x_start, int x_stop)
-{
-    solver_update_ex(x_start, x_stop);
-    solver_update_ey(x_start, x_stop);
-    solver_update_ez(x_start, x_stop);
-    return 0;
-}
-
-int solver_update_h(int x_start, int x_stop)
-{
-    solver_update_hx(x_start, x_stop);
-    solver_update_hy(x_start, x_stop);
-    solver_update_hz(x_start, x_stop);
-    return 0;
 }
 
 // update Ex components, starting with the x-axis index x_start, and ending with x_stop (stop index is not inclusive)

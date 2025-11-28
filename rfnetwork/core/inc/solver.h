@@ -136,11 +136,24 @@ struct Monitor {
     int N1N2;
 };
 
-int solver_init(PyObject * fields, PyObject * coefficients, int Nx, int Ny, int Nz);
+struct Source {
+    float * values;
+    float * ez;
+    float * ez_x;
+    float * ez_y;
+    int x_idx; // x index for ez component
+};
+
+int solver_init_fields(PyObject * fields, PyObject * coefficients, int Nx, int Ny, int Nz);
 
 int solver_init_monitors(PyObject * py_monitors, int Nt);
 
-int solver_run(PyObject * sources, int Nt, int n_threads);
+int solver_init_sources(PyObject * py_sources, int Nt);
+
+int solver_run(int Nt, int n_threads);
+
+void solver_thread(int x_start, int x_stop, int Nt, int thread_idx);
+void solver_controller(int Nt, int n_threads);
 
 int solver_update_ex(int x_start, int x_stop);
 int solver_update_ey(int x_start, int x_stop);
@@ -149,9 +162,5 @@ int solver_update_ez(int x_start, int x_stop);
 int solver_update_hx(int x_start, int x_stop);
 int solver_update_hy(int x_start, int x_stop);
 int solver_update_hz(int x_start, int x_stop);
-
-int solver_update_e(int x_start, int x_stop);
-int solver_update_h(int x_start, int x_stop);
-
 
 #endif /* SOLVER_H */

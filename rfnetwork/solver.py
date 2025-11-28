@@ -489,7 +489,7 @@ class SolverMesh():
             )
 
         probes = []
-        core_func.solver_run(coefficients, fields, sources, probes, monitors, Nx, Ny, Nz, Nt, n_threads)
+        core_func.solver_run(coefficients, fields, sources, probes, monitors, Nx, Ny, Nz, Nt, 1)
 
         # move monitor values back to the class variable
         for i, (k, m) in enumerate(self.monitors.items()):
@@ -843,9 +843,9 @@ s.add_lumped_port(2, port2_face)
 
 s.mesh(d0=0.020)
 s.init_ports()
-s.add_field_monitor("mon1", "ez", "y", s.Ny // 2, 10)
-s.add_field_monitor("mon2", "ez", "z", 2, 10)
-s.add_field_monitor("mon3", "ez", "x", s.Nx // 2, 10)
+# s.add_field_monitor("mon1", "ez", "y", s.Ny // 2, 10)
+# s.add_field_monitor("mon2", "ez", "z", 2, 10)
+# s.add_field_monitor("mon3", "ez", "x", s.Nx // 2, 10)
 
 # s.render().show()
 # print(s.Nx, s.Ny, s.Nz)
@@ -877,8 +877,8 @@ s.run(1, vsrc, n_threads=4)
 # p = s.plot_cooeficients("hy_x", "a", "x", 0, point_size=15, cmap="brg", vmin=-1)
 # p.show()
 
-p = s.plot_monitor(["mon2", "mon3"], el=0, zoom=1.1, az=0, vmin=-20, vmax=20, view="xy", opacity=[0.8, 1], linear=False, cmap="jet")
-p.show(title="EM Solver")
+# p = s.plot_monitor(["mon2", "mon3"], el=0, zoom=1.1, az=0, vmin=-20, vmax=20, view="xy", opacity=[0.8, 1], linear=False, cmap="jet")
+# p.show(title="EM Solver")
 
 
 frequency: np.ndarray = np.arange(5e9, 15e9, 10e6)

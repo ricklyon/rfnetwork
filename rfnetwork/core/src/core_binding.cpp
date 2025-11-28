@@ -390,10 +390,11 @@ static PyObject* solver_run(PyObject* self, PyObject* args) {
         return PyLong_FromLong(1);
     }
 
-    solver_init(fields, coefficients, Nx, Ny, Nz);
+    solver_init_fields(fields, coefficients, Nx, Ny, Nz);
+    solver_init_sources(sources, Nt);
     solver_init_monitors(monitors, Nt);
 
-    solver_run(sources, Nt, n_threads);
+    solver_run(Nt, n_threads);
 
     return PyLong_FromLong(0);
 }
