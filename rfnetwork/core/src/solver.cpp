@@ -362,7 +362,7 @@ int solver_run(int Nt, int n_threads)
 {
 
     // error check number of threads
-    if (n_threads < 0 || n_threads > 8)
+    if (n_threads < 0 || n_threads > MAX_THREADS)
     {
         throw std::runtime_error("Invalid number of threads.");
     }
@@ -460,8 +460,6 @@ void solver_thread(int x_start, int x_stop, int Nt, int thread_idx)
     // msg << "Starting Thread " << thread_idx << " " << x_start << " " << x_stop << "\n";
     // std::cout << msg.str();
 
-    std::unique_lock<std::mutex> lock(mutex);
-
     for (int n = 0; n < Nt; n++)
     {
         solver_update_ex(x_start, x_stop);
@@ -490,7 +488,7 @@ void solver_thread(int x_start, int x_stop, int Nt, int thread_idx)
         {
             // lock the mutex while updating shared variable, also ensures that only one thread sends a notification
             // to the controller at a time, preventing missed notifications.
-            
+            std::unique_lock<std::mutex> lock(mutex);
             ++e_updates;
 
             cv.notify_all(); 
