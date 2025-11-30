@@ -411,16 +411,11 @@ int solver_run(int Nt, int n_threads)
     return 0;
 }
 
+// thread responsible for synchronizing field update threads
 void solver_controller(int Nt, int n_threads)
 {
-    // std::cout << "Starting Solver\n";
-    
-    
-    
     for (int n = 0; n < Nt; n++)
     {
-
-        // std::cout << "Controller waiting for E-updates\n";
         // wait until all threads have signaled they are done with e field updates
         {
             // get lock on mutex while shared variables are modified
@@ -433,12 +428,8 @@ void solver_controller(int Nt, int n_threads)
             cv_th.notify_all();
             cv.wait(lock, [n_threads] { return e_updates.load() == n_threads; });
         }
-        // std::cout << "Releasing Threads to H-updates\n";
 
-        
         // reset e update counter and signal to threads that they can move on to h updates
-        
-        // std::cout << "Controller waiting for H-updates\n";
         {
             // get lock on mutex while shared variables are modified
             std::unique_lock<std::mutex> lock(mutex);
@@ -449,9 +440,6 @@ void solver_controller(int Nt, int n_threads)
             cv_th.notify_all();
             cv.wait(lock, [n_threads] { return h_updates.load() == n_threads; });
         }
-
-        // std::cout << "Releasing Threads to E-updates\n";
-
     }
 
     // send a final notification that h field updates are complete
@@ -472,26 +460,13 @@ void solver_thread(int x_start, int x_stop, int Nt, int thread_idx)
     // msg << "Starting Thread " << thread_idx << " " << x_start << " " << x_stop << "\n";
     // std::cout << msg.str();
 
+    std::unique_lock<std::mutex> lock(mutex);
+
     for (int n = 0; n < Nt; n++)
     {
-        // msg.str("");
-        // msg.clear();
-        // msg << "n " << n << " thread " << thread_idx << "\n";
-        // std::cout << msg.str();
-
         solver_update_ex(x_start, x_stop);
         solver_update_ey(x_start, x_stop);
         solver_update_ez(x_start, x_stop);
-
-        // long e = 0;
-        // for (long k = 0; k < 10000000000; k++){
-        //     e += k;
-        // }
-
-        // msg.str("");
-        // msg.clear();
-        // msg << "e " << e << "\n";
-        // std::cout << msg.str();
 
         // update sources
         for (int s = 0; s < n_sources; s++)
@@ -512,21 +487,11 @@ void solver_thread(int x_start, int x_stop, int Nt, int thread_idx)
             (sources[s].values)[n] = *(sources[s].ez);
         }
 
-        // notify controller that e updates are done for this thread
-        
-        
-    
-
         {
             // lock the mutex while updating shared variable, also ensures that only one thread sends a notification
             // to the controller at a time, preventing missed notifications.
-            std::unique_lock<std::mutex> lock(mutex);
+            
             ++e_updates;
-           
-            // msg.str("");
-            // msg.clear();
-            // msg << "Thread " << thread_idx << " done with E-updates. Waiting. " << e_updates << "\n";
-            // std::cout << msg.str();
 
             cv.notify_all(); 
             // wait for all threads to reach this point before moving on to h-field updates.
@@ -537,66 +502,64 @@ void solver_thread(int x_start, int x_stop, int Nt, int thread_idx)
         solver_update_hy(x_start, x_stop);
         solver_update_hz(x_start, x_stop);
         
-        
-
-        
         // wait for all threads to complete before moving on to e fields
         {
             // lock the mutex
             std::unique_lock<std::mutex> lock(mutex);
             ++h_updates;
 
-            // msg.str("");
-            // msg.clear();
-            // msg << "Thread " << thread_idx << " done with H-updates. Waiting. " << h_updates << "\n";
-            // std::cout << msg.str();
-
             // notify controller that h_updates has been changed
             cv.notify_all(); 
             cv_th.wait(lock, [] { return h_updates_done; });
         }
-        // h_lock.unlock();
-        // std::cout << "h done waiting\n";
 
-           // update monitors
-    //     for (int m = 0; m < n_monitors; m++)
-    //     {
-    //         Monitor mon = monitors[m];
+        // update monitors
+        for (int m = 0; m < n_monitors; m++)
+        {
+            Monitor mon = monitors[m];
 
-    //         if ((n > 0) && ((n % (mon.n_step)) != 0))
-    //         {
-    //             continue;
-    //         }
+            if ((n > 0) && ((n % (mon.n_step)) != 0))
+            {
+                continue;
+            }
 
-    //         int m_n = n / mon.n_step;
+            int m_n = n / mon.n_step;
 
-    //         MatrixFloatType m_values (mon.values + (m_n * (mon.N1N2)), mon.N1, mon.N2);
+            MatrixFloatType m_values (mon.values + (m_n * (mon.N1N2)), mon.N1, mon.N2);
             
-    //         if (mon.axis == 0)
-    //         {
-    //             MatrixFloatType m_field (mon.field + (mon.position * (mon.NyNz)), mon.Ny, mon.Nz);
-    //             m_values = m_field;
-    //         }
+            if (mon.axis == 0)
+            {
+                // only update x slice monitor if it is within bounds of the thread
+                if ((mon.position < x_start) || (mon.position >= x_stop))
+                {
+                    continue;
+                }
+                MatrixFloatType m_field (mon.field + (mon.position * (mon.NyNz)), mon.Ny, mon.Nz);
+                m_values = m_field;
+            }
 
-    //         else if (mon.axis == 1)
-    //         {
-    //             for (int i = 0; i < mon.Nx; i++)
-    //             {
-    //                 MatrixFloatType m_field (mon.field + (i * (mon.NyNz)), mon.Ny, mon.Nz);
-    //                 m_values.row(i) = m_field.row(mon.position);
-    //             }
-    //         }
+            else if (mon.axis == 1)
+            {
+                // components on the edge of the grid that have +1 components from the grid will not be captured here,
+                // but they are not updated and will be zero. 
+                // as long as the monitor values were initialized in python to zero, this is a non-issue.
+                for (int i = x_start; i < x_stop; i++)
+                {
+                    MatrixFloatType m_field (mon.field + (i * (mon.NyNz)), mon.Ny, mon.Nz);
+                    m_values.row(i) = m_field.row(mon.position);
+                }
+            }
 
-    //         else // (m.axis == 2)
-    //         {
-    //             for (int i = 0; i < mon.Nx; i++)
-    //             {
-    //                 MatrixFloatType m_field (mon.field + (i * (mon.NyNz)), mon.Ny, mon.Nz);
-    //                 m_values.row(i) = m_field.col(mon.position);
-    //             }
-    //         }
+            else // (m.axis == 2)
+            {
+                for (int i = x_start; i < x_stop; i++)
+                {
+                    MatrixFloatType m_field (mon.field + (i * (mon.NyNz)), mon.Ny, mon.Nz);
+                    m_values.row(i) = m_field.col(mon.position);
+                }
+            }
             
-    //     }
+        }
 
     }
 
