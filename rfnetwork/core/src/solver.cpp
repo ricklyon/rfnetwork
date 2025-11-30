@@ -15,6 +15,7 @@
 #include <iostream>
 #include <thread>
 #include <condition_variable>
+#include <atomic>
 
 #include "solver.h"
 
@@ -54,17 +55,16 @@ int n_sources = 0;
 
 std::thread threads[MAX_THREADS];
 
-std::condition_variable cv_e;
-std::mutex mutex_e; 
-
-std::condition_variable cv_h;
-std::mutex mutex_h; 
-
+// conditional variables used by the thread controller and update threads for synchronization
 std::condition_variable cv;
-std::mutex mutex; 
+std::condition_variable cv_th;
 
-int e_updates = 0;
-int h_updates = 0;
+// shared variables protected by mutex
+std::mutex mutex;
+std::atomic<int> e_updates{0};
+std::atomic<int> h_updates{0};
+bool e_updates_done = false;
+bool h_updates_done = false;
 
 // get the array of the given name from a python dictionary. Validate the shape
 // matches Nx, Ny, Nz
@@ -413,47 +413,85 @@ int solver_run(int Nt, int n_threads)
 
 void solver_controller(int Nt, int n_threads)
 {
-    std::cout << "Starting Solver\n";
-    std::unique_lock<std::mutex> lock(mutex);
+    // std::cout << "Starting Solver\n";
+    
+    
     
     for (int n = 0; n < Nt; n++)
     {
-        // wait until all threads have signaled they are done with e field updates
-        cv.wait(lock, [n_threads] { return e_updates == n_threads; });
-        std::cout << "n (e-field)" << n << "\n";
-        // reset e update counter and signal to threads that they can move on to h updates
-        e_updates = 0;
-        cv_e.notify_all();
 
-        cv.wait(lock, [n_threads] { return h_updates == n_threads; });
-        std::cout << "n (h-field)" << n << "\n";
-        // reset h update counter and signal to threads that they can move on to e updates
+        // std::cout << "Controller waiting for E-updates\n";
+        // wait until all threads have signaled they are done with e field updates
+        {
+            // get lock on mutex while shared variables are modified
+            std::unique_lock<std::mutex> lock(mutex);
+            h_updates = 0;
+            h_updates_done = true;
+            e_updates_done = false;
+            // send notification to threads that H-field updates are done. On the first iteration, the threads
+            // will ignore this because they are first waiting that e-field updates are done.
+            cv_th.notify_all();
+            cv.wait(lock, [n_threads] { return e_updates.load() == n_threads; });
+        }
+        // std::cout << "Releasing Threads to H-updates\n";
+
+        
+        // reset e update counter and signal to threads that they can move on to h updates
+        
+        // std::cout << "Controller waiting for H-updates\n";
+        {
+            // get lock on mutex while shared variables are modified
+            std::unique_lock<std::mutex> lock(mutex);
+            e_updates = 0;
+            e_updates_done = true;
+            h_updates_done = false;
+            // send notification to threads that E-field updates are done.
+            cv_th.notify_all();
+            cv.wait(lock, [n_threads] { return h_updates.load() == n_threads; });
+        }
+
+        // std::cout << "Releasing Threads to E-updates\n";
+
+    }
+
+    // send a final notification that h field updates are complete
+    {
+        // get lock on mutex while shared variables are modified
+        std::unique_lock<std::mutex> lock(mutex);
         h_updates = 0;
-        cv_h.notify_all();
+        h_updates_done = true;
+        e_updates_done = false;
+        cv_th.notify_all();
     }
 
 }
 
 void solver_thread(int x_start, int x_stop, int Nt, int thread_idx)
 {
-
-    std::cout << "Starting Thread " << thread_idx << " " << x_start << " " << x_stop << "\n";
-
-    std::unique_lock<std::mutex> lock_e(mutex_e);
-    std::unique_lock<std::mutex> lock_h(mutex_h);
-
-    // std::this_thread::sleep_for(std::chrono::milliseconds(1000));
-
-    
+    // std::stringstream msg;
+    // msg << "Starting Thread " << thread_idx << " " << x_start << " " << x_stop << "\n";
+    // std::cout << msg.str();
 
     for (int n = 0; n < Nt; n++)
     {
-        std::cout << "n " << n << "\n";
+        // msg.str("");
+        // msg.clear();
+        // msg << "n " << n << " thread " << thread_idx << "\n";
+        // std::cout << msg.str();
+
         solver_update_ex(x_start, x_stop);
         solver_update_ey(x_start, x_stop);
         solver_update_ez(x_start, x_stop);
 
-        std::cout << "E-field " << thread_idx << " " << n << "\n";
+        // long e = 0;
+        // for (long k = 0; k < 10000000000; k++){
+        //     e += k;
+        // }
+
+        // msg.str("");
+        // msg.clear();
+        // msg << "e " << e << "\n";
+        // std::cout << msg.str();
 
         // update sources
         for (int s = 0; s < n_sources; s++)
@@ -475,20 +513,50 @@ void solver_thread(int x_start, int x_stop, int Nt, int thread_idx)
         }
 
         // notify controller that e updates are done for this thread
-        e_updates++;
-        cv.notify_all(); 
-        // wait for all threads to complete before moving on to h fields
-        cv_e.wait(lock_e);
+        
+        
+    
+
+        {
+            // lock the mutex while updating shared variable, also ensures that only one thread sends a notification
+            // to the controller at a time, preventing missed notifications.
+            std::unique_lock<std::mutex> lock(mutex);
+            ++e_updates;
+           
+            // msg.str("");
+            // msg.clear();
+            // msg << "Thread " << thread_idx << " done with E-updates. Waiting. " << e_updates << "\n";
+            // std::cout << msg.str();
+
+            cv.notify_all(); 
+            // wait for all threads to reach this point before moving on to h-field updates.
+            cv_th.wait(lock, [] { return e_updates_done; });
+        }
         
         solver_update_hx(x_start, x_stop);
         solver_update_hy(x_start, x_stop);
         solver_update_hz(x_start, x_stop);
+        
+        
 
-        // notify controller that h updates are done for this thread
-        h_updates++;
-        cv.notify_all(); 
+        
         // wait for all threads to complete before moving on to e fields
-        cv_h.wait(lock_h);
+        {
+            // lock the mutex
+            std::unique_lock<std::mutex> lock(mutex);
+            ++h_updates;
+
+            // msg.str("");
+            // msg.clear();
+            // msg << "Thread " << thread_idx << " done with H-updates. Waiting. " << h_updates << "\n";
+            // std::cout << msg.str();
+
+            // notify controller that h_updates has been changed
+            cv.notify_all(); 
+            cv_th.wait(lock, [] { return h_updates_done; });
+        }
+        // h_lock.unlock();
+        // std::cout << "h done waiting\n";
 
            // update monitors
     //     for (int m = 0; m < n_monitors; m++)
@@ -564,21 +632,25 @@ int solver_update_ex(int x_start, int x_stop)
         
         // update ex_y
         // ex_y[:, 1:-1, 1:-1] = (Ca_ex_y * ex_y[:, 1:-1, 1:-1]) + ex_yd
-        ex_y.block(1, 1, Ny, Nz) = Ca_ex_y.cwiseProduct(ex_y.block(1, 1, Ny, Nz));
-        
-        // ex_yd = Cb_ex_y * np.diff(hz, axis=1)[:, :, 1:-1]
-        ex_y.block(1, 1, Ny, Nz) += (
+        ex_y.block(1, 1, Ny, Nz) = Ca_ex_y.cwiseProduct(ex_y.block(1, 1, Ny, Nz)) + (
             Cb_ex_y.cwiseProduct((hz.bottomRows(Ny) - hz.topRows(Ny)).block(0, 1, Ny, Nz))
         );
+        
+        // ex_yd = Cb_ex_y * np.diff(hz, axis=1)[:, :, 1:-1]
+        // ex_y.block(1, 1, Ny, Nz) += (
+        //     Cb_ex_y.cwiseProduct((hz.bottomRows(Ny) - hz.topRows(Ny)).block(0, 1, Ny, Nz))
+        // );
 
         // update ex_z
         // ex_z[:, 1:-1, 1:-1] = (Ca_ex_z * ex_z[:, 1:-1, 1:-1]) + ex_zd
-        ex_z.block(1, 1, Ny, Nz) = Ca_ex_z.cwiseProduct(ex_z.block(1, 1, Ny, Nz));
-
-        // ex_zd = Cb_ex_z * np.diff(hy, axis=2)[:, 1:-1, :]
-        ex_z.block(1, 1, Ny, Nz) += (
+        ex_z.block(1, 1, Ny, Nz) = Ca_ex_z.cwiseProduct(ex_z.block(1, 1, Ny, Nz)) + (
             Cb_ex_z.cwiseProduct((hy.rightCols(Nz) - hy.leftCols(Nz)).block(1, 0, Ny, Nz))
         );
+
+        // ex_zd = Cb_ex_z * np.diff(hy, axis=2)[:, 1:-1, :]
+        // ex_z.block(1, 1, Ny, Nz) += (
+        //     Cb_ex_z.cwiseProduct((hy.rightCols(Nz) - hy.leftCols(Nz)).block(1, 0, Ny, Nz))
+        // );
 
         // combine split components
         ex = ex_y + ex_z;
@@ -627,21 +699,26 @@ int solver_update_ey(int x_start, int x_stop)
 
         // update ey_z
         // ey_z[1:-1, :, 1:-1] = (Ca_ey_z * ey_z[1:-1, :, 1:-1]) + ey_zd
-        ey_z.block(0, 1, Ny, Nz) = Ca_ey_z.cwiseProduct(ey_z.block(0, 1, Ny, Nz));
-
-        // ey_zd = Cb_ey_z * np.diff(hx, axis=2)[1:-1, :, :]
-        ey_z.block(0, 1, Ny, Nz) += (
+        ey_z.block(0, 1, Ny, Nz) = Ca_ey_z.cwiseProduct(ey_z.block(0, 1, Ny, Nz)) + (
             Cb_ey_z.cwiseProduct(hx.rightCols(Nz) - hx.leftCols(Nz))
         );
 
+        // ey_zd = Cb_ey_z * np.diff(hx, axis=2)[1:-1, :, :]
+        // ey_z.block(0, 1, Ny, Nz) += (
+        //     Cb_ey_z.cwiseProduct(hx.rightCols(Nz) - hx.leftCols(Nz))
+        // );
+
         // update ey_x
         // ey_x[1:-1, :, 1:-1] = (Ca_ey_x * ey_x[1:-1, :, 1:-1]) + ey_xd
-        ey_x.block(0, 1, Ny, Nz) = Ca_ey_x.cwiseProduct(ey_x.block(0, 1, Ny, Nz));
-
-        // ey_xd = Cb_ey_x * np.diff(hz, axis=0)[:, :, 1:-1]
-        ey_x.block(0, 1, Ny, Nz) += (
+        ey_x.block(0, 1, Ny, Nz) = Ca_ey_x.cwiseProduct(ey_x.block(0, 1, Ny, Nz)) + (
             Cb_ey_x.cwiseProduct((hz_1 - hz_0).block(0, 1, Ny, Nz))
         );
+
+
+        // ey_xd = Cb_ey_x * np.diff(hz, axis=0)[:, :, 1:-1]
+        // ey_x.block(0, 1, Ny, Nz) += (
+        //     Cb_ey_x.cwiseProduct((hz_1 - hz_0).block(0, 1, Ny, Nz))
+        // );
 
         // combine split components
         ey = ey_z + ey_x;
@@ -690,21 +767,25 @@ int solver_update_ez(int x_start, int x_stop)
 
         // update ez_x
         // ez_x[1:-1, 1:-1, :] = (Ca_ez_x * ez_x[1:-1, 1:-1, :]) + ez_xd
-        ez_x.block(1, 0, Ny, Nz) = Ca_ez_x.cwiseProduct(ez_x.block(1, 0, Ny, Nz));
-
-        // ez_xd = Cb_ez_x * np.diff(hy, axis=0)[:, 1:-1, :]
-        ez_x.block(1, 0, Ny, Nz) += (
+        ez_x.block(1, 0, Ny, Nz) = Ca_ez_x.cwiseProduct(ez_x.block(1, 0, Ny, Nz)) + (
             Cb_ez_x.cwiseProduct((hy_1 - hy_0).block(1, 0, Ny, Nz))
         );
 
+        // ez_xd = Cb_ez_x * np.diff(hy, axis=0)[:, 1:-1, :]
+        // ez_x.block(1, 0, Ny, Nz) += (
+        //     Cb_ez_x.cwiseProduct((hy_1 - hy_0).block(1, 0, Ny, Nz))
+        // );
+
         // update ez_y
         // ez_y[1:-1, 1:-1, :] = (Ca_ez_y * ez_y[1:-1, 1:-1, :]) + ez_yd
-        ez_y.block(1, 0, Ny, Nz) = Ca_ez_y.cwiseProduct(ez_y.block(1, 0, Ny, Nz));
-
-        // ez_yd = Cb_ez_y * np.diff(hx, axis=1)[1:-1, :, :]
-        ez_y.block(1, 0, Ny, Nz) += (
+        ez_y.block(1, 0, Ny, Nz) = Ca_ez_y.cwiseProduct(ez_y.block(1, 0, Ny, Nz)) + (
             Cb_ez_y.cwiseProduct(hx.bottomRows(Ny) - hx.topRows(Ny))
         );
+
+        // ez_yd = Cb_ez_y * np.diff(hx, axis=1)[1:-1, :, :]
+        // ez_y.block(1, 0, Ny, Nz) += (
+        //     Cb_ez_y.cwiseProduct(hx.bottomRows(Ny) - hx.topRows(Ny))
+        // );
 
         // combine split components
         ez = ez_x + ez_y;
@@ -745,21 +826,26 @@ int solver_update_hx(int x_start, int x_stop)
 
         // update hx_y
         // hx_y = Da_hx_y * hx_y + hx_yd
-        hx_y = Da_hx_y.cwiseProduct(hx_y);
-
-        // hx_yd = Db_hx_y * np.diff(ez, axis=1)
-        hx_y += (
+        hx_y = Da_hx_y.cwiseProduct(hx_y) + (
             Db_hx_y.cwiseProduct(ez.bottomRows(Ny) - ez.topRows(Ny))
         );
 
+
+        // hx_yd = Db_hx_y * np.diff(ez, axis=1)
+        // hx_y += (
+        //     Db_hx_y.cwiseProduct(ez.bottomRows(Ny) - ez.topRows(Ny))
+        // );
+
         // update hx_z
         // hx_z = Da_hx_z * hx_z + hx_zd
-        hx_z = Da_hx_z.cwiseProduct(hx_z);
-
-        // hx_zd = Db_hx_z * np.diff(ey, axis=2)
-        hx_z += (
+        hx_z = Da_hx_z.cwiseProduct(hx_z) + (
             Db_hx_z.cwiseProduct(ey.rightCols(Nz) - ey.leftCols(Nz))
         );
+
+        // hx_zd = Db_hx_z * np.diff(ey, axis=2)
+        // hx_z += (
+        //     Db_hx_z.cwiseProduct(ey.rightCols(Nz) - ey.leftCols(Nz))
+        // );
 
         // combine split components
         hx = hx_y + hx_z;
@@ -802,21 +888,25 @@ int solver_update_hy(int x_start, int x_stop)
 
         // update hy_z
         // hy_z = Da_hy_z * hy_z + hy_zd
-        hy_z = Da_hy_z.cwiseProduct(hy_z);
-
-        // hy_zd = Db_hy_z * np.diff(ex, axis=2)
-        hy_z += (
+        hy_z = Da_hy_z.cwiseProduct(hy_z) + (
             Db_hy_z.cwiseProduct(ex.rightCols(Nz) - ex.leftCols(Nz))
         );
 
+        // hy_zd = Db_hy_z * np.diff(ex, axis=2)
+        // hy_z += (
+        //     Db_hy_z.cwiseProduct(ex.rightCols(Nz) - ex.leftCols(Nz))
+        // );
+
         // update hy_x
         // hy_x = Da_hy_x * hy_x + hy_xd
-        hy_x = Da_hy_x.cwiseProduct(hy_x);
-
-        // hy_xd = Db_hy_x * np.diff(ez, axis=0)
-        hy_x += (
+        hy_x = Da_hy_x.cwiseProduct(hy_x) + (
             Db_hy_x.cwiseProduct(ez_1 - ez_0)
         );
+
+        // hy_xd = Db_hy_x * np.diff(ez, axis=0)
+        // hy_x += (
+        //     Db_hy_x.cwiseProduct(ez_1 - ez_0)
+        // );
 
         // combine split components
         hy = hy_z + hy_x;
@@ -859,21 +949,26 @@ int solver_update_hz(int x_start, int x_stop)
 
         // update hz_x
         // hz_x = Da_hz_x * hz_x + hz_xd
-        hz_x = Da_hz_x.cwiseProduct(hz_x);
-
-        // hz_xd = Db_hz_x * np.diff(ey, axis=0) 
-        hz_x += (
+        hz_x = Da_hz_x.cwiseProduct(hz_x) + (
             Db_hz_x.cwiseProduct(ey_1 - ey_0)
         );
 
+
+        // hz_xd = Db_hz_x * np.diff(ey, axis=0) 
+        // hz_x += (
+        //     Db_hz_x.cwiseProduct(ey_1 - ey_0)
+        // );
+
         // update hz_y
         // hz_y = Da_hz_y * hz_y + hz_yd
-        hz_y = Da_hz_y.cwiseProduct(hz_y);
-
-        // hz_yd = Db_hz_y * np.diff(ex, axis=1)
-        hz_y += (
+        hz_y = Da_hz_y.cwiseProduct(hz_y) + (
             Db_hz_y.cwiseProduct(ex.bottomRows(Ny) - ex.topRows(Ny))
         );
+
+        // hz_yd = Db_hz_y * np.diff(ex, axis=1)
+        // hz_y += (
+        //     Db_hz_y.cwiseProduct(ex.bottomRows(Ny) - ex.topRows(Ny))
+        // );
 
         // combine split components
         hz = hz_x + hz_y;

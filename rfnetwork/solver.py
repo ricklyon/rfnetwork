@@ -489,7 +489,7 @@ class SolverMesh():
             )
 
         probes = []
-        core_func.solver_run(coefficients, fields, sources, probes, monitors, Nx, Ny, Nz, Nt, 1)
+        core_func.solver_run(coefficients, fields, sources, probes, monitors, Nx, Ny, Nz, Nt, n_threads)
 
         # move monitor values back to the class variable
         for i, (k, m) in enumerate(self.monitors.items()):
@@ -806,7 +806,7 @@ class SolverMesh():
         
 sbox_h = 0.5
 sbox_w = 0.5
-sbox_len = 2.5
+sbox_len = 4.5
 
 sub_h = 0.02
 ms_x = (-1, 1)
@@ -867,12 +867,12 @@ t0 = (s.dt * 350)
 
 t = np.linspace(0, s.dt * pulse_n, pulse_n)
 vsrc = 1e-2 * (np.sin(2* np.pi * f0 * (t)) * np.exp(-((t - t0) / t_half)**2)).astype(np.float32)
-# plt.plot(vsrc)
+plt.plot(vsrc)
 
 ports = 1
 v_waveforms = [vsrc]
 
-s.run(1, vsrc, n_threads=4)
+s.run(1, vsrc, n_threads=8)
 
 # p = s.plot_cooeficients("hy_x", "a", "x", 0, point_size=15, cmap="brg", vmin=-1)
 # p.show()
