@@ -196,17 +196,31 @@ class SolverMesh():
         eps_x = (eps[:-1] * (dx0/2) + eps[1:] * (dx1/2)) / (dx0/2 + dx1/2)
         # average epsilon cells adjacent to y edges
         eps_y = (eps[:, :-1] * (dy0/2) + eps[:, 1:] * (dy1/2)) / (dy0/2 + dy1/2)
+        # average epsilon cells adjacent to z edges
+        eps_z = (eps[..., :-1] * (dz0/2) + eps[..., 1:] * (dz1/2)) / (dz0/2 + dz1/2)
 
         self.eps_ex = np.ones(self.fshape["ex"], dtype=dtype_) * e0
         self.eps_ey = np.ones(self.fshape["ey"], dtype=dtype_) * e0
         self.eps_ez = np.ones(self.fshape["ez"], dtype=dtype_) * e0
 
-        # ey component is on the y and z edge of the cell
+        # ex component is on the y and z edge of the cell
         self.eps_ex[:, 1:-1, 1:-1] = ((eps_y[..., :-1] * (dz0/2) + eps_y[..., 1:] * (dz1/2)) / (dz0/2 + dz1/2))
         # ey component is on the x and z edge of the cell
         self.eps_ey[1:-1, :, 1:-1] = ((eps_x[..., :-1] * (dz0/2) + eps_x[..., 1:] * (dz1/2)) / (dz0/2 + dz1/2))
         # ez component is on the x and y edge of the cell, average eps from adjacent cells on both axis
         self.eps_ez[1:-1, 1:-1] = ((eps_x[:, :-1] * (dy0/2) + eps_x[:, 1:] * (dy1/2)) / (dy0/2 + dy1/2))
+
+        # eps at h components
+        self.eps_hx = np.ones(self.fshape["hx"], dtype=dtype_) * e0
+        self.eps_hy = np.ones(self.fshape["hy"], dtype=dtype_) * e0
+        self.eps_hz = np.ones(self.fshape["hz"], dtype=dtype_) * e0
+
+        # ex component is on the x edge of the cell
+        self.eps_hx[1:-1, ] = eps_x
+        # ey component is on the y edge of the cell
+        self.eps_hy[:, 1:-1] = eps_y
+        # ez component is on the x and y edge of the cell, average eps from adjacent cells on both axis
+        self.eps_hz[..., 1:-1] = eps_z
 
         # coefficient in front of the previous time values of E
         Ca_ex = np.ones((Nx, Ny+1, Nz+1), dtype=dtype_) * Ca_0
@@ -217,51 +231,6 @@ class SolverMesh():
         Cb_ex = dt / self.eps_ex
         Cb_ey = dt / self.eps_ey
         Cb_ez = dt / self.eps_ez
-
-        # PEC pattern
-        for name, pec in self.pec_face.items():
-            
-            if pec.n_cells > 1 or pec.faces[0] != 4:
-                raise ValueError("Only rectangular PEC faces are supported.")
-            
-            x0, y0, z0 = self.point_to_idx(np.min(pec.points, axis=0))
-            x1, y1, z1 = self.point_to_idx(np.max(pec.points, axis=0))
-    
-            x0_c, y0_c, z0_c = self.point_to_idx(np.min(pec.points, axis=0), mode="cell")
-            x1_c, y1_c, z1_c = self.point_to_idx(np.max(pec.points, axis=0), mode="cell")
-    
-            # get width of pec in cell units
-            idx_d = np.array([x1, y1, z1]) - np.array([x0, y0, z0])
-    
-            if np.count_nonzero(idx_d) != 2:
-                raise ValueError("PEC face must be on cartesian grid, and must be 2D.")
-                    
-            # PEC is normal to the x-axis, Ez and Ey are parallel to surface
-            if (idx_d[0] == 0):
-                # ez edges on y axis are inclusive, interior cells on z axis are not
-                Cb_ez[x0, y0: y1, z0_c: z1_c] = 0
-                Ca_ez[x0, y0: y1, z0_c: z1_c] = -1
-                # ey cells on y axis are not inclusive, edges on z axis are
-                Cb_ey[x0, y0_c: y1_c, z0: z1 + 1] = 0
-                Ca_ey[x0, y0_c: y1_c, z0: z1 + 1] = -1
-            # PEC is normal to the y-axis, Ez and Ex are parallel to surface
-            elif (idx_d[1] == 0):
-                # ez edges on x axis are inclusive, interior cells on z axis are not
-                Cb_ez[x0: x1+1, y0, z0_c: z1_c] = 0
-                Ca_ez[x0: x1+1, y0, z0_c: z1_c] = -1
-                # ex cells on x axis are not inclusive, edges on y axis are
-                Cb_ex[x0_c: x1_c, y0, z0: z1 + 1] = 0
-                Ca_ex[x0_c: x1_c, y0, z0: z1 + 1] = -1
-            # PEC is normal to the z-axis, Ex and Ey are parallel to surface
-            elif (idx_d[2] == 0):
-                # ey edges on x axis are inclusive, interior cells on y axis are not
-                Cb_ey[x0: x1+1, y0_c: y1_c, z0] = 0
-                Ca_ey[x0: x1+1, y0_c: y1_c, z0] = -1
-                # ex cells on x axis are not inclusive, edges on y axis are
-                Cb_ex[x0_c: x1_c, y0: y1 + 1, z0] = 0
-                Ca_ex[x0_c: x1_c, y0: y1 + 1, z0] = -1
-            else:
-                raise ValueError(f"PEC {name} is not 2D")
     
         self.Ca = dict(
             ex_y = Ca_ex.copy(),
@@ -299,6 +268,68 @@ class SolverMesh():
             hz_y = np.ones((Nx, Ny, Nz+1), dtype=dtype_) * Db_0,
         )
 
+    def init_pec(self):
+        # initialize the PEC faces
+        # this should be called after setting the PML layers
+
+        # PEC pattern
+        for name, pec in self.pec_face.items():
+            
+            if pec.n_cells > 1 or pec.faces[0] != 4:
+                raise ValueError("Only rectangular PEC faces are supported.")
+            
+            x0, y0, z0 = self.point_to_idx(np.min(pec.points, axis=0))
+            x1, y1, z1 = self.point_to_idx(np.max(pec.points, axis=0))
+    
+            x0_c, y0_c, z0_c = self.point_to_idx(np.min(pec.points, axis=0), mode="cell")
+            x1_c, y1_c, z1_c = self.point_to_idx(np.max(pec.points, axis=0), mode="cell")
+    
+            # get width of pec in cell units
+            idx_d = np.array([x1, y1, z1]) - np.array([x0, y0, z0])
+    
+            if np.count_nonzero(idx_d) != 2:
+                raise ValueError("PEC face must be on cartesian grid, and must be 2D.")
+                    
+            # PEC is normal to the x-axis, Ez and Ey are parallel to surface
+            if (idx_d[0] == 0):
+                # ez edges on y axis are inclusive, interior cells on z axis are not
+                self.Cb["ez_x"][x0, y0: y1, z0_c: z1_c] = 0
+                self.Ca["ez_x"][x0, y0: y1, z0_c: z1_c] = -1
+                self.Cb["ez_y"][x0, y0: y1, z0_c: z1_c] = 0
+                self.Ca["ez_y"][x0, y0: y1, z0_c: z1_c] = -1
+                # ey cells on y axis are not inclusive, edges on z axis are
+                self.Cb["ey_z"][x0, y0_c: y1_c, z0: z1 + 1] = 0
+                self.Ca["ey_z"][x0, y0_c: y1_c, z0: z1 + 1] = -1
+                self.Cb["ey_x"][x0, y0_c: y1_c, z0: z1 + 1] = 0
+                self.Ca["ey_x"][x0, y0_c: y1_c, z0: z1 + 1] = -1
+            # PEC is normal to the y-axis, Ez and Ex are parallel to surface
+            elif (idx_d[1] == 0):
+                # ez edges on x axis are inclusive, interior cells on z axis are not
+                self.Cb["ez_x"][x0: x1+1, y0, z0_c: z1_c] = 0
+                self.Ca["ez_x"][x0: x1+1, y0, z0_c: z1_c] = -1
+                self.Cb["ez_y"][x0: x1+1, y0, z0_c: z1_c] = 0
+                self.Ca["ez_y"][x0: x1+1, y0, z0_c: z1_c] = -1
+                # ex cells on x axis are not inclusive, edges on y axis are
+                self.Cb["ex_y"][x0_c: x1_c, y0, z0: z1 + 1] = 0
+                self.Ca["ex_y"][x0_c: x1_c, y0, z0: z1 + 1] = -1
+                self.Cb["ex_z"][x0_c: x1_c, y0, z0: z1 + 1] = 0
+                self.Ca["ex_z"][x0_c: x1_c, y0, z0: z1 + 1] = -1
+            # PEC is normal to the z-axis, Ex and Ey are parallel to surface
+            elif (idx_d[2] == 0):
+                # ey edges on x axis are inclusive, interior cells on y axis are not
+                self.Cb["ey_z"][x0: x1+1, y0_c: y1_c, z0] = 0
+                self.Ca["ey_z"][x0: x1+1, y0_c: y1_c, z0] = -1
+                self.Cb["ey_x"][x0: x1+1, y0_c: y1_c, z0] = 0
+                self.Ca["ey_x"][x0: x1+1, y0_c: y1_c, z0] = -1
+                # ex cells on x axis are not inclusive, edges on y axis are
+                self.Cb["ex_y"][x0_c: x1_c, y0: y1 + 1, z0] = 0
+                self.Ca["ex_y"][x0_c: x1_c, y0: y1 + 1, z0] = -1
+                self.Cb["ex_z"][x0_c: x1_c, y0: y1 + 1, z0] = 0
+                self.Ca["ex_z"][x0_c: x1_c, y0: y1 + 1, z0] = -1
+
+            else:
+                raise ValueError(f"PEC {name} is not 2D")
+            
     def init_ports(self, r0=50):
         """
         
@@ -356,7 +387,72 @@ class SolverMesh():
             else:
                 raise ValueError(f"Port face is not 2D")
 
+    def add_xPML(self, d_pml=10, side="upper"):
+        """
+        Add PML layer to the top face of the solution box.
+        """
+        m_pml = 3 # sigma profile order
+
+        dt = self.dt
+        dx = conv.m_in(self.dx[-1]) if side == "upper" else conv.m_in(self.dx[0])
+        eta0 = np.sqrt(u0 / e0)
+        # now define the values of sigma and sigma_m from the profiles
+        sigma_max = 0.8 * (m_pml + 1) / (eta0 * dx)
     
+        # define sigma profile in the PML region on the right side of the grid. 
+        i_pml = np.arange(0, d_pml)[..., None, None]
+    
+        # sigma on the cell edges. Components on the edge of the PML have a sigma of 0.
+        sigma_e_n = sigma_max * ((i_pml) / (d_pml))**m_pml
+        # sigma in the middle of the cells. First Hz component in the PML is 0.5 cells into the PML
+        sigma_e_np5 = sigma_max * ((i_pml + 0.5) / (d_pml))**m_pml
+
+        # magnetic conductivity
+        # plt.figure()
+        # plt.plot(np.arange(0, d_pml, 1), sigma_e_n.squeeze())
+        # plt.plot(np.arange(0.5, d_pml + .5, 1), sigma_e_np5.squeeze())
+
+        e_idx = slice(d_pml, 0, -1) if side == "lower" else slice(-d_pml-1, -1)
+        h_idx = slice(d_pml-1, None, -1) if side == "lower" else slice(-d_pml, None)
+
+        # ez
+        # first ez component is at the edge of the PML where sigma = 0, last component is at the solve boundary 
+        # and not updated.
+        # sigma / eps must be constant across y and z, page 291 in taflove
+        # scale sigma by eps so that sigma / eps is constant
+        eps_ez = self.eps_ez[e_idx]
+        sigma_ez = np.broadcast_to(sigma_e_n, eps_ez.shape).copy()
+        sigma_ez *= (eps_ez / e0)
+        
+        self.Ca["ez_x"][e_idx] = (2 * eps_ez - (sigma_ez * dt)) / (2 * eps_ez + (sigma_ez * dt))
+        self.Cb["ez_x"][e_idx] = (2 * dt) / ((2 * eps_ez + (sigma_ez * dt)))
+
+        # ey
+        eps_ey = self.eps_ey[e_idx]
+        sigma_ey = np.broadcast_to(sigma_e_n, eps_ey.shape).copy()
+        sigma_ey *= (eps_ey / e0)
+
+        self.Ca["ey_x"][e_idx] = (2 * eps_ey - (sigma_ey * dt)) / (2 * eps_ey + (sigma_ey * dt))
+        self.Cb["ey_x"][e_idx] = (2 * dt) / ((2 * eps_ey + (sigma_ey * dt)))
+
+        # hx/hy components are in the middle of the PML cells, use half cell indices
+        eps_hy = self.eps_hy[h_idx]
+        simga_e_hy = np.broadcast_to(sigma_e_np5, (d_pml,) + self.Da["hy_x"].shape[1:]).copy()
+        simga_e_hy *= (eps_hy / e0)
+        sigma_m_hy = simga_e_hy * u0 / eps_hy
+
+        self.Da["hy_x"][h_idx] = (2 * u0 - (sigma_m_hy * dt)) / (2 * u0 + (sigma_m_hy * dt))
+        self.Db["hy_x"][h_idx] = (2 * dt) / ((2 * u0 + (sigma_m_hy * dt))) 
+
+        eps_hz = self.eps_hz[h_idx]
+        sigma_e_hz = np.broadcast_to(sigma_e_np5, (d_pml,) + self.Da["hz_x"].shape[1:]).copy()
+        sigma_e_hz *= (eps_hz / e0)
+        sigma_m_hz = sigma_e_hz * u0 / eps_hz
+
+        self.Da["hz_x"][h_idx] = (2 * u0 - (sigma_m_hz * dt)) / (2 * u0 + (sigma_m_hz * dt))
+        self.Db["hz_x"][h_idx] = (2 * dt) / ((2 * u0 + (sigma_m_hz * dt)))
+
+
     def run(self, ports, v_waveforms, n_threads=4):
 
         if isinstance(ports, int):
@@ -806,10 +902,10 @@ class SolverMesh():
         
 sbox_h = 0.5
 sbox_w = 0.5
-sbox_len = 4.5
+sbox_len = 2.5
 
 sub_h = 0.02
-ms_x = (-1, 1)
+ms_x = (-1, 1.25)
 ms_y = 0
 ms_w = 0.04
 
@@ -829,23 +925,25 @@ port1_face = pv.Rectangle([
     (ms_x[0], ms_y + ms_w/2, 0),
 ])
 
-port2_face = pv.Rectangle([
-    (ms_x[1], ms_y - ms_w/2, sub_h),
-    (ms_x[1], ms_y + ms_w/2, sub_h),
-    (ms_x[1], ms_y + ms_w/2, 0),
-])
+# port2_face = pv.Rectangle([
+#     (ms_x[1], ms_y - ms_w/2, sub_h),
+#     (ms_x[1], ms_y + ms_w/2, sub_h),
+#     (ms_x[1], ms_y + ms_w/2, 0),
+# ])
 
-s = SolverMesh(sbox, nports=2)
+s = SolverMesh(sbox, nports=1)
 s.add_substrate("sub", substrate, er=3.66, opacity=0.0)
 s.add_pec_face("ms1", ms_trace, color="gold")
 s.add_lumped_port(1, port1_face)
-s.add_lumped_port(2, port2_face)
+# s.add_lumped_port(2, port2_face)
 
 s.mesh(d0=0.020)
 s.init_ports()
-# s.add_field_monitor("mon1", "ez", "y", s.Ny // 2, 10)
-# s.add_field_monitor("mon2", "ez", "z", 2, 10)
-# s.add_field_monitor("mon3", "ez", "x", s.Nx // 2, 10)
+s.add_xPML(side="upper")
+s.init_pec()
+s.add_field_monitor("mon1", "ez", "y", s.Ny // 2, 10)
+s.add_field_monitor("mon2", "ez", "z", 2, 10)
+s.add_field_monitor("mon3", "ez", "x", s.Nx // 2, 10)
 
 # s.render().show()
 # print(s.Nx, s.Ny, s.Nz)
@@ -872,13 +970,13 @@ plt.plot(vsrc)
 ports = 1
 v_waveforms = [vsrc]
 
-s.run(1, vsrc, n_threads=8)
+s.run(1, vsrc, n_threads=4)
 
-# p = s.plot_cooeficients("hy_x", "a", "x", 0, point_size=15, cmap="brg", vmin=-1)
-# p.show()
+p = s.plot_cooeficients("ex_y", "a", "x", 0, point_size=15, cmap="brg", vmin=-1)
+p.show()
 
-# p = s.plot_monitor(["mon2", "mon3"], el=0, zoom=1.1, az=0, vmin=-20, vmax=20, view="xy", opacity=[0.8, 1], linear=False, cmap="jet")
-# p.show(title="EM Solver")
+p = s.plot_monitor(["mon2", "mon1"], el=0, zoom=1.1, az=0, vmin=-20, vmax=20, view="xy", opacity=[0.8, 1], linear=False, cmap="jet")
+p.show(title="EM Solver")
 
 
 frequency: np.ndarray = np.arange(5e9, 15e9, 10e6)
