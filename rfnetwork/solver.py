@@ -65,6 +65,18 @@ class SolverMesh():
             idx += [np.argmax(diff >= -1e-3) if diff[-1] > 0 else len(g)]
 
         return tuple(idx)
+
+    def field_position_to_idx(self, position, field: str):
+        floc = self.floc[field]
+
+        idx = []
+        for i, g in enumerate(floc):
+            diff = (g - position[i])
+            # if no cell is above the point, return the length of the axis, otherwise return the first cell that is 
+            # larger than the point.
+            idx += [np.argmax(diff >= -1e-3) if diff[-1] > 0 else len(g)]
+        
+        return tuple(idx)
     
     def init_grid(self, d0=0.02, n_feature_min=2):
         """
@@ -584,11 +596,12 @@ class SolverMesh():
         for k, m in self.monitors.items():
 
             n_m = int(Nt / m["n_step"]) + 1
+
             monitors.append(
                 dict(
                     values=np.zeros(((n_m,) + m["shape"]), dtype=dtype_, order="C"), 
                     axis=int(m["axis"]),
-                    position=int(m["position"]),
+                    position=int(m["index"]),
                     field=list(self.fshape.keys()).index(m["field"]),
                     n_step=int(m["n_step"])
                 )
@@ -598,7 +611,8 @@ class SolverMesh():
         probes = []
         for k, p in self.probes.items():
             nx, ny, nz = self.fshape[p["field"]]
-            xi, yi, zi = p["position"]
+            xi, yi, zi = p["index"]
+
             probes.append(
                 dict(
                     values=np.zeros(Nt, dtype=dtype_, order="C"), 
@@ -630,7 +644,7 @@ class SolverMesh():
             self.probes[k]["values"] = probes[i]["values"]
 
 
-    def add_field_monitor(self, name: str, field: str, axis: str, position: int, n_step: int):
+    def add_field_monitor(self, name: str, field: str, axis: str, position: float, n_step: int):
         """
         Add field monitor along a slice through the 3D volume
 
@@ -646,7 +660,7 @@ class SolverMesh():
         """
 
         if field not in self.fshape.keys():
-            raise ValueError(f"Unsuported field: {field}. Expecting one of: {tuple(self.fshape.keys())}")
+            raise ValueError(f"Unsupported field: {field}. Expecting one of: {tuple(self.fshape.keys())}")
         if axis not in ('x', 'y', 'z'):
             raise ValueError(f"Unsupported axis: {axis}")
 
@@ -655,15 +669,19 @@ class SolverMesh():
         shape = list(self.fshape[field])
         axis_len = shape.pop(axis_i)
 
-        if (position < 0) or (position > axis_len - 1):
-            raise ValueError(f"Position out of bounds, expecting value from 0 - {axis_len - 1}")
-        
-        
+        # convert position to field index
+        full_pos = [0] * 3
+        full_pos[axis_i] = position
+        idx = self.field_position_to_idx(full_pos, field)
+
+        if idx[axis_i] >= (axis_len - 1):
+            raise ValueError("Field position out of bounds")
+
         self.monitors[name] = dict(
-            field=field, axis=axis_i, position=position, n_step=n_step, shape=tuple(shape)
+            field=field, axis=axis_i, position=position, index=int(idx[axis_i]), n_step=n_step, shape=tuple(shape)
         )
 
-    def add_probe(self, name: str, field: str, position: int):
+    def add_probe(self, name: str, field: str, position: float):
         """
         Add field monitor along a slice through the 3D volume
 
@@ -678,14 +696,13 @@ class SolverMesh():
         if field not in self.fshape.keys():
             raise ValueError(f"Unsupported field: {field}. Expecting one of: {tuple(self.fshape.keys())}")
 
-        # get the spatial shape of the field slice
-        shape = list(self.fshape[field])
-        
-        if any([idx < 0 or (idx > (s - 1)) for idx, s in zip(position, shape)]):
-            raise ValueError(f"Probe position out of bounds.")
+        idx = self.field_position_to_idx(position, field)
+
+        if any([p >= (fs - 1) for p, fs in zip(idx, self.fshape[field])]):
+            raise ValueError("Field position out of bounds")
         
         self.probes[name] = dict(
-            field=field, position=position,
+            field=field, position=position, index=idx
         )
         
     def render(self, show_probes=False, point_size=15) -> pv.Plotter:
@@ -698,7 +715,6 @@ class SolverMesh():
         
         grid = pv.RectilinearGrid(gx, gy, gz)
         
-
         plotter = pv.Plotter()
         plotter.enable_parallel_projection()
         # add grid
@@ -720,7 +736,7 @@ class SolverMesh():
             points = []
             for k, probe in self.probes.items():
                 floc = self.floc[probe["field"]]
-                pos = probe["position"]
+                pos = probe["index"]
                 # get physical position of probe from the grid index
                 points.append([f[p] for f, p in zip(floc, pos)])
 
@@ -741,18 +757,22 @@ class SolverMesh():
         return plotter
 
     def plot_cooeficients(
-        self, component, value, axis, position, vmin=None, vmax=None, opacity=1, cmap="jet", point_size=10, normalization=None
+        self, field, value, axis, position, vmin=None, vmax=None, opacity=1, cmap="jet", point_size=10, normalization=None
     ):
             
         plotter = self.render()
 
-        idx = [slice(None)] * 3
+        full_pos = [0] * 3
         axis_i = dict(x=0, y=1, z=2)[axis]
+        full_pos[axis_i] = position
+
+        idx = [slice(None)] * 3
+        idx[axis_i] = self.field_position_to_idx(full_pos, field)[axis_i]
 
         if value == "a":
-            values = self.Ca[component] if component[0] == "e" else self.Da[component]
+            values = self.Ca[field] if field[0] == "e" else self.Da[field]
         else:
-            values = self.Cb[component] if component[0] == "e" else self.Db[component]
+            values = self.Cb[field] if field[0] == "e" else self.Db[field]
 
         if normalization:
             values = values / normalization
@@ -761,11 +781,6 @@ class SolverMesh():
             vmax = np.max(values)
         if vmin is None:
             vmin = np.min(values)
-
-        # if axis length of values is larger than the number of cells, it is a edge component, get edge index
-        idx[axis_i] = position
-
-        field = component[:2]
         
         floc = self.floc[field]
 
@@ -789,7 +804,7 @@ class SolverMesh():
         )
 
         plotter.add_scalar_bar(
-            title=f"{component}, {value}\n", vertical=False, label_font_size=11, title_font_size=14
+            title=f"{field}, {value}\n", vertical=False, label_font_size=11, title_font_size=14
         )
         
         return plotter
@@ -857,13 +872,12 @@ class SolverMesh():
             monitor = self.monitors[m_name]
             
             field = monitor["values"]
-            position = monitor["position"]
             axis = monitor["axis"]
             
             n_step = monitor["n_step"]
 
             slc = [slice(None)] * 3
-            slc[axis] = position
+            slc[axis] = monitor["index"]
 
             field = np.where(np.abs(field) < 1e-12, 1e-12, field)
             if linear:
@@ -1015,16 +1029,16 @@ s.add_pec_face("ms1", ms_trace, color="gold")
 s.add_lumped_port(1, port1_face)
 # s.add_lumped_port(2, port2_face)
 
-s.mesh(d0=0.02, n_feature_min=2)
+s.mesh(d0=0.01, n_feature_min=2)
 s.init_ports()
 s.add_xPML(side="upper")
 s.init_pec()
-s.add_field_monitor("mon1", "hz", "z", 2, 10)
-s.add_field_monitor("mon2", "ey", "z", 2, 10)
-s.add_field_monitor("mon3", "ez", "x", s.Nx // 2, 10)
+s.add_field_monitor("mon1", "hz", "z", sub_h, 10)
+s.add_field_monitor("mon2", "ey", "z", sub_h, 10)
+s.add_field_monitor("mon3", "ez", "x", 0, 10)
 
 # 43, 4 for course mesh
-s.add_probe("hz1", "hz", (s.Nx//2, 11, 2))
+s.add_probe("hz1", "hz", (0, (ms_w / 2) + 0.01, sub_h))
 
 # s.add_field_monitor("mon2", "ez", "z", 2, 10)
 # s.add_field_monitor("mon3", "ez", "x", s.Nx // 2, 10)
