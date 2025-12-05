@@ -393,6 +393,7 @@ static PyObject* solver_run(PyObject* self, PyObject* args) {
     solver_init_fields(fields, coefficients, Nx, Ny, Nz);
     solver_init_sources(sources, Nt);
     solver_init_monitors(monitors, Nt);
+    solver_init_probes(probes, Nt);
 
     solver_run(Nt, n_threads);
 

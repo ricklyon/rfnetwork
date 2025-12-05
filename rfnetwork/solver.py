@@ -35,6 +35,7 @@ class SolverMesh():
         self.port_face = [None] * nports
         self.bounding_box = bounding_box
         self.monitors=dict()
+        self.probes=dict()
         self.slider_value = 0
 
         self.sbox_max = np.max(bounding_box.points, axis=0)
@@ -65,7 +66,7 @@ class SolverMesh():
 
         return tuple(idx)
     
-    def init_grid(self, d0=0.02):
+    def init_grid(self, d0=0.02, n_feature_min=2):
         """
         Initialize the spatial grid.
         """
@@ -94,8 +95,8 @@ class SolverMesh():
                 nx = d / d0
             
                 # use a minimum of two cells between adjacent features
-                if nx < 2:
-                    cell_d[i] += [d / 2] * 2
+                if nx < n_feature_min:
+                    cell_d[i] += [d / n_feature_min] * n_feature_min
             
                 else:
                     # make the cell a bit smaller than the default to account for the remainder of nx
@@ -164,20 +165,20 @@ class SolverMesh():
         
 
 
-    def mesh(self, d0):
+    def mesh(self, d0, n_feature_min=2):
         """
         Build FDTD coefficients for all grid cells.
         """
-        s.init_grid(d0)
+        s.init_grid(d0, n_feature_min)
         dtype_ = np.float32
         
-        dx, dy, dz = self.d_cells
+        dx, dy, dz = [conv.m_in(d) for d in self.d_cells]
         Nx, Ny, Nz = self.n_cells
         
         # compute maximum time step that ensures convergence, use freespace propagation speed as worst case
         length_min = np.array([np.min(dx), np.min(dy), np.min(dz)])
         dmin = 1 / np.sqrt(((1 / length_min)**2).sum())
-        dt = 0.95 * (dmin / const.c0_in)
+        dt = 0.95 * (dmin / const.c0)
         self.dt = dt
         
         Ca_0 = 1  # (2 * e0 - (sig_0 * dt)) / (2 * e0 + (sig_0 * dt))
@@ -272,6 +273,8 @@ class SolverMesh():
         # initialize the PEC faces
         # this should be called after setting the PML layers
 
+        dx, dy, dz = [conv.m_in(d) for d in self.d_cells]
+
         # PEC pattern
         for name, pec in self.pec_face.items():
             
@@ -326,6 +329,14 @@ class SolverMesh():
                 self.Ca["ex_y"][x0_c: x1_c, y0: y1 + 1, z0] = -1
                 self.Cb["ex_z"][x0_c: x1_c, y0: y1 + 1, z0] = 0
                 self.Ca["ex_z"][x0_c: x1_c, y0: y1 + 1, z0] = -1
+
+                # edge singularity
+                # a = 1e-9
+                # self.Db["hz_y"][x0_c: x1_c, y0-1, z0] *= 1e3
+                # self.Db["hz_y"][x0_c: x1_c, y1, z0] *= 1e3
+
+                # self.Cb["ey_x"][x0_c: x1_c, y0-1, z0] *= 2 / (np.log(dy[y0-1] / a))
+                # self.Cb["ey_x"][x0_c: x1_c, y1, z0] *= 2 / (np.log(dy[y1] / a))
 
             else:
                 raise ValueError(f"PEC {name} is not 2D")
@@ -570,7 +581,6 @@ class SolverMesh():
 
         # initialize field monitors
         monitors = []
-
         for k, m in self.monitors.items():
 
             n_m = int(Nt / m["n_step"]) + 1
@@ -584,7 +594,19 @@ class SolverMesh():
                 )
             )
 
+        # initialize probes
         probes = []
+        for k, p in self.probes.items():
+            nx, ny, nz = self.fshape[p["field"]]
+            xi, yi, zi = p["position"]
+            probes.append(
+                dict(
+                    values=np.zeros(Nt, dtype=dtype_, order="C"), 
+                    field=list(self.fshape.keys()).index(p["field"]),
+                    offset=int((xi * ny * nz) + (yi * nz) + zi)
+                )
+            )
+
         core_func.solver_run(coefficients, fields, sources, probes, monitors, Nx, Ny, Nz, Nt, n_threads)
 
         # move monitor values back to the class variable
@@ -593,7 +615,6 @@ class SolverMesh():
 
         # get the voltages at each source components
         src_v = [s["values"] for s in sources]
-
         # move the measured source voltages back to the class variable for the associated port
         cur_source = 0
         for p in (ports):
@@ -603,6 +624,10 @@ class SolverMesh():
 
             self.ports[p-1]["values"] = np.array(src_v[cur_source: cur_source + src_len]).reshape(src_shape + (Nt,))
             cur_source += src_len
+
+        # move probe values to the class variable
+        for i, (k, p) in enumerate(self.probes.items()):
+            self.probes[k]["values"] = probes[i]["values"]
 
 
     def add_field_monitor(self, name: str, field: str, axis: str, position: int, n_step: int):
@@ -637,8 +662,33 @@ class SolverMesh():
         self.monitors[name] = dict(
             field=field, axis=axis_i, position=position, n_step=n_step, shape=tuple(shape)
         )
+
+    def add_probe(self, name: str, field: str, position: int):
+        """
+        Add field monitor along a slice through the 3D volume
+
+        Parameters
+        ----------
+        name : str
+        field : {'ex', 'ey', 'ez', 'hx', 'hy', 'hz'}
+        position : tuple(int, int, int)
+            index of field component in the grid
+        """
+
+        if field not in self.fshape.keys():
+            raise ValueError(f"Unsupported field: {field}. Expecting one of: {tuple(self.fshape.keys())}")
+
+        # get the spatial shape of the field slice
+        shape = list(self.fshape[field])
         
-    def render(self) -> pv.Plotter:
+        if any([idx < 0 or (idx > (s - 1)) for idx, s in zip(position, shape)]):
+            raise ValueError(f"Probe position out of bounds.")
+        
+        self.probes[name] = dict(
+            field=field, position=position,
+        )
+        
+    def render(self, show_probes=False, point_size=15) -> pv.Plotter:
         """
         Plot the model geometry
         """
@@ -666,19 +716,38 @@ class SolverMesh():
         for port_face in self.port_face:
             plotter.add_mesh(port_face, color="pink", opacity=0.5)
 
+        if show_probes:
+            points = []
+            for k, probe in self.probes.items():
+                floc = self.floc[probe["field"]]
+                pos = probe["position"]
+                # get physical position of probe from the grid index
+                points.append([f[p] for f, p in zip(floc, pos)])
+
+            plotter.add_point_labels(
+                points,
+                list(self.probes.keys()),
+                point_color="red" if probe["field"][0] == "h" else "blue",
+                point_size=point_size,
+                always_visible=True,
+                render_points_as_spheres=True,
+                fill_shape=False,
+                italic=True,
+                margin=1
+            )
+
         plotter.show_grid(font_size=9)
 
         return plotter
 
-    def plot_cooeficients(self, component, value, axis, pos, vmin=None, vmax=None, opacity=1, cmap="jet", point_size=10, normalization=None):
+    def plot_cooeficients(
+        self, component, value, axis, position, vmin=None, vmax=None, opacity=1, cmap="jet", point_size=10, normalization=None
+    ):
             
         plotter = self.render()
 
         idx = [slice(None)] * 3
         axis_i = dict(x=0, y=1, z=2)[axis]
-
-        pos_full = [0] * 3
-        pos_full[axis_i] = pos
 
         if value == "a":
             values = self.Ca[component] if component[0] == "e" else self.Da[component]
@@ -694,8 +763,7 @@ class SolverMesh():
             vmin = np.min(values)
 
         # if axis length of values is larger than the number of cells, it is a edge component, get edge index
-        mode = "edge" if values.shape[axis_i] > self.n_cells[axis_i] else "cell"
-        idx[axis_i] = self.point_to_idx(pos_full, mode=mode)[axis_i]
+        idx[axis_i] = position
 
         field = component[:2]
         
@@ -802,11 +870,11 @@ class SolverMesh():
                 field_v = field
             else:
                 field_v = 20 * np.log10(np.abs(field))
-                
-            if vmin is None:
-                vmin = np.nanmin(field_v)
+
             if vmax is None:
                 vmax = np.nanmax(field_v)
+            if vmin is None:
+                vmin = 0 if linear else vmax - 50
 
             field_v = np.clip(field_v, vmin, vmax).reshape(len(field), -1, order="F")
         
@@ -821,7 +889,17 @@ class SolverMesh():
             fmesh.point_data['values'] = field_v[0]
             
             actor = plotter.add_mesh(
-                fmesh, cmap=cmap, scalars="values", clim=[vmin, vmax], show_scalar_bar=False, opacity=opacity[i]
+                fmesh, 
+                cmap=cmap, 
+                scalars="values", 
+                clim=[vmin, vmax], 
+                show_scalar_bar=False, 
+                opacity=opacity[i],
+                interpolate_before_map=False,
+                render_points_as_spheres=True,
+                style="points",
+                lighting=False,
+                point_size=10
             )
 
             field_meshes += [(fmesh, field_v)]
@@ -902,10 +980,10 @@ class SolverMesh():
         
 sbox_h = 0.5
 sbox_w = 0.5
-sbox_len = 2.5
+sbox_len = 1
 
 sub_h = 0.02
-ms_x = (-1, 1.25)
+ms_x = (-0.4, 0.5)
 ms_y = 0
 ms_w = 0.04
 
@@ -937,15 +1015,21 @@ s.add_pec_face("ms1", ms_trace, color="gold")
 s.add_lumped_port(1, port1_face)
 # s.add_lumped_port(2, port2_face)
 
-s.mesh(d0=0.020)
+s.mesh(d0=0.02, n_feature_min=2)
 s.init_ports()
 s.add_xPML(side="upper")
 s.init_pec()
-s.add_field_monitor("mon1", "ez", "y", s.Ny // 2, 10)
-s.add_field_monitor("mon2", "ez", "z", 2, 10)
+s.add_field_monitor("mon1", "hz", "z", 2, 10)
+s.add_field_monitor("mon2", "ey", "z", 2, 10)
 s.add_field_monitor("mon3", "ez", "x", s.Nx // 2, 10)
 
-# s.render().show()
+# 43, 4 for course mesh
+s.add_probe("hz1", "hz", (s.Nx//2, 11, 2))
+
+# s.add_field_monitor("mon2", "ez", "z", 2, 10)
+# s.add_field_monitor("mon3", "ez", "x", s.Nx // 2, 10)
+
+s.render(show_probes=True).show()
 # print(s.Nx, s.Ny, s.Nz)
 
 
@@ -957,7 +1041,7 @@ s.add_field_monitor("mon3", "ez", "x", s.Nx // 2, 10)
 self = s
 
 f0 = 10e9
-pulse_n = 1800
+pulse_n = 1200
 # width of half pulse in time
 t_half = (s.dt * 100)
 # center of the pulse in time
@@ -965,34 +1049,47 @@ t0 = (s.dt * 350)
 
 t = np.linspace(0, s.dt * pulse_n, pulse_n)
 vsrc = 1e-2 * (np.sin(2* np.pi * f0 * (t)) * np.exp(-((t - t0) / t_half)**2)).astype(np.float32)
-plt.plot(vsrc)
+# plt.plot(vsrc)
 
 ports = 1
 v_waveforms = [vsrc]
 
+stime = time.time()
 s.run(1, vsrc, n_threads=4)
+print(f"Solve Time: {time.time()-stime:.3f}")
+print("Grid Cells (k): ", s.Nx * s.Ny * s.Nz / 1e3)
 
-p = s.plot_cooeficients("ex_y", "a", "x", 0, point_size=15, cmap="brg", vmin=-1)
-p.show()
+Db_0 = s.dt / u0
+Cb_0 = s.dt / e0 
+# p = s.plot_cooeficients("ey_x", "b", "z", sub_h, point_size=15, cmap="brg", normalization=Cb_0)
+# p.show()
 
-p = s.plot_monitor(["mon2", "mon1"], el=0, zoom=1.1, az=0, vmin=-20, vmax=20, view="xy", opacity=[0.8, 1], linear=False, cmap="jet")
+p = s.plot_monitor(["mon1"], el=0, zoom=1.1, az=0, view="xy", opacity=[0.8, 1], linear=False, cmap="jet")
 p.show(title="EM Solver")
-
 
 frequency: np.ndarray = np.arange(5e9, 15e9, 10e6)
 
 sdata = s.get_sparameters(frequency)
 S11 = sdata[:, 0]
 
-fig, ax = plt.subplots()
-ax.plot(frequency/1e9, conv.db20_lin(S11))
+# fig, ax = plt.subplots()
+# ax.plot(frequency/1e9, conv.db20_lin(S11))
 
 fig, ax = plt.subplots()
 rfn.plots.draw_smithchart(ax)
 plt.plot(S11.real, S11.imag)
-plt.show()
 
+fig, ax = plt.subplots()
+ax.plot(s.probes["hz1"]["values"])
+# ax.plot(np.load("fine_grid_hz1.npy"))
+ax.set_ylim([-0.06, 0.06])
+
+# np.save("fine_grid_hz1", s.probes["hz1"]["values"])
+
+
+# fig, ax = plt.subplots()
+# ax.plot(frequency/1e9, rfn.conv.z_gamma(S11))
+# plt.show()
 
 # 
 # Nx, Ny, Nz = 126, 26, 26
-

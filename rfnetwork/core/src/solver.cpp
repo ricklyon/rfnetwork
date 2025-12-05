@@ -27,7 +27,9 @@ typedef Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::R
 
 
 #define DATA_NDIM 3
+
 #define MAX_MONITORS 20
+#define MAX_PROBES 100
 #define MAX_SOURCES 50
 #define MAX_THREADS 20
 
@@ -52,6 +54,9 @@ int n_monitors = 0;
 
 Source sources[MAX_SOURCES];
 int n_sources = 0;
+
+Probe probes[MAX_PROBES];
+int n_probes = 0;
 
 std::thread threads[MAX_THREADS];
 
@@ -358,6 +363,40 @@ int solver_init_sources(PyObject * py_sources, int Nt)
     return 0;
 }
 
+int solver_init_probes(PyObject * py_probes, int Nt)
+{
+    n_probes = (int) PyList_Size(py_probes);
+
+    float * field_p[6] = {Ex.ex, Ey.ey, Ez.ez, Hx.hx, Hy.hy, Hz.hz};
+
+    if (n_probes > MAX_PROBES)
+    {
+        throw std::runtime_error("Exceeded maximum number of probes.");
+    }
+
+    for (int p = 0; p < n_probes; p++) 
+    {
+        // verify each item in the list is a python dictionary
+        PyObject * probe_dict = PyList_GetItem(py_probes, p);
+        if (!PyDict_Check(probe_dict)) {
+            throw std::runtime_error("Expected a list of probe dictionaries");
+        }
+
+        // get waveform data array
+        probes[p].values = get_source_array(probe_dict, Nt);
+
+        int offset = (int) PyLong_AsLong(PyDict_GetItemString(probe_dict, "offset"));
+
+        // field index
+        int field = (int) PyLong_AsLong(PyDict_GetItemString(probe_dict, "field"));
+        // pointer to the field index in the grid
+        probes[p].field = field_p[field] + offset;
+    }
+
+    return 0;
+}
+
+
 int solver_run(int Nt, int n_threads)
 {
 
@@ -429,7 +468,8 @@ void solver_controller(int Nt, int n_threads)
             cv.wait(lock, [n_threads] { return e_updates.load() == n_threads; });
         }
 
-        // reset e update counter and signal to threads that they can move on to h updates
+        // reset e update counter and signal to threads that they can move on to h updates, wait until h updates 
+        // are completed on all threads
         {
             // get lock on mutex while shared variables are modified
             std::unique_lock<std::mutex> lock(mutex);
@@ -439,6 +479,12 @@ void solver_controller(int Nt, int n_threads)
             // send notification to threads that E-field updates are done.
             cv_th.notify_all();
             cv.wait(lock, [n_threads] { return h_updates.load() == n_threads; });
+        }
+
+        // with e and h field updates completed, update the probes
+        for (int p = 0; p < n_probes; p++)
+        {
+            (probes[p].values)[n] = *(probes[p].field);
         }
     }
 

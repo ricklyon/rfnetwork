@@ -144,11 +144,18 @@ struct Source {
     int x_idx; // x index for ez component
 };
 
+struct Probe {
+    float * values; // array of values for all time steps
+    float * field; // single pointer to the field value in the grid
+};
+
 int solver_init_fields(PyObject * fields, PyObject * coefficients, int Nx, int Ny, int Nz);
 
 int solver_init_monitors(PyObject * py_monitors, int Nt);
 
 int solver_init_sources(PyObject * py_sources, int Nt);
+
+int solver_init_probes(PyObject * py_probes, int Nt);
 
 int solver_run(int Nt, int n_threads);
 
