@@ -28,7 +28,7 @@ typedef Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::R
 
 #define DATA_NDIM 3
 #define MAX_MONITORS 20
-#define MAX_SOURCES 20
+#define MAX_SOURCES 50
 #define MAX_THREADS 20
 
 Field_Ex Ex;

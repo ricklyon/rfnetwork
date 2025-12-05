@@ -16,6 +16,8 @@
 
 using Eigen::MatrixXd;
 
+#define MAX_THREADS 20
+
 typedef Eigen::Map<Eigen::Matrix<std::complex<double>, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> MatrixType;
 
 typedef Eigen::Map<Eigen::Matrix<int, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> MatrixIntType;
@@ -83,7 +85,7 @@ int connect_other(
     // remainder
     int batch_rm = f_len % n_threads;
 
-    std::thread threads[n_threads];
+    std::thread threads[MAX_THREADS];
     int f_idx = 0; // frequency index of current batch
     int f_blen; // length of current batch
 
@@ -319,7 +321,8 @@ int connect_self(
     // remainder
     int batch_rm = f_len % n_threads;
 
-    std::thread threads[n_threads];
+    std::thread threads[MAX_THREADS];
+
     int f_idx = 0; // frequency index of current batch
     int f_blen; // length of current batch
 

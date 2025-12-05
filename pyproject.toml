@@ -16,7 +16,7 @@ classifiers = [
 ]
 keywords = ["rf", "microwave", "network", "noise"]
 dependencies = [
-    "numpy>=2.0.0", "matplotlib", "scipy", "np-struct>=0.0.2", "mpl-markers", "pyside6"
+    "numpy>=2.0.0", "matplotlib", "scipy", "np-struct>=0.0.2", "mpl-markers", "pyside6", "pyvista"
 ]
 requires-python = ">=3.9"
 
