@@ -349,9 +349,15 @@ class SolverMesh():
                 self.Cb["ex_z"][x0_c: x1_c, y0: y1 + 1, z0] = 0
                 self.Ca["ex_z"][x0_c: x1_c, y0: y1 + 1, z0] = -1
 
+                # self.Db["hz_y"][x0_c: x1_c, y0, z0] = 0
+                # self.Db["hz_y"][x0_c: x1_c, y1-1, z0] = 0
+
                 # edge singularity
-                # a = 1e-9
-                # self.Db["hz_y"][x0_c: x1_c, y0-1, z0] *= 1e3
+                d_edge = conv.m_in(0.005)
+                # self.Db["hz_y"][x0_c: x1_c, y0-1, z0] *= dy[y0-1] / (dy[y0-1] - d_edge)
+                # self.Db["hz_y"][x0_c: x1_c, y1, z0] *= dy[y0-1] / (dy[y0-1] - d_edge)
+
+                # self.Db["hz_y"][x0_c: x1_c, y0-1, z0] *= 
                 # self.Db["hz_y"][x0_c: x1_c, y1, z0] *= 1e3
 
                 # self.Cb["ey_x"][x0_c: x1_c, y0-1, z0] *= 2 / (np.log(dy[y0-1] / a))
@@ -762,7 +768,36 @@ class SolverMesh():
 
         else:
             raise NotImplementedError("Current face not supported in the given direction yet")
-            
+        
+    def add_voltage_probe(self, name: str, line: pv.PolyData):
+        """
+        
+        """
+        dx, dy, dz = [conv.m_in(d) for d in self.d_cells]
+
+        if len(line.faces) > 1:
+            raise ValueError("Only line voltage probes are supported.")
+                
+        # get axis that face is constant over (the normal axis)
+        axis = np.argmax(np.any(np.diff(line.points, axis=0), axis=0))
+
+        # minimum and maximum extents of current face
+        pmin, pmax = np.min(line.points, axis=0), np.max(line.points, axis=0)
+
+        if axis == 2: # voltage is along z-axis
+            # all components have the same x-index and y-index
+            xyz_min = self.field_pos_to_idx(pmin, "ez")
+            xyz_max = self.field_pos_to_idx(pmax, "ez")
+
+            # add probes along the axis between both endpoints
+            i = 0
+            for z in np.arange(xyz_min[2], xyz_max[2]):
+                self.probes[f"{name}_{i}"] = dict(field="ez", index=(xyz_min[0], xyz_min[1], z), d=-dz[z])
+                i += 1
+
+        else:
+            raise NotImplementedError("Voltage probe not supported in the given direction yet")
+      
     def render(self, show_probes=False, point_size=15) -> pv.Plotter:
         """
         Plot the model geometry
@@ -825,7 +860,7 @@ class SolverMesh():
         full_pos[axis_i] = position
 
         idx = [slice(None)] * 3
-        idx[axis_i] = self.field_pos_to_idx(full_pos, field)[axis_i]
+        idx[axis_i] = self.field_pos_to_idx(full_pos, field[:2])[axis_i]
 
         if value == "a":
             values = self.Ca[field] if field[0] == "e" else self.Da[field]
@@ -840,7 +875,7 @@ class SolverMesh():
         if vmin is None:
             vmin = np.min(values)
         
-        floc = self.floc[field]
+        floc = self.floc[field[:2]]
 
         g = [floc[i] if isinstance(s, slice) else floc[i][s: s+1] for i, s in enumerate(idx)]
 
@@ -866,6 +901,12 @@ class SolverMesh():
         )
         
         return plotter
+
+    def vi_probe_values(self, name: str):
+        """
+        Returns time domain current or voltage for the given probe.
+        """
+        return np.sum([p["values"] * p["d"] for k, p in self.probes.items() if k[:len(name)] == name], axis=0)
 
     def get_sparameters(self, frequency, z0=50, source_port=1):
         """
@@ -1115,21 +1156,15 @@ s.add_field_monitor("mon3", "ez", "x", 0, 10)
 # s.add_field_monitor("mon3", "ez", "x", s.Nx // 2, 10)
 
 self = s
-face = current_face
 
 s.add_current_probe("c1", current_face)
+s.add_voltage_probe("v1", voltage_line)
 
 plotter = s.render(show_probes=True)
 plotter.show()
 # print(s.Nx, s.Ny, s.Nz)
-
-
 # p.camera_position = "xz"
 # p.camera.zoom(1.8)
-# p.show_grid(font_size=10, grid=True, use_3d_text=False, location="default")
-# p.show()
-
-
 
 f0 = 10e9
 pulse_n = 1200
@@ -1150,39 +1185,49 @@ s.run(1, vsrc, n_threads=4)
 print(f"Solve Time: {time.time()-stime:.3f}")
 print("Grid Cells (k): ", s.Nx * s.Ny * s.Nz / 1e3)
 
-# compute current
-name = "c1"
 
-current = np.sum([p["values"] * p["d"] for k, p in self.probes.items() if k[:len(name)] == name], axis=0)
-plt.figure()
-plt.plot(current)
 
 Db_0 = s.dt / u0
 Cb_0 = s.dt / e0 
-# p = s.plot_cooeficients("ey_x", "b", "z", sub_h, point_size=15, cmap="brg", normalization=Cb_0)
-# p.show()
+p = s.plot_cooeficients("ex_z", "a", "z", sub_h, point_size=15, cmap="brg", normalization=None)
+p.show()
 
 # p = s.plot_monitor(["mon1"], el=0, zoom=1.1, az=0, view="xy", opacity=[0.8, 1], linear=False, cmap="jet")
 # p.show(title="EM Solver")
 
 frequency: np.ndarray = np.arange(5e9, 15e9, 10e6)
 
+
 sdata = s.get_sparameters(frequency)
 S11 = sdata[:, 0]
 
-# fig, ax = plt.subplots()
-# ax.plot(frequency/1e9, conv.db20_lin(S11))
+# compute line impedance
+line_i = self.vi_probe_values("c1")
+line_v = self.vi_probe_values("v1")
+
+plt.plot(line_v)
+
+IP = utils.dtft(self.vi_probe_values("c1"), frequency, 1 / s.dt)
+VP = utils.dtft(self.vi_probe_values("v1"), frequency, 1 / s.dt)
+ZP = VP / IP
 
 fig, ax = plt.subplots()
 rfn.plots.draw_smithchart(ax)
 plt.plot(S11.real, S11.imag)
 
-# np.save("fine_grid_hz1", s.probes["hz1"]["values"])
-
 
 fig, ax = plt.subplots()
 ax.plot(frequency/1e9, rfn.conv.z_gamma(S11))
+ax.plot(frequency/1e9, ZP.real)
 plt.show()
+
+
+# fig, ax = plt.subplots()
+# plt.plot(s.probes["c1_1"]["values"])
+# mplm.axis_marker(y = np.max(s.probes["c1_1"]["values"]))
+# plt.show()
+
+
 
 # 
 # Nx, Ny, Nz = 126, 26, 26
