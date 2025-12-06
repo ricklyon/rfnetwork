@@ -52,8 +52,11 @@ class SolverMesh():
     def add_lumped_port(self, number, face):
         self.port_face[number - 1] = face
 
-    def point_to_idx(self, p, mode="edge"):
-
+    def pos_to_idx(self, p, mode="edge"):
+        """
+        Returns the index of the grid edge or cell center that is directly on or just past (in +x, +y and +z directions) 
+        the given position.
+        """
         idx = []
         mode = [mode] * 3 if isinstance(mode, str) else mode
         
@@ -66,7 +69,11 @@ class SolverMesh():
 
         return tuple(idx)
 
-    def field_position_to_idx(self, position, field: str):
+    def field_pos_to_idx(self, position, field: str):
+        """
+        Returns the index of the field component that is directly on or just past (in +x, +y and +z directions) 
+        the given grid position.
+        """
         floc = self.floc[field]
 
         idx = []
@@ -78,7 +85,7 @@ class SolverMesh():
         
         return tuple(idx)
     
-    def init_grid(self, d0=0.02, n_feature_min=2):
+    def init_grid(self, d0, n_feature_min=2):
         """
         Initialize the spatial grid.
         """
@@ -96,7 +103,7 @@ class SolverMesh():
         # list of cell widths for each axis
         cell_d = [[], [], []]
         # iterate over x, y, z axis
-        for i in range(3):
+        for i, d0_i in enumerate(d0):
             edges_i = edges[i]
         
             # list of distances between each edge
@@ -104,7 +111,7 @@ class SolverMesh():
             
             for d in d_e:
                 # how many cells of the default size will fit in this interval
-                nx = d / d0
+                nx = d / d0_i
             
                 # use a minimum of two cells between adjacent features
                 if nx < n_feature_min:
@@ -114,7 +121,7 @@ class SolverMesh():
                     # make the cell a bit smaller than the default to account for the remainder of nx
                     nx = int(nx + 1) if nx % 1 > 1e-3 else int(nx)
                     # d0 * nx will be larger than d if there was a remainder on nx, divide up this difference amoung each cell
-                    d0_e = d0 - (((d0 * nx) - d) / nx)
+                    d0_e = d0_i - (((d0_i * nx) - d) / nx)
                     cell_d[i] += [d0_e] * nx
             
         # TODO: blend large differences in adjacent cell widths
@@ -149,8 +156,8 @@ class SolverMesh():
         self.eps = np.ones(self.n_cells) * e0
 
         for (sub, er) in self.substrate.values():
-            x0, y0, z0 = self.point_to_idx(np.min(sub.points, axis=0), mode="cell")
-            x1, y1, z1 = self.point_to_idx(np.max(sub.points, axis=0), mode="cell")
+            x0, y0, z0 = self.pos_to_idx(np.min(sub.points, axis=0), mode="cell")
+            x1, y1, z1 = self.pos_to_idx(np.max(sub.points, axis=0), mode="cell")
         
             self.eps[x0: x1, y0: y1, z0: z1] = e0 * er
 
@@ -293,11 +300,11 @@ class SolverMesh():
             if pec.n_cells > 1 or pec.faces[0] != 4:
                 raise ValueError("Only rectangular PEC faces are supported.")
             
-            x0, y0, z0 = self.point_to_idx(np.min(pec.points, axis=0))
-            x1, y1, z1 = self.point_to_idx(np.max(pec.points, axis=0))
+            x0, y0, z0 = self.pos_to_idx(np.min(pec.points, axis=0))
+            x1, y1, z1 = self.pos_to_idx(np.max(pec.points, axis=0))
     
-            x0_c, y0_c, z0_c = self.point_to_idx(np.min(pec.points, axis=0), mode="cell")
-            x1_c, y1_c, z1_c = self.point_to_idx(np.max(pec.points, axis=0), mode="cell")
+            x0_c, y0_c, z0_c = self.pos_to_idx(np.min(pec.points, axis=0), mode="cell")
+            x1_c, y1_c, z1_c = self.pos_to_idx(np.max(pec.points, axis=0), mode="cell")
     
             # get width of pec in cell units
             idx_d = np.array([x1, y1, z1]) - np.array([x0, y0, z0])
@@ -367,11 +374,11 @@ class SolverMesh():
             if face.n_cells > 1 or face.faces[0] != 4:
                 raise ValueError("Only rectangular port faces are supported.")
             
-            x0, y0, z0 = self.point_to_idx(np.min(face.points, axis=0))
-            x1, y1, z1 = self.point_to_idx(np.max(face.points, axis=0))
+            x0, y0, z0 = self.pos_to_idx(np.min(face.points, axis=0))
+            x1, y1, z1 = self.pos_to_idx(np.max(face.points, axis=0))
     
-            x0_c, y0_c, z0_c = self.point_to_idx(np.min(face.points, axis=0), mode="cell")
-            x1_c, y1_c, z1_c = self.point_to_idx(np.max(face.points, axis=0), mode="cell")
+            x0_c, y0_c, z0_c = self.pos_to_idx(np.min(face.points, axis=0), mode="cell")
+            x1_c, y1_c, z1_c = self.pos_to_idx(np.max(face.points, axis=0), mode="cell")
     
             # get width of pec in cell units
             idx_d = np.array([x1, y1, z1]) - np.array([x0, y0, z0])
@@ -672,7 +679,7 @@ class SolverMesh():
         # convert position to field index
         full_pos = [0] * 3
         full_pos[axis_i] = position
-        idx = self.field_position_to_idx(full_pos, field)
+        idx = self.field_pos_to_idx(full_pos, field)
 
         if idx[axis_i] >= (axis_len - 1):
             raise ValueError("Field position out of bounds")
@@ -681,7 +688,7 @@ class SolverMesh():
             field=field, axis=axis_i, position=position, index=int(idx[axis_i]), n_step=n_step, shape=tuple(shape)
         )
 
-    def add_probe(self, name: str, field: str, position: float):
+    def add_probe(self, name: str, field: str, position: tuple):
         """
         Add field monitor along a slice through the 3D volume
 
@@ -696,7 +703,7 @@ class SolverMesh():
         if field not in self.fshape.keys():
             raise ValueError(f"Unsupported field: {field}. Expecting one of: {tuple(self.fshape.keys())}")
 
-        idx = self.field_position_to_idx(position, field)
+        idx = self.field_pos_to_idx(position, field)
 
         if any([p >= (fs - 1) for p, fs in zip(idx, self.fshape[field])]):
             raise ValueError("Field position out of bounds")
@@ -704,7 +711,58 @@ class SolverMesh():
         self.probes[name] = dict(
             field=field, position=position, index=idx
         )
+
+    def add_current_probe(self, name: str, face: pv.PolyData):
+        """
         
+        """
+        dx_h, dy_h, dz_h = [conv.m_in(d) for d in self.dh_cells]
+
+        if face.n_cells > 1 or face.faces[0] != 4:
+            raise ValueError("Only rectangular current faces are supported.")
+                
+        # get axis that face is constant over (the normal axis)
+        axis = np.argmin(np.any(np.diff(face.points, axis=0), axis=0))
+
+        # minimum and maximum extents of current face
+        pmin, pmax = np.min(face.points, axis=0), np.max(face.points, axis=0)
+
+        if axis == 0: # current is along x-axis
+            # all components have the same x-index
+            x0 = self.field_pos_to_idx(pmin, "hy")[0]
+
+            # hz y-indices on the left and right edges of the ampere loop
+            hz_y0 = self.field_pos_to_idx(pmin, "hz")[1] - 1
+            hz_y1 = self.field_pos_to_idx(pmax, "hz")[1]
+            # hy y-indices on top and bottom of the loop
+            hy_y = np.arange(hz_y0 + 1, hz_y1 +1)
+
+            # hy z-indices on the top and bottom of the ampere loop
+            hy_z0 = self.field_pos_to_idx(pmin, "hy")[2] - 1
+            hy_z1 = self.field_pos_to_idx(pmax, "hy")[2]
+            # hy z-indces on the left and right of the loop
+            hz_z = np.arange(hy_z0 + 1, hy_z1 +1)
+
+            # add left and right probes, save the cell width in meters as the d variable, the sign
+            # indicates which direction the component faces in the ampere loop (defined with the current
+            # moving in the +x direction)
+            i = 0
+            for z in (hz_z):
+                self.probes[f"{name}_{i}"] = dict(field="hz", index=(x0, hz_y0, z), d=-dz_h[z-1])
+                i += 1
+                self.probes[f"{name}_{i}"] = dict(field="hz", index=(x0, hz_y1, z), d=dz_h[z-1])
+                i += 1
+
+            # add top and bottom probes
+            for y in (hy_y):
+                self.probes[f"{name}_{i}"] = dict(field="hy", index=(x0, y, hy_z0), d=dy_h[y-1])
+                i += 1
+                self.probes[f"{name}_{i}"] = dict(field="hy", index=(x0, y, hy_z1), d=-dy_h[y-1])
+                i += 1
+
+        else:
+            raise NotImplementedError("Current face not supported in the given direction yet")
+            
     def render(self, show_probes=False, point_size=15) -> pv.Plotter:
         """
         Plot the model geometry
@@ -767,7 +825,7 @@ class SolverMesh():
         full_pos[axis_i] = position
 
         idx = [slice(None)] * 3
-        idx[axis_i] = self.field_position_to_idx(full_pos, field)[axis_i]
+        idx[axis_i] = self.field_pos_to_idx(full_pos, field)[axis_i]
 
         if value == "a":
             values = self.Ca[field] if field[0] == "e" else self.Da[field]
@@ -1017,6 +1075,18 @@ port1_face = pv.Rectangle([
     (ms_x[0], ms_y + ms_w/2, 0),
 ])
 
+current_face = pv.Rectangle([
+    (0, ms_y - ms_w/2, sub_h + 0.001),
+    (0, ms_y + ms_w/2, sub_h + 0.001),
+    (0, ms_y + ms_w/2, sub_h - 0.001),
+])
+
+
+voltage_line = pv.Line(
+    [0, 0, 0], [0, 0, sub_h]
+)
+
+
 # port2_face = pv.Rectangle([
 #     (ms_x[1], ms_y - ms_w/2, sub_h),
 #     (ms_x[1], ms_y + ms_w/2, sub_h),
@@ -1029,7 +1099,7 @@ s.add_pec_face("ms1", ms_trace, color="gold")
 s.add_lumped_port(1, port1_face)
 # s.add_lumped_port(2, port2_face)
 
-s.mesh(d0=0.01, n_feature_min=2)
+s.mesh(d0=[0.02, 0.02, 0.02], n_feature_min=2)
 s.init_ports()
 s.add_xPML(side="upper")
 s.init_pec()
@@ -1038,12 +1108,19 @@ s.add_field_monitor("mon2", "ey", "z", sub_h, 10)
 s.add_field_monitor("mon3", "ez", "x", 0, 10)
 
 # 43, 4 for course mesh
-s.add_probe("hz1", "hz", (0, (ms_w / 2) + 0.01, sub_h))
+# s.add_probe("hz1", "hz", (0, (ms_w / 2) + 0.01, sub_h))
+# s.add_probe("ey1", "ey", (0, (ms_w / 2) + 0.01, sub_h))
 
 # s.add_field_monitor("mon2", "ez", "z", 2, 10)
 # s.add_field_monitor("mon3", "ez", "x", s.Nx // 2, 10)
 
-s.render(show_probes=True).show()
+self = s
+face = current_face
+
+s.add_current_probe("c1", current_face)
+
+plotter = s.render(show_probes=True)
+plotter.show()
 # print(s.Nx, s.Ny, s.Nz)
 
 
@@ -1052,7 +1129,7 @@ s.render(show_probes=True).show()
 # p.show_grid(font_size=10, grid=True, use_3d_text=False, location="default")
 # p.show()
 
-self = s
+
 
 f0 = 10e9
 pulse_n = 1200
@@ -1073,13 +1150,20 @@ s.run(1, vsrc, n_threads=4)
 print(f"Solve Time: {time.time()-stime:.3f}")
 print("Grid Cells (k): ", s.Nx * s.Ny * s.Nz / 1e3)
 
+# compute current
+name = "c1"
+
+current = np.sum([p["values"] * p["d"] for k, p in self.probes.items() if k[:len(name)] == name], axis=0)
+plt.figure()
+plt.plot(current)
+
 Db_0 = s.dt / u0
 Cb_0 = s.dt / e0 
 # p = s.plot_cooeficients("ey_x", "b", "z", sub_h, point_size=15, cmap="brg", normalization=Cb_0)
 # p.show()
 
-p = s.plot_monitor(["mon1"], el=0, zoom=1.1, az=0, view="xy", opacity=[0.8, 1], linear=False, cmap="jet")
-p.show(title="EM Solver")
+# p = s.plot_monitor(["mon1"], el=0, zoom=1.1, az=0, view="xy", opacity=[0.8, 1], linear=False, cmap="jet")
+# p.show(title="EM Solver")
 
 frequency: np.ndarray = np.arange(5e9, 15e9, 10e6)
 
@@ -1093,17 +1177,12 @@ fig, ax = plt.subplots()
 rfn.plots.draw_smithchart(ax)
 plt.plot(S11.real, S11.imag)
 
-fig, ax = plt.subplots()
-ax.plot(s.probes["hz1"]["values"])
-# ax.plot(np.load("fine_grid_hz1.npy"))
-ax.set_ylim([-0.06, 0.06])
-
 # np.save("fine_grid_hz1", s.probes["hz1"]["values"])
 
 
-# fig, ax = plt.subplots()
-# ax.plot(frequency/1e9, rfn.conv.z_gamma(S11))
-# plt.show()
+fig, ax = plt.subplots()
+ax.plot(frequency/1e9, rfn.conv.z_gamma(S11))
+plt.show()
 
 # 
 # Nx, Ny, Nz = 126, 26, 26
