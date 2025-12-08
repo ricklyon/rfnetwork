@@ -85,7 +85,7 @@ class SolverMesh():
         
         return tuple(idx)
     
-    def init_grid(self, d0, n_feature_min=2):
+    def init_grid(self, d0):
         """
         Initialize the spatial grid.
         """
@@ -102,6 +102,7 @@ class SolverMesh():
 
         # list of cell widths for each axis
         cell_d = [[], [], []]
+        n_feature_min = 2
         # iterate over x, y, z axis
         for i, d0_i in enumerate(d0):
             edges_i = edges[i]
@@ -123,16 +124,48 @@ class SolverMesh():
                     # d0 * nx will be larger than d if there was a remainder on nx, divide up this difference amoung each cell
                     d0_e = d0_i - (((d0_i * nx) - d) / nx)
                     cell_d[i] += [d0_e] * nx
-            
-        # TODO: blend large differences in adjacent cell widths
+
         
         gx, gy, gz = [np.around(np.concatenate([[self.sbox_min[i]], self.sbox_min[i] + np.cumsum(cell_d[i])]), decimals=6) for i in range(3)]
-        
-        self.grid_mesh = pv.RectilinearGrid(gx, gy, gz)
-        # cell widths
         dx, dy, dz = np.diff(gx).astype(dtype_), np.diff(gy), np.diff(gz)
+
+
+        # Split cells at the edge of PEC faces, move PEC in one cell to compensate for larger traces.
+        # CST has an edge singularity compensation but it doesn't seem to work reliably when the trace goes into  PML
+        # use cell splitting scheme instead.
+        def split_cell(d_list, idx: int, factor: float):
+            if idx > 0 and idx < len(d_list):
+                d_list = np.insert(d_list, idx, d_list[idx] * factor)
+                d_list[idx+1] = d_list[idx+1] * (1 - factor)
+
+            return d_list
+            
+        pec = list(self.pec_face.values())[0]
+        for pec in self.pec_face.values():
+
+            pmin, pmax = np.min(pec.points, axis=0), np.max(pec.points, axis=0)
+            # normal axis
+
+            axis = np.argmin(pmax - pmin)
+            if axis == 2: # pec face is normal to x-axis
+                # get x index for cell on the edge of the face
+                dx = split_cell(dx, np.argmin(np.abs(gx - pmax[0])) - 1, factor=0.8)
+                dx = split_cell(dx, np.argmin(np.abs(gx - pmin[0])), factor=0.2)
+
+                dy = split_cell(dy, np.argmin(np.abs(gy - pmax[1])) - 1, factor=0.8)
+                dy = split_cell(dy, np.argmin(np.abs(gy - pmin[1])), factor=0.2)
+                
+
+
         # number of cells along each axis
-        self.n_cells = len(dx), len(dy), len(dz)
+        self.n_cells = len(dx), len(dy), len(dz)   
+        cell_d = dx, dy, dz
+        gx, gy, gz = [np.around(np.concatenate([[self.sbox_min[i]], self.sbox_min[i] + np.cumsum(cell_d[i])]), decimals=6) for i in range(3)]
+         
+        self.grid_mesh = pv.RectilinearGrid(gx, gy, gz)
+
+
+        # Blend large differences in adjacent cell sizes
 
         self.Nx, self.Ny, self.Nz = self.n_cells
         self.dx, self.dy, self.dz = dx, dy, dz
@@ -184,11 +217,11 @@ class SolverMesh():
         
 
 
-    def mesh(self, d0, n_feature_min=2):
+    def mesh(self, d0):
         """
         Build FDTD coefficients for all grid cells.
         """
-        s.init_grid(d0, n_feature_min)
+        s.init_grid(d0)
         dtype_ = np.float32
         
         dx, dy, dz = [conv.m_in(d) for d in self.d_cells]
@@ -300,20 +333,16 @@ class SolverMesh():
             if pec.n_cells > 1 or pec.faces[0] != 4:
                 raise ValueError("Only rectangular PEC faces are supported.")
             
-            x0, y0, z0 = self.pos_to_idx(np.min(pec.points, axis=0))
-            x1, y1, z1 = self.pos_to_idx(np.max(pec.points, axis=0))
+            pmin, pmax = np.min(pec.points, axis=0), np.max(pec.points, axis=0)
+            # normal axis
+
+            axis = np.argmin(pmax - pmin)
     
-            x0_c, y0_c, z0_c = self.pos_to_idx(np.min(pec.points, axis=0), mode="cell")
-            x1_c, y1_c, z1_c = self.pos_to_idx(np.max(pec.points, axis=0), mode="cell")
-    
-            # get width of pec in cell units
-            idx_d = np.array([x1, y1, z1]) - np.array([x0, y0, z0])
-    
-            if np.count_nonzero(idx_d) != 2:
+            if np.count_nonzero(pmax - pmin) != 2:
                 raise ValueError("PEC face must be on cartesian grid, and must be 2D.")
                     
             # PEC is normal to the x-axis, Ez and Ey are parallel to surface
-            if (idx_d[0] == 0):
+            if (axis == 0):
                 # ez edges on y axis are inclusive, interior cells on z axis are not
                 self.Cb["ez_x"][x0, y0: y1, z0_c: z1_c] = 0
                 self.Ca["ez_x"][x0, y0: y1, z0_c: z1_c] = -1
@@ -325,7 +354,7 @@ class SolverMesh():
                 self.Cb["ey_x"][x0, y0_c: y1_c, z0: z1 + 1] = 0
                 self.Ca["ey_x"][x0, y0_c: y1_c, z0: z1 + 1] = -1
             # PEC is normal to the y-axis, Ez and Ex are parallel to surface
-            elif (idx_d[1] == 0):
+            elif (axis == 1):
                 # ez edges on x axis are inclusive, interior cells on z axis are not
                 self.Cb["ez_x"][x0: x1+1, y0, z0_c: z1_c] = 0
                 self.Ca["ez_x"][x0: x1+1, y0, z0_c: z1_c] = -1
@@ -337,31 +366,62 @@ class SolverMesh():
                 self.Cb["ex_z"][x0_c: x1_c, y0, z0: z1 + 1] = 0
                 self.Ca["ex_z"][x0_c: x1_c, y0, z0: z1 + 1] = -1
             # PEC is normal to the z-axis, Ex and Ey are parallel to surface
-            elif (idx_d[2] == 0):
-                # ey edges on x axis are inclusive, interior cells on y axis are not
-                self.Cb["ey_z"][x0: x1+1, y0_c: y1_c, z0] = 0
-                self.Ca["ey_z"][x0: x1+1, y0_c: y1_c, z0] = -1
-                self.Cb["ey_x"][x0: x1+1, y0_c: y1_c, z0] = 0
-                self.Ca["ey_x"][x0: x1+1, y0_c: y1_c, z0] = -1
+            elif (axis == 2):
+
+                # edge cells are buffers and not included in the PEC, along y and x axis
+                # field pos returns the first index that is greater than the given position, so y1 index is just
+                # past the edge of the end of the PEC
+                x0, y0, z0 = self.field_pos_to_idx(np.min(pec.points, axis=0), "ey")
+                x1, y1, z1 = self.field_pos_to_idx(np.max(pec.points, axis=0), "ey")
+                self.Cb["ey_z"][x0+1: x1, y0+1: y1-1, z0] = 0
+                self.Ca["ey_z"][x0+1: x1, y0+1: y1-1, z0] = -1
+                self.Cb["ey_x"][x0+1: x1, y0+1: y1-1, z0] = 0
+                self.Ca["ey_x"][x0+1: x1, y0+1: y1-1, z0] = -1
                 # ex cells on x axis are not inclusive, edges on y axis are
-                self.Cb["ex_y"][x0_c: x1_c, y0: y1 + 1, z0] = 0
-                self.Ca["ex_y"][x0_c: x1_c, y0: y1 + 1, z0] = -1
-                self.Cb["ex_z"][x0_c: x1_c, y0: y1 + 1, z0] = 0
-                self.Ca["ex_z"][x0_c: x1_c, y0: y1 + 1, z0] = -1
+                x0, y0, z0 = self.field_pos_to_idx(np.min(pec.points, axis=0), "ex")
+                x1, y1, z1 = self.field_pos_to_idx(np.max(pec.points, axis=0), "ex")
+                self.Cb["ex_y"][x0+1: x1, y0+1: y1, z0] = 0
+                self.Ca["ex_y"][x0+1: x1, y0+1: y1, z0] = -1
+                self.Cb["ex_z"][x0+1: x1, y0+1: y1, z0] = 0
+                self.Ca["ex_z"][x0+1: x1, y0+1: y1, z0] = -1
 
                 # self.Db["hz_y"][x0_c: x1_c, y0, z0] = 0
                 # self.Db["hz_y"][x0_c: x1_c, y1-1, z0] = 0
 
                 # edge singularity
-                d_edge = conv.m_in(0.005)
-                # self.Db["hz_y"][x0_c: x1_c, y0-1, z0] *= dy[y0-1] / (dy[y0-1] - d_edge)
-                # self.Db["hz_y"][x0_c: x1_c, y1, z0] *= dy[y0-1] / (dy[y0-1] - d_edge)
+                # d_edge = conv.m_in(0.00001)
+                # # print(conv.in_m((dy[y0-1] - d_edge)))
+                # self.Db["hz_y"][x0_c: x1_c, y0, z0] *= dy[y0] / (dy[y0] - d_edge)
+                # self.Db["hz_y"][x0_c: x1_c, y1-1, z0] *= dy[y1-1] / (dy[y1-1] - d_edge)
 
                 # self.Db["hz_y"][x0_c: x1_c, y0-1, z0] *= 
                 # self.Db["hz_y"][x0_c: x1_c, y1, z0] *= 1e3
 
-                # self.Cb["ey_x"][x0_c: x1_c, y0-1, z0] *= 2 / (np.log(dy[y0-1] / a))
-                # self.Cb["ey_x"][x0_c: x1_c, y1, z0] *= 2 / (np.log(dy[y1] / a))
+                # self.Cb["ex_y"][x0_c: x1_c, y0, z0] = 0#*= dy[y0-1] / (dy[y0-1] - d_edge)
+                # self.Cb["ex_y"][x0_c: x1_c, y1, z0] =0 #*= dy[y1-1] / (dy[y1-1] - d_edge)
+
+                # edges along y
+                # dy0 = dy[y0]
+                # dz0 = dz[z0]
+                # d = conv.m_in(0.000001)
+                # sig = (d / dz0) * 1e6
+                # dt = self.dt
+
+                # Ca_s = (2 * e0 - (sig * dt)) / (2 * e0 + (sig * dt))
+                # Cb_s = (2 * dt) / ((2 * e0 + (sig * dt)))
+
+                # self.Cb["ex_y"][x0_c: x1_c, y0, z0] *= dy[y0-1] / (dy[y0-1] - d_edge)
+                # self.Ca["ex_y"][x0_c: x1_c, y0, z0] = -1
+                # # self.Cb["ex_z"][x0_c: x1_c, y0, z0] *= dy[y0-1] / (dy[y0-1] - d_edge)
+                # self.Ca["ex_z"][x0_c: x1_c, y0, z0] = -1
+
+                # self.Cb["ex_y"][x0_c: x1_c, y1, z0] *= dy[y1-1] / (dy[y1-1] - d_edge)
+                # self.Ca["ex_y"][x0_c: x1_c, y1, z0] = -1
+                # # self.Cb["ex_z"][x0_c: x1_c, y1, z0] *= dy[y1-1] / (dy[y1-1] - d_edge)
+                # self.Ca["ex_z"][x0_c: x1_c, y1, z0] = -1
+                # self.Cb["ex_z"][x0_c: x1_c, y1: y1, z0] = 0
+                # self.Ca["ex_z"][x0_c: x1_c, y1: y1, z0] = -1
+
 
             else:
                 raise ValueError(f"PEC {name} is not 2D")
@@ -394,6 +454,10 @@ class SolverMesh():
                 
             # face is normal to the x-axis, Resistor is represented by the Ez components
             if (idx_d[0] == 0):
+                # skip buffer cells for +x port, fix for -x
+                x0 += 1
+                y0 += 1
+                y1 -= 1
     
                 # width of resistor cell centered around the ez component, ez is on the x/y edges
                 dx_r = dx_h[x0-1]
@@ -921,8 +985,10 @@ class SolverMesh():
         ports = np.arange(1, nports+1)
         z_idx = self.ports[source_port-1]["idx"][2]
 
-        # source port probe, get middle ez components
-        src_vp = -np.sum(s.ports[source_port-1]["values"][1] * conv.m_in(self.dz[z_idx])[..., None], axis=0)
+        # source port voltage at each component
+        src_voltage = -np.sum(s.ports[source_port-1]["values"] * conv.m_in(self.dz[z_idx])[None, ..., None], axis=1)
+        # average voltage across y
+        src_vp = np.mean(src_voltage, axis=0)
         # source port applied voltage
         src_applied = s.ports[source_port-1]["src"]
 
@@ -1008,9 +1074,9 @@ class SolverMesh():
                 clim=[vmin, vmax], 
                 show_scalar_bar=False, 
                 opacity=opacity[i],
-                interpolate_before_map=False,
+                # interpolate_before_map=False,
                 render_points_as_spheres=True,
-                style="points",
+                # style="points",
                 lighting=False,
                 point_size=10
             )
@@ -1100,6 +1166,10 @@ ms_x = (-0.4, 0.5)
 ms_y = 0
 ms_w = 0.04
 
+line = rfn.elements.MSLine(h=sub_h, er=3.66, w=ms_w)
+z_ref = line.get_properties(10e9).sel(value="z0").item()
+
+
 substrate = pv.Cube(center=(0, 0, sub_h/2), x_length=sbox_len, y_length=sbox_w, z_length=sub_h)
 
 sbox = pv.Cube(center=(0, 0, sbox_h/2), x_length=sbox_len, y_length=sbox_w, z_length=sbox_h)
@@ -1140,13 +1210,14 @@ s.add_pec_face("ms1", ms_trace, color="gold")
 s.add_lumped_port(1, port1_face)
 # s.add_lumped_port(2, port2_face)
 
-s.mesh(d0=[0.02, 0.02, 0.02], n_feature_min=2)
+d0=[0.02, 0.01, 0.01]
+s.mesh(d0=d0)
 s.init_ports()
 s.add_xPML(side="upper")
 s.init_pec()
-s.add_field_monitor("mon1", "hz", "z", sub_h, 10)
-s.add_field_monitor("mon2", "ey", "z", sub_h, 10)
-s.add_field_monitor("mon3", "ez", "x", 0, 10)
+# s.add_field_monitor("mon1", "hz", "z", sub_h, 10)
+# s.add_field_monitor("mon2", "ey", "z", sub_h, 10)
+# s.add_field_monitor("mon3", "ez", "x", 0, 10)
 
 # 43, 4 for course mesh
 # s.add_probe("hz1", "hz", (0, (ms_w / 2) + 0.01, sub_h))
@@ -1160,10 +1231,11 @@ self = s
 s.add_current_probe("c1", current_face)
 s.add_voltage_probe("v1", voltage_line)
 
-plotter = s.render(show_probes=True)
-plotter.show()
+# plotter = s.render(show_probes=True)
+# plotter.camera_position = "xy"
+# plotter.show()
 # print(s.Nx, s.Ny, s.Nz)
-# p.camera_position = "xz"
+
 # p.camera.zoom(1.8)
 
 f0 = 10e9
@@ -1187,10 +1259,22 @@ print("Grid Cells (k): ", s.Nx * s.Ny * s.Nz / 1e3)
 
 
 
-Db_0 = s.dt / u0
-Cb_0 = s.dt / e0 
-p = s.plot_cooeficients("ex_z", "a", "z", sub_h, point_size=15, cmap="brg", normalization=None)
-p.show()
+# Db_0 = s.dt / u0
+# Cb_0 = s.dt / e0 
+# p = s.plot_cooeficients("hz_y", "b", "z", sub_h, point_size=15, cmap="brg", normalization=None)
+# p.camera_position = "xy"
+# p.camera.zoom(1.8)
+# p.show()
+
+# p = s.plot_cooeficients("ex_y", "b", "z", sub_h, point_size=15, cmap="brg", normalization=None)
+# p.camera_position = "xy"
+# p.camera.zoom(1.8)
+# p.show()
+
+# p = s.plot_cooeficients("ey_z", "a", "z", sub_h, point_size=15, cmap="brg", normalization=None)
+# p.camera_position = "xy"
+# p.camera.zoom(1.8)
+# p.show()
 
 # p = s.plot_monitor(["mon1"], el=0, zoom=1.1, az=0, view="xy", opacity=[0.8, 1], linear=False, cmap="jet")
 # p.show(title="EM Solver")
@@ -1205,21 +1289,28 @@ S11 = sdata[:, 0]
 line_i = self.vi_probe_values("c1")
 line_v = self.vi_probe_values("v1")
 
-plt.plot(line_v)
-
 IP = utils.dtft(self.vi_probe_values("c1"), frequency, 1 / s.dt)
 VP = utils.dtft(self.vi_probe_values("v1"), frequency, 1 / s.dt)
 ZP = VP / IP
 
+S11_z = conv.gamma_z(ZP)
+
 fig, ax = plt.subplots()
 rfn.plots.draw_smithchart(ax)
 plt.plot(S11.real, S11.imag)
+plt.plot(S11_z.real, S11_z.imag)
+
+fig, ax = plt.subplots()
+ax.plot(frequency/1e9, rfn.conv.db20_lin(S11))
 
 
 fig, ax = plt.subplots()
 ax.plot(frequency/1e9, rfn.conv.z_gamma(S11))
 ax.plot(frequency/1e9, ZP.real)
-plt.show()
+ax.set_ylim([0, 120])
+mplm.axis_marker(y=z_ref)
+ax.set_xlabel("Frequency [GHz]")
+# plt.show()
 
 
 # fig, ax = plt.subplots()
