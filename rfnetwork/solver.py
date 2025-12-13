@@ -669,9 +669,9 @@ class SolverMesh():
                 probes.append(
                     dict(
                         values=np.array(-Vs_a_flt[j] * v_waveforms[i], dtype=dtype_, order="C"), 
-                        field=field,
+                        field=int(list(self.fshape.keys()).index(field)),
                         idx=[int(id) for id in idx_j],
-                        source=int(1)
+                        is_source=int(1)
                     )
                 )
 
@@ -682,7 +682,7 @@ class SolverMesh():
                     values=np.zeros(Nt, dtype=dtype_, order="C"), 
                     field=list(self.fshape.keys()).index(p["field"]),
                     idx=[int(id) for id in p["index"]],
-                    source=int(0)
+                    is_source=int(0)
                 )
             )
 
@@ -1162,11 +1162,11 @@ class SolverMesh():
 
         
 sbox_h = 0.5
-sbox_w = 1
-sbox_len = 2
+sbox_w = 0.5
+sbox_len = 1
 
 sub_h = 0.02
-ms_x = (-1, 1)
+ms_x = (-0.4, 0.5)
 ms_y = 0
 ms_w = 0.04
 
@@ -1257,9 +1257,31 @@ ports = 1
 v_waveforms = [vsrc]
 
 stime = time.time()
-s.run(1, vsrc, n_threads=2)
-print(f"(2) Solve Time: {time.time()-stime:.3f}")
-
-stime = time.time()
 s.run(1, vsrc, n_threads=4)
-print(f"(4) Solve Time: {time.time()-stime:.3f}")
+print(f"(2) Solve Time: {time.time()-stime:.3f}")
+print("Grid Cells (k): ", s.Nx * s.Ny * s.Nz / 1e3)
+
+# stime = time.time()
+# s.run(1, vsrc, n_threads=2)
+# print(f"(2) Solve Time: {time.time()-stime:.3f}")
+
+# stime = time.time()
+# s.run(1, vsrc, n_threads=4)
+# print(f"(4) Solve Time: {time.time()-stime:.3f}")
+
+# compute line impedance
+line_i = self.vi_probe_values("c1")
+line_v = self.vi_probe_values("v1")
+
+fig, ax = plt.subplots()
+ax.plot(line_i)
+
+frequency: np.ndarray = np.arange(5e9, 15e9, 10e6)
+
+
+sdata = s.get_sparameters(frequency)
+S11 = sdata[:, 0]
+fig, ax = plt.subplots()
+rfn.plots.draw_smithchart(ax)
+plt.plot(S11.real, S11.imag)
+plt.show()

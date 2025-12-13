@@ -347,7 +347,7 @@ int solver_init_monitors(PyObject * py_monitors, int Nt)
 int solver_init_probes(PyObject * py_probes, int Nt)
 {
     // shapes of field components
-    int Nx[6] = {Ex.Nx, Ey.Nx, Ez.Nx, Hx.Nx, Hy.Nx, Hz.Nx};
+    // int Nx[6] = {Ex.Nx, Ey.Nx, Ez.Nx, Hx.Nx, Hy.Nx, Hz.Nx};
     int Ny[6] = {Ex.Ny, Ey.Ny, Ez.Ny, Hx.Ny, Hy.Ny, Hz.Ny};
     int Nz[6] = {Ex.Nz, Ey.Nz, Ez.Nz, Hx.Nz, Hy.Nz, Hz.Nz};
 
@@ -377,7 +377,7 @@ int solver_init_probes(PyObject * py_probes, int Nt)
         // cell that the field component belongs to
         probes[s].x_cell = (int) PyLong_AsLong(PyList_GetItem(py_idx, 0));
 
-        int field_type = PyDict_GetItemString(probe_dict, "field");
+        int field_type = PyLong_AsLong(PyDict_GetItemString(probe_dict, "field"));
         probes[s].field_type = field_type;
 
         // if component's first index is at x=0 instead of x=0.5, the first usable component
@@ -393,12 +393,15 @@ int solver_init_probes(PyObject * py_probes, int Nt)
         }
 
         probes[s].yz_offset = (
-            ((int) PyLong_AsLong(PyList_GetItem(py_idx, 1)) * Ny[field_type]) +
+            ((int) PyLong_AsLong(PyList_GetItem(py_idx, 1)) * Nz[field_type]) +
             ((int) PyLong_AsLong(PyList_GetItem(py_idx, 2)))
         );
+
+        // size of yz grid
+        probes[s].NyNz = (Ny[field_type] * Nz[field_type]);
         
         // flag probe if it provides source values
-        probe[s].source = PyDict_GetItemString(probe_dict, "source");
+        probes[s].is_source = PyDict_GetItemString(probe_dict, "is_source");
     }
 
     return 0;
@@ -605,7 +608,7 @@ void solver_thread(int x_start, int x_stop, int Nt, int thread_idx)
     msg << "Starting Thread " << thread_idx << " " << x_start << " " << x_stop << "\n";
     std::cout << msg.str();
 
-    long long k = 0;
+    // long long k = 0;
     int x_offset;
     // number of updated field components
     int Nx = x_stop - x_start;
@@ -658,21 +661,29 @@ void solver_thread(int x_start, int x_stop, int Nt, int thread_idx)
     std:: vector<Probe*> h_probes;
     Probe * p;
     float * fields_base[6] = {p_ex, p_ey, p_ez, p_hx, p_hy, p_hz};
+
     for (int i = 0; i < n_probes; i++)
     {   
         p = &(probes[i]);
-        if ((probe->x_cell >= x_start) && ((p->x_cell) < x_stop))
+        // if probe is inside the grid for this thread
+        if ((p->x_cell >= x_start) && ((p->x_cell) < x_stop))
         {
-            if ((p->field) < 3)
+            // e-field probe
+            if ((p->field_type) < 3)
             {
                 e_probes.push_back(p);
             }
-            else {
+            // h-field probe
+            else 
+            {
                 h_probes.push_back(p);
-            
-            // figure out full offset into the array. x_index needs to account for the starting position of 
+            }
+            // compute the pointer for the probe in the grid. x_index needs to account for the starting position of 
             // the grid.
-            p->field_p = (fields_base[p->field]) + ( ) + p->yz_offset;
+            p->field_p = (fields_base[p->field_type]) + (
+                ((p->x_cell - x_start) * (p->NyNz)) + (p->yz_offset)
+            );
+
         }
     }
 
@@ -810,7 +821,10 @@ void solver_thread(int x_start, int x_stop, int Nt, int thread_idx)
         // update e-probe values
         for (Probe * p : e_probes) {
             // apply soft source
-            *(p->field_p) = *(p->field_p) + (p->values)[n];
+            if (p->is_source)
+            {
+                *(p->field_p) = *(p->field_p) + (p->values)[n];
+            }
 
             // put the resulting total voltage in the source_values array once the value is used for this
             // time step.
@@ -943,6 +957,18 @@ void solver_thread(int x_start, int x_stop, int Nt, int thread_idx)
 
         }
 
+        // update h-probe values
+        for (Probe * p : h_probes) {
+            // apply soft source
+            if (p->is_source)
+            {
+                *(p->field_p) = *(p->field_p) + (p->values)[n];
+            }
+
+            // put the resulting total voltage in the source_values array once the value is used for this
+            // time step.
+            (p->values)[n] = *(p->field_p);
+        }
 
         // wait for all threads to complete before moving on to e fields
         {

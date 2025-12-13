@@ -143,7 +143,8 @@ struct Probe {
     int field_type;
     int x_cell; // cell index where the probe is located
     int yz_offset;
-    bool source;
+    int NyNz;
+    bool is_source;
 };
 
 struct ThreadData {
