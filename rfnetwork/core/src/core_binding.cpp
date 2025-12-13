@@ -349,7 +349,6 @@ static PyObject * cascade_self_ndata_bind(PyObject *self, PyObject *args)
 static PyObject* solver_run(PyObject* self, PyObject* args) {
 
     PyObject *coefficients;
-    PyObject *fields;
     PyObject *probes;
     PyObject *monitors;
     
@@ -360,17 +359,12 @@ static PyObject* solver_run(PyObject* self, PyObject* args) {
     int n_threads;
 
     // Parse arguments: expecting a single Python object
-    if (!PyArg_ParseTuple(args, "OOOOIIIII", &coefficients, &fields, &probes, &monitors, &Nx, &Ny, &Nz, &Nt, &n_threads)) {
+    if (!PyArg_ParseTuple(args, "OOOIIIII", &coefficients, &probes, &monitors, &Nx, &Ny, &Nz, &Nt, &n_threads)) {
         return PyLong_FromLong(1);
     }
 
     if (!PyDict_Check(coefficients)) {
         PyErr_SetString(PyExc_TypeError, "Expected a coefficients dictionary");
-        return PyLong_FromLong(1);
-    }
-
-    if (!PyDict_Check(fields)) {
-        PyErr_SetString(PyExc_TypeError, "Expected a fields dictionary");
         return PyLong_FromLong(1);
     }
 
@@ -384,7 +378,7 @@ static PyObject* solver_run(PyObject* self, PyObject* args) {
         return PyLong_FromLong(1);
     }
 
-    solver_init_fields(fields, coefficients, Nx, Ny, Nz);
+    solver_init_fields(coefficients, Nx, Ny, Nz);
     solver_init_monitors(monitors, Nt);
     solver_init_probes(probes, Nt);
 

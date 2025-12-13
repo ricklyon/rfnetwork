@@ -156,15 +156,12 @@ float * get_source_array(PyObject * dict, int Nt)
 }
 
 
-int solver_init_fields(PyObject * fields, PyObject * coefficients, int Nx, int Ny, int Nz)
+int solver_init_fields(PyObject * coefficients, int Nx, int Ny, int Nz)
 {
     // initialize ex pointers
     Ex.Nx = Nx;
     Ex.Ny = Ny + 1;
     Ex.Nz = Nz + 1;
-    Ex.ex_y = get_solver_array(fields, "ex_y", Ex.Nx, Ex.Ny, Ex.Nz);
-    Ex.ex_z = get_solver_array(fields, "ex_z", Ex.Nx, Ex.Ny, Ex.Nz);
-    Ex.ex   = get_solver_array(fields, "ex",   Ex.Nx, Ex.Ny, Ex.Nz);
     Ex.NyNz = Ex.Ny * Ex.Nz;
 
     // y and z endpoints do not get updated and don't have coefficients 
@@ -181,9 +178,6 @@ int solver_init_fields(PyObject * fields, PyObject * coefficients, int Nx, int N
     Ey.Nx = Nx + 1;
     Ey.Ny = Ny;
     Ey.Nz = Nz + 1;
-    Ey.ey_z = get_solver_array(fields, "ey_z", Ey.Nx, Ey.Ny, Ey.Nz);
-    Ey.ey_x = get_solver_array(fields, "ey_x", Ey.Nx, Ey.Ny, Ey.Nz);
-    Ey.ey   = get_solver_array(fields, "ey",   Ey.Nx, Ey.Ny, Ey.Nz);
     Ey.NyNz = Ey.Ny * Ey.Nz;
 
     // x and z endpoints do not get updated and don't have coefficients 
@@ -206,9 +200,6 @@ int solver_init_fields(PyObject * fields, PyObject * coefficients, int Nx, int N
     Ez.Nx = Nx + 1;
     Ez.Ny = Ny + 1;
     Ez.Nz = Nz;
-    Ez.ez_x = get_solver_array(fields, "ez_x", Ez.Nx, Ez.Ny, Ez.Nz);
-    Ez.ez_y = get_solver_array(fields, "ez_y", Ez.Nx, Ez.Ny, Ez.Nz);
-    Ez.ez   = get_solver_array(fields, "ez",   Ez.Nx, Ez.Ny, Ez.Nz);
     Ez.NyNz = Ez.Ny * Ez.Nz;
 
     // x and y endpoints do not get updated and don't have coefficients 
@@ -230,9 +221,6 @@ int solver_init_fields(PyObject * fields, PyObject * coefficients, int Nx, int N
     Hx.Nx = Nx + 1;
     Hx.Ny = Ny;
     Hx.Nz = Nz;
-    Hx.hx_y = get_solver_array(fields, "hx_y", Hx.Nx, Hx.Ny, Hx.Nz);
-    Hx.hx_z = get_solver_array(fields, "hx_z", Hx.Nx, Hx.Ny, Hx.Nz);
-    Hx.hx   = get_solver_array(fields, "hx",   Hx.Nx, Hx.Ny, Hx.Nz);
     Hx.NyNz = Hx.Ny * Hx.Nz;
 
     Dx.Db_hx_y = get_solver_array(coefficients, "Db_hx_y", Hx.Nx-1, Hx.Ny, Hx.Nz);
@@ -249,9 +237,6 @@ int solver_init_fields(PyObject * fields, PyObject * coefficients, int Nx, int N
     Hy.Nx = Nx;
     Hy.Ny = Ny + 1;
     Hy.Nz = Nz;
-    Hy.hy_z = get_solver_array(fields, "hy_z", Hy.Nx, Hy.Ny, Hy.Nz);
-    Hy.hy_x = get_solver_array(fields, "hy_x", Hy.Nx, Hy.Ny, Hy.Nz);
-    Hy.hy   = get_solver_array(fields, "hy",   Hy.Nx, Hy.Ny, Hy.Nz);
     Hy.NyNz = Hy.Ny * Hy.Nz;
 
     Dy.Db_hy_z = get_solver_array(coefficients, "Db_hy_z", Hy.Nx, Hy.Ny, Hy.Nz);
@@ -263,9 +248,6 @@ int solver_init_fields(PyObject * fields, PyObject * coefficients, int Nx, int N
     Hz.Nx = Nx;
     Hz.Ny = Ny;
     Hz.Nz = Nz + 1;
-    Hz.hz_x = get_solver_array(fields, "hz_x", Hz.Nx, Hz.Ny, Hz.Nz);
-    Hz.hz_y = get_solver_array(fields, "hz_y", Hz.Nx, Hz.Ny, Hz.Nz);
-    Hz.hz   = get_solver_array(fields, "hz",   Hz.Nx, Hz.Ny, Hz.Nz);
     Hz.NyNz = Hz.Ny * Hz.Nz;
 
     Dz.Db_hz_x = get_solver_array(coefficients, "Db_hz_x", Hz.Nx, Hz.Ny, Hz.Nz);
@@ -285,9 +267,6 @@ int solver_init_monitors(PyObject * py_monitors, int Nt)
     {
         throw std::runtime_error("Exceeded maximum number of monitors.");
     }
-
-    // pointer to all field components
-    float * field_p[6] = {Ex.ex, Ey.ey, Ez.ez, Hx.hx, Hy.hy, Hz.hz};
 
     // shapes of field components
     int Nx[6] = {Ex.Nx, Ey.Nx, Ez.Nx, Hx.Nx, Hy.Nx, Hz.Nx};
@@ -327,7 +306,7 @@ int solver_init_monitors(PyObject * py_monitors, int Nt)
         }
 
         monitors[m].values = get_solver_array(py_mon, "values", Nm, n1, n2);
-        monitors[m].field = field_p[field];
+        monitors[m].field_type = field;
         monitors[m].position = PyLong_AsLong(PyDict_GetItemString(py_mon, "position"));
         monitors[m].n_step = n_step;
         monitors[m].axis = axis;
@@ -451,7 +430,7 @@ int solver_run(int Nt, int n_th)
     }
 
     // allocate dummy data for endpoints of thread grids. 
-    thread_data[0].ez = new float[Ex.Ny * Ex.Nz]{};
+    thread_data[0].ez = new float[Ez.Ny * Ez.Nz]{};
     thread_data[0].ey = new float[Ey.Ny * Ey.Nz]{};
     thread_data[n_threads+1].hy = new float[Hy.Ny * Hy.Nz]{};
     thread_data[n_threads+1].hz = new float[Hz.Ny * Hz.Nz]{};
@@ -640,8 +619,8 @@ void solver_thread(int x_start, int x_stop, int Nt, int thread_idx)
     float * p_hy_x = new float[Nx * Hy.Ny * Hy.Nz]{0}; //  memset(p_hy_x, 0, Nx * Hy.Ny * Hy.Nz * sizeof(float));
     float * p_hy   = new float[Nx * Hy.Ny * Hy.Nz]{0}; //  memset(p_hy,   0, Nx * Hy.Ny * Hy.Nz * sizeof(float));
 
-    float * p_hz_z = new float[Nx * Hz.Ny * Hz.Nz]{0}; //  memset(p_hz_z, 0, Nx * Hz.Ny * Hz.Nz * sizeof(float));
     float * p_hz_x = new float[Nx * Hz.Ny * Hz.Nz]{0}; //  memset(p_hz_x, 0, Nx * Hz.Ny * Hz.Nz * sizeof(float));
+    float * p_hz_y = new float[Nx * Hz.Ny * Hz.Nz]{0}; //  memset(p_hz_x, 0, Nx * Hz.Ny * Hz.Nz * sizeof(float));
     float * p_hz   = new float[Nx * Hz.Ny * Hz.Nz]{0}; //  memset(p_hz,   0, Nx * Hz.Ny * Hz.Nz * sizeof(float));
 
     // populate thread data
@@ -655,19 +634,32 @@ void solver_thread(int x_start, int x_stop, int Nt, int thread_idx)
     float * p_hy_1;
     float * p_ey_0; // points to the ey components in the previous thread grid
     float * p_ez_0; // points to the ez components in the previous thread grid
+    float * mon_field; // points to a field that is being monitored
 
     // get all probes indices that fall within this thread's grid
     std:: vector<Probe*> e_probes;
     std:: vector<Probe*> h_probes;
     Probe * p;
-    float * fields_base[6] = {p_ex, p_ey, p_ez, p_hx, p_hy, p_hz};
+    float * fields_base[6]     = {p_ex, p_ey, p_ez, p_hx, p_hy, p_hz};
+    float * fields_sp1_base[6] = {p_ex_y, p_ey_z, p_ez_x, p_hx_y, p_hy_z, p_hz_x};
+    float * fields_sp2_base[6] = {p_ex_z, p_ey_x, p_ez_y, p_hx_z, p_hy_x, p_hz_y};
+
+    // msg.str("");
+    // msg.clear();
+    // msg << "N probes " << n_probes  << "\n";
+    // std::cout << msg.str();
 
     for (int i = 0; i < n_probes; i++)
     {   
         p = &(probes[i]);
         // if probe is inside the grid for this thread
-        if ((p->x_cell >= x_start) && ((p->x_cell) < x_stop))
+        if (((p->x_cell) >= x_start) && ((p->x_cell) < x_stop))
         {
+            // msg.str("");
+            // msg.clear();
+            // msg << "Probe " << i << ", Thread " << thread_idx << " x-cell " << (p->x_cell) << "\n";
+            // std::cout << msg.str();
+
             // e-field probe
             if ((p->field_type) < 3)
             {
@@ -680,9 +672,10 @@ void solver_thread(int x_start, int x_stop, int Nt, int thread_idx)
             }
             // compute the pointer for the probe in the grid. x_index needs to account for the starting position of 
             // the grid.
-            p->field_p = (fields_base[p->field_type]) + (
-                ((p->x_cell - x_start) * (p->NyNz)) + (p->yz_offset)
-            );
+            x_offset = (((p->x_cell) - x_start) * (p->NyNz)) + (p->yz_offset);
+            p->field_p = (fields_base[p->field_type]) + x_offset;
+            p->field_s1_p = (fields_sp1_base[p->field_type]) + x_offset;
+            p->field_s2_p = (fields_sp2_base[p->field_type]) + x_offset;
 
         }
     }
@@ -736,7 +729,7 @@ void solver_thread(int x_start, int x_stop, int Nt, int thread_idx)
             MatrixFloatType hz   (p_hz   + x_offset, Hz.Ny, Hz.Nz);
 
             // ex coefficients
-            x_offset = x * Cx.NyNz;
+            x_offset = (x_start + x) * Cx.NyNz;
             MatrixFloatType Cb_ex_y (Cx.Cb_ex_y + x_offset, Cx.Ny, Cx.Nz);
             MatrixFloatType Cb_ex_z (Cx.Cb_ex_z + x_offset, Cx.Ny, Cx.Nz);
 
@@ -744,7 +737,7 @@ void solver_thread(int x_start, int x_stop, int Nt, int thread_idx)
             MatrixFloatType Ca_ex_z (Cx.Ca_ex_z + x_offset, Cx.Ny, Cx.Nz);
 
             // ey coefficients. 
-            x_offset = x * Cy.NyNz;
+            x_offset = (x_start + x) * Cy.NyNz;
             MatrixFloatType Cb_ey_z (Cy.Cb_ey_z + x_offset, Cy.Ny, Cy.Nz);
             MatrixFloatType Cb_ey_x (Cy.Cb_ey_x + x_offset, Cy.Ny, Cy.Nz);
 
@@ -752,7 +745,7 @@ void solver_thread(int x_start, int x_stop, int Nt, int thread_idx)
             MatrixFloatType Ca_ey_x (Cy.Ca_ey_x + x_offset, Cy.Ny, Cy.Nz);
             
             // ez coefficients
-            x_offset = x * Cz.NyNz;
+            x_offset = (x_start + x) * Cz.NyNz;
             MatrixFloatType Cb_ez_x (Cz.Cb_ez_x + x_offset, Cz.Ny, Cz.Nz);
             MatrixFloatType Cb_ez_y (Cz.Cb_ez_y + x_offset, Cz.Ny, Cz.Nz);
 
@@ -823,11 +816,14 @@ void solver_thread(int x_start, int x_stop, int Nt, int thread_idx)
             // apply soft source
             if (p->is_source)
             {
-                *(p->field_p) = *(p->field_p) + (p->values)[n];
+                *(p->field_s1_p) = *(p->field_s1_p) + (p->values)[n];
+                *(p->field_s2_p) = *(p->field_s2_p) + (p->values)[n];
+                *(p->field_p) = *(p->field_s1_p) + *(p->field_s2_p);
             }
 
-            // put the resulting total voltage in the source_values array once the value is used for this
-            // time step.
+            // update probes
+            // if this is a source, the values array is replaced with the resulting total voltage after it is used for
+            // each time step.
             (p->values)[n] = *(p->field_p);
         }
 
@@ -858,8 +854,8 @@ void solver_thread(int x_start, int x_stop, int Nt, int thread_idx)
             MatrixFloatType hy   (p_hy   + x_offset, Hy.Ny, Hy.Nz);
 
             x_offset = x * Hz.NyNz;
-            MatrixFloatType hz_x (p_hz_z + x_offset, Hz.Ny, Hz.Nz);
-            MatrixFloatType hz_y (p_hz_x + x_offset, Hz.Ny, Hz.Nz);
+            MatrixFloatType hz_x (p_hz_x + x_offset, Hz.Ny, Hz.Nz);
+            MatrixFloatType hz_y (p_hz_y + x_offset, Hz.Ny, Hz.Nz);
             MatrixFloatType hz   (p_hz   + x_offset, Hz.Ny, Hz.Nz);
 
             // e-fields 
@@ -873,7 +869,7 @@ void solver_thread(int x_start, int x_stop, int Nt, int thread_idx)
             MatrixFloatType ez   (p_ez   + x_offset, Ez.Ny, Ez.Nz);
 
             // hx coefficients
-            x_offset = x * Hx.NyNz;
+            x_offset = (x_start + x) * Hx.NyNz;
             MatrixFloatType Db_hx_y (Dx.Db_hx_y + x_offset, Hx.Ny, Hx.Nz);
             MatrixFloatType Db_hx_z (Dx.Db_hx_z + x_offset, Hx.Ny, Hx.Nz);
 
@@ -881,7 +877,7 @@ void solver_thread(int x_start, int x_stop, int Nt, int thread_idx)
             MatrixFloatType Da_hx_z (Dx.Da_hx_z + x_offset, Hx.Ny, Hx.Nz);
 
             // hy coefficients
-            x_offset = x * Hy.NyNz;
+            x_offset = (x_start + x) * Hy.NyNz;
             MatrixFloatType Db_hy_z (Dy.Db_hy_z + x_offset, Hy.Ny, Hy.Nz);
             MatrixFloatType Db_hy_x (Dy.Db_hy_x + x_offset, Hy.Ny, Hy.Nz);
 
@@ -889,7 +885,7 @@ void solver_thread(int x_start, int x_stop, int Nt, int thread_idx)
             MatrixFloatType Da_hy_x (Dy.Da_hy_x + x_offset, Hy.Ny, Hy.Nz);
 
             // hz coefficients
-            x_offset = x * Hz.NyNz;
+            x_offset = (x_start + x) * Hz.NyNz;
             MatrixFloatType Db_hz_x (Dz.Db_hz_x + x_offset, Hz.Ny, Hz.Nz);
             MatrixFloatType Db_hz_y (Dz.Db_hz_y + x_offset, Hz.Ny, Hz.Nz);
 
@@ -958,7 +954,8 @@ void solver_thread(int x_start, int x_stop, int Nt, int thread_idx)
         }
 
         // update h-probe values
-        for (Probe * p : h_probes) {
+        for (Probe * p : h_probes) 
+        {
             // apply soft source
             if (p->is_source)
             {
@@ -979,6 +976,56 @@ void solver_thread(int x_start, int x_stop, int Nt, int thread_idx)
             // notify controller that h_updates has been changed
             cv.notify_all(); 
             cv_th.wait(lock, [] { return h_updates_done; });
+        }
+
+        // update monitors
+        for (int m = 0; m < n_monitors; m++)
+        {
+            Monitor mon = monitors[m];
+            // pointer to field in grid
+            mon_field = fields_base[mon.field_type];
+
+            if ((n > 0) && ((n % (mon.n_step)) != 0))
+            {
+                continue;
+            }
+
+            int m_n = n / mon.n_step;
+
+            MatrixFloatType m_values (mon.values + (m_n * (mon.N1N2)), mon.N1, mon.N2);
+            
+            if (mon.axis == 0)
+            {
+                // only update x slice monitor if it is within bounds of the thread
+                if ((mon.position < x_start) || (mon.position >= x_stop))
+                {
+                    continue;
+                }
+                MatrixFloatType m_field (mon_field + (mon.position * (mon.NyNz)), mon.Ny, mon.Nz);
+                m_values = m_field;
+            }
+
+            else if (mon.axis == 1)
+            {
+                // components on the edge of the grid that have +1 components from the grid will not be captured here,
+                // but they are not updated and will be zero. 
+                // as long as the monitor values were initialized in python to zero, this is a non-issue.
+                for (int i = x_start; i < x_stop; i++)
+                {
+                    MatrixFloatType m_field (mon_field+ ((i - x_start) * (mon.NyNz)), mon.Ny, mon.Nz);
+                    m_values.row(i) = m_field.row(mon.position);
+                }
+            }
+
+            else // (m.axis == 2)
+            {
+                for (int i = x_start; i < x_stop; i++)
+                {
+                    MatrixFloatType m_field (mon_field + ((i - x_start) * (mon.NyNz)), mon.Ny, mon.Nz);
+                    m_values.row(i) = m_field.col(mon.position);
+                }
+            }
+            
         }
 
     }
@@ -1003,385 +1050,8 @@ void solver_thread(int x_start, int x_stop, int Nt, int thread_idx)
     delete[] p_hy_x ;
     delete[] p_hy   ;
 
-    delete[] p_hz_z ;
     delete[] p_hz_x ;
+    delete[] p_hz_y ;
     delete[] p_hz   ;
-
-}
-
-// update Ex components, starting with the x-axis index x_start, and ending with x_stop (stop index is not inclusive)
-int solver_update_ex(int x_start, int x_stop)
-{
-    int x_offset;
-    // number of updated field components
-    int Ny = Cx.Ny;
-    int Nz = Cx.Nz;
-
-    // operate on a single slice of the field on the x axis
-    for (int x = x_start; x < x_stop; x++)
-    {   
-        x_offset = x * Ex.NyNz;
-        MatrixFloatType ex_y (Ex.ex_y + x_offset, Ex.Ny, Ex.Nz);
-        MatrixFloatType ex_z (Ex.ex_z + x_offset, Ex.Ny, Ex.Nz);
-        MatrixFloatType ex   (Ex.ex   + x_offset, Ex.Ny, Ex.Nz);
-        
-        // hz and hy are in the same x plane as ex
-        MatrixFloatType hz (Hz.hz + (x * Hz.NyNz), Hz.Ny, Hz.Nz);
-        MatrixFloatType hy (Hy.hy + (x * Hy.NyNz), Hy.Ny, Hy.Nz);
-        
-        // ex coefficients have the same x index as ex
-        x_offset = x * Cx.NyNz;
-        MatrixFloatType Cb_ex_y (Cx.Cb_ex_y + x_offset, Ny, Nz);
-        MatrixFloatType Cb_ex_z (Cx.Cb_ex_z + x_offset, Ny, Nz);
-
-        MatrixFloatType Ca_ex_y (Cx.Ca_ex_y + x_offset, Ny, Nz);
-        MatrixFloatType Ca_ex_z (Cx.Ca_ex_z + x_offset, Ny, Nz);
-        
-        // update ex_y
-        // ex_y[:, 1:-1, 1:-1] = (Ca_ex_y * ex_y[:, 1:-1, 1:-1]) + ex_yd
-        ex_y.block(1, 1, Ny, Nz) = Ca_ex_y.cwiseProduct(ex_y.block(1, 1, Ny, Nz)) + (
-            Cb_ex_y.cwiseProduct((hz.bottomRows(Ny) - hz.topRows(Ny)).block(0, 1, Ny, Nz))
-        );
-        
-        // ex_yd = Cb_ex_y * np.diff(hz, axis=1)[:, :, 1:-1]
-        // ex_y.block(1, 1, Ny, Nz) += (
-        //     Cb_ex_y.cwiseProduct((hz.bottomRows(Ny) - hz.topRows(Ny)).block(0, 1, Ny, Nz))
-        // );
-
-        // update ex_z
-        // ex_z[:, 1:-1, 1:-1] = (Ca_ex_z * ex_z[:, 1:-1, 1:-1]) + ex_zd
-        ex_z.block(1, 1, Ny, Nz) = Ca_ex_z.cwiseProduct(ex_z.block(1, 1, Ny, Nz)) + (
-            Cb_ex_z.cwiseProduct((hy.rightCols(Nz) - hy.leftCols(Nz)).block(1, 0, Ny, Nz))
-        );
-
-        // ex_zd = Cb_ex_z * np.diff(hy, axis=2)[:, 1:-1, :]
-        // ex_z.block(1, 1, Ny, Nz) += (
-        //     Cb_ex_z.cwiseProduct((hy.rightCols(Nz) - hy.leftCols(Nz)).block(1, 0, Ny, Nz))
-        // );
-
-        // combine split components
-        ex = ex_y + ex_z;
-        
-
-    }
-
-    return 0;
-}
-
-// update Ey components, starting with the x-axis index x_start, and ending with x_stop (stop index is not inclusive)
-int solver_update_ey(int x_start, int x_stop)
-{
-    int x_offset;
-    // number of updated field components
-    int Ny = Cy.Ny;
-    int Nz = Cy.Nz;
-
-    // get a single slice of the field on the x axis
-    for (int x = x_start; x < x_stop; x++)
-    {   
-        // endpoints of ey along x do not get updated
-        if ((x < 1) || (x > (Ey.Nx - 2)))
-        {
-            continue;
-        }
-        
-        x_offset = x * Ey.NyNz;
-        MatrixFloatType ey_z (Ey.ey_z + x_offset, Ey.Ny, Ey.Nz);
-        MatrixFloatType ey_x (Ey.ey_x + x_offset, Ey.Ny, Ey.Nz);
-        MatrixFloatType ey   (Ey.ey   + x_offset, Ey.Ny, Ey.Nz);
-
-        // hx is in the same x plane as ey
-        MatrixFloatType hx (Hx.hx + (x * Hx.NyNz), Hx.Ny, Hx.Nz);
-        
-        // get hz components on either side of x-slice
-        MatrixFloatType hz_0 (Hz.hz + ((x - 1) * Hz.NyNz), Hz.Ny, Hz.Nz);
-        MatrixFloatType hz_1 (Hz.hz + (x * Hz.NyNz), Hz.Ny, Hz.Nz);
-
-        // ey coefficients start at ex=1, the pointer offset for the first slice of coefficients at x=0 should be 0
-        x_offset = (x - 1) * Cy.NyNz;
-        MatrixFloatType Cb_ey_z (Cy.Cb_ey_z + x_offset, Ny, Nz);
-        MatrixFloatType Cb_ey_x (Cy.Cb_ey_x + x_offset, Ny, Nz);
-
-        MatrixFloatType Ca_ey_z (Cy.Ca_ey_z + x_offset, Ny, Nz);
-        MatrixFloatType Ca_ey_x (Cy.Ca_ey_x + x_offset, Ny, Nz);
-
-        // update ey_z
-        // ey_z[1:-1, :, 1:-1] = (Ca_ey_z * ey_z[1:-1, :, 1:-1]) + ey_zd
-        ey_z.block(0, 1, Ny, Nz) = Ca_ey_z.cwiseProduct(ey_z.block(0, 1, Ny, Nz)) + (
-            Cb_ey_z.cwiseProduct(hx.rightCols(Nz) - hx.leftCols(Nz))
-        );
-
-        // ey_zd = Cb_ey_z * np.diff(hx, axis=2)[1:-1, :, :]
-        // ey_z.block(0, 1, Ny, Nz) += (
-        //     Cb_ey_z.cwiseProduct(hx.rightCols(Nz) - hx.leftCols(Nz))
-        // );
-
-        // update ey_x
-        // ey_x[1:-1, :, 1:-1] = (Ca_ey_x * ey_x[1:-1, :, 1:-1]) + ey_xd
-        ey_x.block(0, 1, Ny, Nz) = Ca_ey_x.cwiseProduct(ey_x.block(0, 1, Ny, Nz)) + (
-            Cb_ey_x.cwiseProduct((hz_1 - hz_0).block(0, 1, Ny, Nz))
-        );
-
-
-        // ey_xd = Cb_ey_x * np.diff(hz, axis=0)[:, :, 1:-1]
-        // ey_x.block(0, 1, Ny, Nz) += (
-        //     Cb_ey_x.cwiseProduct((hz_1 - hz_0).block(0, 1, Ny, Nz))
-        // );
-
-        // combine split components
-        ey = ey_z + ey_x;
-    }
-
-    return 0;
-}
-
-
-// update Ez components, starting with the x-axis index x_start, and ending with x_stop (stop index is not inclusive)
-int solver_update_ez(int x_start, int x_stop)
-{
-    int x_offset;
-    // number of updated field components
-    int Ny = Cz.Ny;
-    int Nz = Cz.Nz;
-
-    // get a single slice of the field on the x axis
-    for (int x = x_start; x < x_stop; x++)
-    {   
-        // endpoints of ey along x do not get updated
-        if ((x < 1) || (x > (Ez.Nx - 2)))
-        {
-            continue;
-        }
-        
-        x_offset = x * Ez.NyNz;
-        MatrixFloatType ez_x (Ez.ez_x + x_offset, Ez.Ny, Ez.Nz);
-        MatrixFloatType ez_y (Ez.ez_y + x_offset, Ez.Ny, Ez.Nz);
-        MatrixFloatType ez   (Ez.ez   + x_offset, Ez.Ny, Ez.Nz);
-
-        // hx is in the same x plane as ey
-        MatrixFloatType hx (Hx.hx + (x * Hx.NyNz), Hx.Ny, Hx.Nz);
-
-        // get hy components on either side of x-slice
-        MatrixFloatType hy_0 (Hy.hy + ((x - 1) * Hy.NyNz), Hy.Ny, Hy.Nz);
-        MatrixFloatType hy_1 (Hy.hy + (x * Hy.NyNz), Hy.Ny, Hy.Nz);
-
-        // ez coefficients start at x=1, the pointer offset for the first slice of coefficients at x=0 should be 0
-        x_offset = (x - 1) * Cz.NyNz;
-        MatrixFloatType Cb_ez_x (Cz.Cb_ez_x + x_offset, Ny, Nz);
-        MatrixFloatType Cb_ez_y (Cz.Cb_ez_y + x_offset, Ny, Nz);
-
-        MatrixFloatType Ca_ez_x (Cz.Ca_ez_x + x_offset, Ny, Nz);
-        MatrixFloatType Ca_ez_y (Cz.Ca_ez_y + x_offset, Ny, Nz);
-
-        // update ez_x
-        // ez_x[1:-1, 1:-1, :] = (Ca_ez_x * ez_x[1:-1, 1:-1, :]) + ez_xd
-        ez_x.block(1, 0, Ny, Nz) = Ca_ez_x.cwiseProduct(ez_x.block(1, 0, Ny, Nz)) + (
-            Cb_ez_x.cwiseProduct((hy_1 - hy_0).block(1, 0, Ny, Nz))
-        );
-
-        // ez_xd = Cb_ez_x * np.diff(hy, axis=0)[:, 1:-1, :]
-        // ez_x.block(1, 0, Ny, Nz) += (
-        //     Cb_ez_x.cwiseProduct((hy_1 - hy_0).block(1, 0, Ny, Nz))
-        // );
-
-        // update ez_y
-        // ez_y[1:-1, 1:-1, :] = (Ca_ez_y * ez_y[1:-1, 1:-1, :]) + ez_yd
-        ez_y.block(1, 0, Ny, Nz) = Ca_ez_y.cwiseProduct(ez_y.block(1, 0, Ny, Nz)) + (
-            Cb_ez_y.cwiseProduct(hx.bottomRows(Ny) - hx.topRows(Ny))
-        );
-
-        // ez_yd = Cb_ez_y * np.diff(hx, axis=1)[1:-1, :, :]
-        // ez_y.block(1, 0, Ny, Nz) += (
-        //     Cb_ez_y.cwiseProduct(hx.bottomRows(Ny) - hx.topRows(Ny))
-        // );
-
-        // combine split components
-        ez = ez_x + ez_y;
-
-    }
-
-    return 0;
-
-}
-
-// update Hx components, starting with the x-axis index x_start, and ending with x_stop (stop index is not inclusive)
-int solver_update_hx(int x_start, int x_stop)
-{
-    int x_offset;
-    // number of updated field components
-    int Ny = Hx.Ny;
-    int Nz = Hx.Nz;
-    int NyNz = Hx.NyNz;
-
-    // get a single slice of the field on the x axis
-    for (int x = x_start; x < x_stop; x++)
-    {   
-        x_offset = x * NyNz;
-        MatrixFloatType hx_y (Hx.hx_y + x_offset, Ny, Nz);
-        MatrixFloatType hx_z (Hx.hx_z + x_offset, Ny, Nz);
-        MatrixFloatType hx   (Hx.hx   + x_offset, Ny, Nz);
-
-        // ey and ez are in the same x plane as hx
-        MatrixFloatType ey (Ey.ey + (x * Ey.NyNz), Ey.Ny, Ey.Nz);
-        MatrixFloatType ez (Ez.ez + (x * Ez.NyNz), Ez.Ny, Ez.Nz);
-
-        // hx coefficients
-        MatrixFloatType Db_hx_y (Dx.Db_hx_y + x_offset, Ny, Nz);
-        MatrixFloatType Db_hx_z (Dx.Db_hx_z + x_offset, Ny, Nz);
-
-        MatrixFloatType Da_hx_y (Dx.Da_hx_y + x_offset, Ny, Nz);
-        MatrixFloatType Da_hx_z (Dx.Da_hx_z + x_offset, Ny, Nz);
-
-        // update hx_y
-        // hx_y = Da_hx_y * hx_y + hx_yd
-        hx_y = Da_hx_y.cwiseProduct(hx_y) + (
-            Db_hx_y.cwiseProduct(ez.bottomRows(Ny) - ez.topRows(Ny))
-        );
-
-
-        // hx_yd = Db_hx_y * np.diff(ez, axis=1)
-        // hx_y += (
-        //     Db_hx_y.cwiseProduct(ez.bottomRows(Ny) - ez.topRows(Ny))
-        // );
-
-        // update hx_z
-        // hx_z = Da_hx_z * hx_z + hx_zd
-        hx_z = Da_hx_z.cwiseProduct(hx_z) + (
-            Db_hx_z.cwiseProduct(ey.rightCols(Nz) - ey.leftCols(Nz))
-        );
-
-        // hx_zd = Db_hx_z * np.diff(ey, axis=2)
-        // hx_z += (
-        //     Db_hx_z.cwiseProduct(ey.rightCols(Nz) - ey.leftCols(Nz))
-        // );
-
-        // combine split components
-        hx = hx_y + hx_z;
-    }
-
-    return 0;
-
-}
-
-// update Hy components, starting with the x-axis index x_start, and ending with x_stop (stop index is not inclusive)
-int solver_update_hy(int x_start, int x_stop)
-{
-    int x_offset;
-    // number of updated field components
-    int Ny = Hy.Ny;
-    int Nz = Hy.Nz;
-    int NyNz = Hy.NyNz;
-
-    // get a single slice of the field on the x axis
-    for (int x = x_start; x < x_stop; x++)
-    {  
-        x_offset = x * NyNz;
-        MatrixFloatType hy_z (Hy.hy_z + x_offset, Ny, Nz);
-        MatrixFloatType hy_x (Hy.hy_x + x_offset, Ny, Nz);
-        MatrixFloatType hy   (Hy.hy   + x_offset, Ny, Nz);
-
-        // ex is in the same x plane as hy
-        MatrixFloatType ex (Ex.ex + (x * Ex.NyNz), Ex.Ny, Ex.Nz);
-
-        // get ez components on either side of x-slice
-        MatrixFloatType ez_0 (Ez.ez + ((x) * Ez.NyNz), Ez.Ny, Ez.Nz);
-        MatrixFloatType ez_1 (Ez.ez + ((x + 1) * Ez.NyNz), Ez.Ny, Ez.Nz);
-
-        // hy coefficients
-        MatrixFloatType Db_hy_z (Dy.Db_hy_z + x_offset, Ny, Nz);
-        MatrixFloatType Db_hy_x (Dy.Db_hy_x + x_offset, Ny, Nz);
-
-        MatrixFloatType Da_hy_z (Dy.Da_hy_z + x_offset, Ny, Nz);
-        MatrixFloatType Da_hy_x (Dy.Da_hy_x + x_offset, Ny, Nz);
-
-        // update hy_z
-        // hy_z = Da_hy_z * hy_z + hy_zd
-        hy_z = Da_hy_z.cwiseProduct(hy_z) + (
-            Db_hy_z.cwiseProduct(ex.rightCols(Nz) - ex.leftCols(Nz))
-        );
-
-        // hy_zd = Db_hy_z * np.diff(ex, axis=2)
-        // hy_z += (
-        //     Db_hy_z.cwiseProduct(ex.rightCols(Nz) - ex.leftCols(Nz))
-        // );
-
-        // update hy_x
-        // hy_x = Da_hy_x * hy_x + hy_xd
-        hy_x = Da_hy_x.cwiseProduct(hy_x) + (
-            Db_hy_x.cwiseProduct(ez_1 - ez_0)
-        );
-
-        // hy_xd = Db_hy_x * np.diff(ez, axis=0)
-        // hy_x += (
-        //     Db_hy_x.cwiseProduct(ez_1 - ez_0)
-        // );
-
-        // combine split components
-        hy = hy_z + hy_x;
-
-    }
-
-    return 0;
-}
-
-// update Hz components, starting with the x-axis index x_start, and ending with x_stop (stop index is not inclusive)
-int solver_update_hz(int x_start, int x_stop)
-{
-    int x_offset;
-    // number of updated field components
-    int Ny = Hz.Ny;
-    int Nz = Hz.Nz;
-    int NyNz = Hz.NyNz;
-
-    // get a single slice of the field on the x axis
-    for (int x = x_start; x < x_stop; x++)
-    {  
-        x_offset = x * NyNz;
-        MatrixFloatType hz_x (Hz.hz_x + x_offset, Ny, Nz);
-        MatrixFloatType hz_y (Hz.hz_y + x_offset, Ny, Nz);
-        MatrixFloatType hz   (Hz.hz   + x_offset, Ny, Nz);
-
-        // ex is in the same x plane as hz
-        MatrixFloatType ex (Ex.ex + (x * Ex.NyNz), Ex.Ny, Ex.Nz);
-
-        // get ey components on either side of x-slice
-        MatrixFloatType ey_0 (Ey.ey + ((x) * Ey.NyNz), Ey.Ny, Ey.Nz);
-        MatrixFloatType ey_1 (Ey.ey + ((x + 1) * Ey.NyNz), Ey.Ny, Ey.Nz);
-
-        // hz coefficients
-        MatrixFloatType Db_hz_x (Dz.Db_hz_x + x_offset, Ny, Nz);
-        MatrixFloatType Db_hz_y (Dz.Db_hz_y + x_offset, Ny, Nz);
-
-        MatrixFloatType Da_hz_x (Dz.Da_hz_x + x_offset, Ny, Nz);
-        MatrixFloatType Da_hz_y (Dz.Da_hz_y + x_offset, Ny, Nz);
-
-        // update hz_x
-        // hz_x = Da_hz_x * hz_x + hz_xd
-        hz_x = Da_hz_x.cwiseProduct(hz_x) + (
-            Db_hz_x.cwiseProduct(ey_1 - ey_0)
-        );
-
-
-        // hz_xd = Db_hz_x * np.diff(ey, axis=0) 
-        // hz_x += (
-        //     Db_hz_x.cwiseProduct(ey_1 - ey_0)
-        // );
-
-        // update hz_y
-        // hz_y = Da_hz_y * hz_y + hz_yd
-        hz_y = Da_hz_y.cwiseProduct(hz_y) + (
-            Db_hz_y.cwiseProduct(ex.bottomRows(Ny) - ex.topRows(Ny))
-        );
-
-        // hz_yd = Db_hz_y * np.diff(ex, axis=1)
-        // hz_y += (
-        //     Db_hz_y.cwiseProduct(ex.bottomRows(Ny) - ex.topRows(Ny))
-        // );
-
-        // combine split components
-        hz = hz_x + hz_y;
-    }
-
-    return 0;
 
 }

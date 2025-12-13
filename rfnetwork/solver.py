@@ -624,32 +624,32 @@ class SolverMesh():
         )
 
 
-        # field values
-        fields = dict(
-            ex_y = np.zeros((Nx, Ny+1, Nz+1), dtype=dtype_),
-            ex_z = np.zeros((Nx, Ny+1, Nz+1), dtype=dtype_),
-            ex = np.zeros((Nx, Ny+1, Nz+1), dtype=dtype_),
+        # # field values
+        # fields = dict(
+        #     ex_y = np.zeros((Nx, Ny+1, Nz+1), dtype=dtype_),
+        #     ex_z = np.zeros((Nx, Ny+1, Nz+1), dtype=dtype_),
+        #     ex = np.zeros((Nx, Ny+1, Nz+1), dtype=dtype_),
             
-            ey_z = np.zeros((Nx+1, Ny, Nz+1), dtype=dtype_),
-            ey_x = np.zeros((Nx+1, Ny, Nz+1), dtype=dtype_),
-            ey = np.zeros((Nx+1, Ny, Nz+1), dtype=dtype_),
+        #     ey_z = np.zeros((Nx+1, Ny, Nz+1), dtype=dtype_),
+        #     ey_x = np.zeros((Nx+1, Ny, Nz+1), dtype=dtype_),
+        #     ey = np.zeros((Nx+1, Ny, Nz+1), dtype=dtype_),
             
-            ez_x = np.zeros((Nx+1, Ny+1, Nz), dtype=dtype_),
-            ez_y = np.zeros((Nx+1, Ny+1, Nz), dtype=dtype_),
-            ez = np.zeros((Nx+1, Ny+1, Nz), dtype=dtype_),
+        #     ez_x = np.zeros((Nx+1, Ny+1, Nz), dtype=dtype_),
+        #     ez_y = np.zeros((Nx+1, Ny+1, Nz), dtype=dtype_),
+        #     ez = np.zeros((Nx+1, Ny+1, Nz), dtype=dtype_),
             
-            hx_y = np.zeros((Nx+1, Ny, Nz), dtype=dtype_),
-            hx_z = np.zeros((Nx+1, Ny, Nz), dtype=dtype_),
-            hx = np.zeros((Nx+1, Ny, Nz), dtype=dtype_),
+        #     hx_y = np.zeros((Nx+1, Ny, Nz), dtype=dtype_),
+        #     hx_z = np.zeros((Nx+1, Ny, Nz), dtype=dtype_),
+        #     hx = np.zeros((Nx+1, Ny, Nz), dtype=dtype_),
             
-            hy_z = np.zeros((Nx, Ny+1, Nz), dtype=dtype_),
-            hy_x = np.zeros((Nx, Ny+1, Nz), dtype=dtype_),
-            hy = np.zeros((Nx, Ny+1, Nz), dtype=dtype_),
+        #     hy_z = np.zeros((Nx, Ny+1, Nz), dtype=dtype_),
+        #     hy_x = np.zeros((Nx, Ny+1, Nz), dtype=dtype_),
+        #     hy = np.zeros((Nx, Ny+1, Nz), dtype=dtype_),
             
-            hz_x = np.zeros((Nx, Ny, Nz+1), dtype=dtype_),
-            hz_y = np.zeros((Nx, Ny, Nz+1), dtype=dtype_),
-            hz = np.zeros((Nx, Ny, Nz+1), dtype=dtype_),
-        )
+        #     hz_x = np.zeros((Nx, Ny, Nz+1), dtype=dtype_),
+        #     hz_y = np.zeros((Nx, Ny, Nz+1), dtype=dtype_),
+        #     hz = np.zeros((Nx, Ny, Nz+1), dtype=dtype_),
+        # )
 
         # initialize probes and sources. Sources act like probes, but the values are input to the 
         # field grid before being replaced by the actual component value.
@@ -680,7 +680,7 @@ class SolverMesh():
             probes.append(
                 dict(
                     values=np.zeros(Nt, dtype=dtype_, order="C"), 
-                    field=list(self.fshape.keys()).index(p["field"]),
+                    field=int(list(self.fshape.keys()).index(p["field"])),
                     idx=[int(id) for id in p["index"]],
                     is_source=int(0)
                 )
@@ -702,7 +702,7 @@ class SolverMesh():
                 )
             )
 
-        core_func.solver_run(coefficients, fields, probes, monitors, Nx, Ny, Nz, Nt, n_threads)
+        core_func.solver_run(coefficients, probes, monitors, Nx, Ny, Nz, Nt, n_threads)
 
         # move monitor values back to the class variable
         for i, (k, m) in enumerate(self.monitors.items()):
@@ -1028,7 +1028,8 @@ class SolverMesh():
         opacity="linear",
         gif_file=None,
         linear=False, 
-        cmap="jet"
+        cmap="jet",
+        style="points"
     ):
 
         monitor_name = np.atleast_1d(monitor_name)
@@ -1078,9 +1079,9 @@ class SolverMesh():
                 clim=[vmin, vmax], 
                 show_scalar_bar=False, 
                 opacity=opacity[i],
-                # interpolate_before_map=False,
+                interpolate_before_map=style == "surface",
                 render_points_as_spheres=True,
-                # style="points",
+                style=style,
                 lighting=False,
                 point_size=10
             )
@@ -1214,14 +1215,14 @@ s.add_pec_face("ms1", ms_trace, color="gold")
 s.add_lumped_port(1, port1_face)
 # s.add_lumped_port(2, port2_face)
 
-d0=[0.01, 0.01, 0.01]
+d0=[0.02, 0.01, 0.01]
 s.mesh(d0=d0)
 s.init_ports()
 s.add_xPML(side="upper")
 s.init_pec()
 # s.add_field_monitor("mon1", "hz", "z", sub_h, 10)
 # s.add_field_monitor("mon2", "ey", "z", sub_h, 10)
-# s.add_field_monitor("mon3", "ez", "x", 0, 10)
+s.add_field_monitor("mon3", "ez", "z", sub_h, 10)
 
 # 43, 4 for course mesh
 # s.add_probe("hz1", "hz", (0, (ms_w / 2) + 0.01, sub_h))
@@ -1261,6 +1262,13 @@ s.run(1, vsrc, n_threads=4)
 print(f"(2) Solve Time: {time.time()-stime:.3f}")
 print("Grid Cells (k): ", s.Nx * s.Ny * s.Nz / 1e3)
 
+p = s.plot_monitor(["mon3"], el=0, zoom=1.1, az=0, view="xy", opacity=[0.8, 1], linear=False, cmap="jet", style="surface")
+p.show(title="EM Solver")
+
+# stime = time.time()
+# s.run(1, vsrc, n_threads=4)
+# print(f"(4) Solve Time: {time.time()-stime:.3f}")
+
 # stime = time.time()
 # s.run(1, vsrc, n_threads=2)
 # print(f"(2) Solve Time: {time.time()-stime:.3f}")
@@ -1273,8 +1281,9 @@ print("Grid Cells (k): ", s.Nx * s.Ny * s.Nz / 1e3)
 line_i = self.vi_probe_values("c1")
 line_v = self.vi_probe_values("v1")
 
-fig, ax = plt.subplots()
-ax.plot(line_i)
+
+# fig, ax = plt.subplots()
+# ax.plot(line_v)
 
 frequency: np.ndarray = np.arange(5e9, 15e9, 10e6)
 
@@ -1284,4 +1293,4 @@ S11 = sdata[:, 0]
 fig, ax = plt.subplots()
 rfn.plots.draw_smithchart(ax)
 plt.plot(S11.real, S11.imag)
-plt.show()
+# plt.show()

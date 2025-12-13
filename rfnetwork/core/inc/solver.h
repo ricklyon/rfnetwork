@@ -9,9 +9,6 @@
 #define N_COEFF 24
 
 struct Field_Ex {
-    float * ex_y;
-    float * ex_z;
-    float * ex;
     int Nx;
     int Ny;
     int Nz;
@@ -19,9 +16,6 @@ struct Field_Ex {
 };
 
 struct Field_Ey {
-    float * ey_z;
-    float * ey_x;
-    float * ey;
     int Nx;
     int Ny;
     int Nz;
@@ -29,9 +23,6 @@ struct Field_Ey {
 };
 
 struct Field_Ez {
-    float * ez_x;
-    float * ez_y;
-    float * ez;
     int Nx;
     int Ny;
     int Nz;
@@ -39,9 +30,6 @@ struct Field_Ez {
 };
 
 struct Field_Hx {
-    float * hx_y;
-    float * hx_z;
-    float * hx;
     int Nx;
     int Ny;
     int Nz;
@@ -49,9 +37,6 @@ struct Field_Hx {
 };
 
 struct Field_Hy {
-    float * hy_z;
-    float * hy_x;
-    float * hy;
     int Nx;
     int Ny;
     int Nz;
@@ -59,9 +44,6 @@ struct Field_Hy {
 };
 
 struct Field_Hz {
-    float * hz_x;
-    float * hz_y;
-    float * hz;
     int Nx;
     int Ny;
     int Nz;
@@ -124,7 +106,7 @@ struct Coeff_Hz {
 
 struct Monitor {
     float * values;
-    float * field;
+    int field_type;
     int axis;
     int position;
     int n_step;
@@ -140,6 +122,8 @@ struct Monitor {
 struct Probe {
     float * values; // array of values for all time steps
     float * field_p; // pointer to field in grid
+    float * field_s1_p; // pointer to first split field in grid
+    float * field_s2_p; // pointer to second split field in grid
     int field_type;
     int x_cell; // cell index where the probe is located
     int yz_offset;
@@ -154,7 +138,7 @@ struct ThreadData {
     float * ez;
 };
 
-int solver_init_fields(PyObject * fields, PyObject * coefficients, int Nx, int Ny, int Nz);
+int solver_init_fields(PyObject * coefficients, int Nx, int Ny, int Nz);
 
 int solver_init_monitors(PyObject * py_monitors, int Nt);
 
