@@ -482,7 +482,7 @@ class SolverMesh():
                 self.Ca["ez_y"][ez_idx] = ((eps_r / self.dt) - (dz_r / (2 * rterm))) / denom
                 self.Cb["ez_y"][ez_idx] = 1 / (denom)
 
-                self.ports[i] = dict(idx=ez_idx, Vs_a=1 / (denom * rterm * eps_r.shape[1]), component="ez")
+                self.ports[i] = dict(idx=ez_idx, Vs_a=1 / (denom * rterm * eps_r.shape[1]), field="ez")
         
             else:
                 raise ValueError(f"Port face is not 2D")
@@ -576,6 +576,8 @@ class SolverMesh():
         dy_h_inv = 1 / dy_h[None, :, None]
         dz_h_inv = 1 / dz_h[None, None, :]
 
+        # dx with an extra component for the dummy end cell
+        dx1_h_inv = np.vstack([dx_h_inv, [[[0]]]])
 
         coefficients = dict(
             # ex coefficients, edges along y and z do not get updated
@@ -586,25 +588,25 @@ class SolverMesh():
             Cb_ex_z = np.array(-self.Cb["ex_z"][:, 1:-1, 1:-1] * dz_h_inv, order="C", dtype=dtype_),
 
             # ey coefficients, edges along x and z do not get updated
-            Ca_ey_z = np.array(self.Ca["ey_z"][1:-1, :, 1:-1], order="C", dtype=dtype_),
-            Ca_ey_x = np.array(self.Ca["ey_x"][1:-1, :, 1:-1], order="C", dtype=dtype_),
+            Ca_ey_z = np.array(self.Ca["ey_z"][1:, :, 1:-1], order="C", dtype=dtype_),
+            Ca_ey_x = np.array(self.Ca["ey_x"][1:, :, 1:-1], order="C", dtype=dtype_),
             
-            Cb_ey_z = np.array(self.Cb["ey_z"][1:-1, :, 1:-1] * dz_h_inv, order="C", dtype=dtype_),
-            Cb_ey_x = np.array(-self.Cb["ey_x"][1:-1, :, 1:-1] * dx_h_inv, order="C", dtype=dtype_),
+            Cb_ey_z = np.array(self.Cb["ey_z"][1:, :, 1:-1] * dz_h_inv, order="C", dtype=dtype_),
+            Cb_ey_x = np.array(-self.Cb["ey_x"][1:, :, 1:-1] * dx1_h_inv, order="C", dtype=dtype_),
 
             # ez coefficients, edges along x and y do not get updated
-            Ca_ez_x = np.array(self.Ca["ez_x"][1:-1, 1:-1, :], order="C", dtype=dtype_),
-            Ca_ez_y = np.array(self.Ca["ez_y"][1:-1, 1:-1, :], order="C", dtype=dtype_),
+            Ca_ez_x = np.array(self.Ca["ez_x"][1:, 1:-1, :], order="C", dtype=dtype_),
+            Ca_ez_y = np.array(self.Ca["ez_y"][1:, 1:-1, :], order="C", dtype=dtype_),
             
-            Cb_ez_x = np.array(self.Cb["ez_x"][1:-1, 1:-1, :] * dx_h_inv, order="C", dtype=dtype_),
-            Cb_ez_y = np.array(-self.Cb["ez_y"][1:-1, 1:-1, :] * dy_h_inv, order="C", dtype=dtype_),
+            Cb_ez_x = np.array(self.Cb["ez_x"][1:, 1:-1, :] * dx1_h_inv, order="C", dtype=dtype_),
+            Cb_ez_y = np.array(-self.Cb["ez_y"][1:, 1:-1, :] * dy_h_inv, order="C", dtype=dtype_),
 
             # hx coefficients
-            Da_hx_y = self.Da["hx_y"],
-            Da_hx_z = self.Da["hx_z"],
+            Da_hx_y = self.Da["hx_y"][1:],
+            Da_hx_z = self.Da["hx_z"][1:],
             
-            Db_hx_y = -self.Db["hx_y"] * dy_inv,
-            Db_hx_z = self.Db["hx_z"] * dz_inv,
+            Db_hx_y = -self.Db["hx_y"][1:] * dy_inv,
+            Db_hx_z = self.Db["hx_z"][1:] * dz_inv,
 
             # hy coefficients
             Da_hy_z = self.Da["hy_z"],
@@ -649,11 +651,12 @@ class SolverMesh():
             hz = np.zeros((Nx, Ny, Nz+1), dtype=dtype_),
         )
 
-        # initialize sources
-        sources = []
+        # initialize probes and sources. Sources act like probes, but the values are input to the 
+        # field grid before being replaced by the actual component value.
+        probes = []
         for i, p in enumerate(ports):
             port = self.ports[p-1]
-            idx, Vs_a, component = port["idx"], port["Vs_a"], port["component"]
+            idx, Vs_a, field = port["idx"], port["Vs_a"], port["field"]
 
             self.ports[p-1]["src"] = v_waveforms[i].copy()
 
@@ -663,10 +666,25 @@ class SolverMesh():
             # create a list of sources for each ez component, with the integer index and scalar waveform data
             Vs_a_flt = Vs_a.flatten()
             for j, idx_j in enumerate(product(*idx_list)):
-                values = np.array(-Vs_a_flt[j] * v_waveforms[i], dtype=dtype_, order="C")
-                sources.append(
-                    dict(values=values, idx=[int(id) for id in idx_j], component=component)
+                probes.append(
+                    dict(
+                        values=np.array(-Vs_a_flt[j] * v_waveforms[i], dtype=dtype_, order="C"), 
+                        field=field,
+                        idx=[int(id) for id in idx_j],
+                        source=int(1)
+                    )
                 )
+
+        # initialize probes
+        for k, p in self.probes.items():
+            probes.append(
+                dict(
+                    values=np.zeros(Nt, dtype=dtype_, order="C"), 
+                    field=list(self.fshape.keys()).index(p["field"]),
+                    idx=[int(id) for id in p["index"]],
+                    source=int(0)
+                )
+            )
 
         # initialize field monitors
         monitors = []
@@ -684,28 +702,14 @@ class SolverMesh():
                 )
             )
 
-        # initialize probes
-        probes = []
-        for k, p in self.probes.items():
-            nx, ny, nz = self.fshape[p["field"]]
-            xi, yi, zi = p["index"]
-
-            probes.append(
-                dict(
-                    values=np.zeros(Nt, dtype=dtype_, order="C"), 
-                    field=list(self.fshape.keys()).index(p["field"]),
-                    offset=int((xi * ny * nz) + (yi * nz) + zi)
-                )
-            )
-
-        core_func.solver_run(coefficients, fields, sources, probes, monitors, Nx, Ny, Nz, Nt, n_threads)
+        core_func.solver_run(coefficients, fields, probes, monitors, Nx, Ny, Nz, Nt, n_threads)
 
         # move monitor values back to the class variable
         for i, (k, m) in enumerate(self.monitors.items()):
             self.monitors[k]["values"] = monitors[i]["values"]
 
         # get the voltages at each source components
-        src_v = [s["values"] for s in sources]
+        src_v = [s["values"] for s in probes]
         # move the measured source voltages back to the class variable for the associated port
         cur_source = 0
         for p in (ports):
@@ -718,7 +722,7 @@ class SolverMesh():
 
         # move probe values to the class variable
         for i, (k, p) in enumerate(self.probes.items()):
-            self.probes[k]["values"] = probes[i]["values"]
+            self.probes[k]["values"] = probes[i + cur_source]["values"]
 
 
     def add_field_monitor(self, name: str, field: str, axis: str, position: float, n_step: int):
@@ -1158,11 +1162,11 @@ class SolverMesh():
 
         
 sbox_h = 0.5
-sbox_w = 0.5
-sbox_len = 1
+sbox_w = 1
+sbox_len = 2
 
 sub_h = 0.02
-ms_x = (-0.4, 0.5)
+ms_x = (-1, 1)
 ms_y = 0
 ms_w = 0.04
 
@@ -1210,7 +1214,7 @@ s.add_pec_face("ms1", ms_trace, color="gold")
 s.add_lumped_port(1, port1_face)
 # s.add_lumped_port(2, port2_face)
 
-d0=[0.02, 0.01, 0.01]
+d0=[0.01, 0.01, 0.01]
 s.mesh(d0=d0)
 s.init_ports()
 s.add_xPML(side="upper")
@@ -1253,72 +1257,9 @@ ports = 1
 v_waveforms = [vsrc]
 
 stime = time.time()
+s.run(1, vsrc, n_threads=2)
+print(f"(2) Solve Time: {time.time()-stime:.3f}")
+
+stime = time.time()
 s.run(1, vsrc, n_threads=4)
-print(f"Solve Time: {time.time()-stime:.3f}")
-print("Grid Cells (k): ", s.Nx * s.Ny * s.Nz / 1e3)
-
-
-
-# Db_0 = s.dt / u0
-# Cb_0 = s.dt / e0 
-# p = s.plot_cooeficients("hz_y", "b", "z", sub_h, point_size=15, cmap="brg", normalization=None)
-# p.camera_position = "xy"
-# p.camera.zoom(1.8)
-# p.show()
-
-# p = s.plot_cooeficients("ex_y", "b", "z", sub_h, point_size=15, cmap="brg", normalization=None)
-# p.camera_position = "xy"
-# p.camera.zoom(1.8)
-# p.show()
-
-# p = s.plot_cooeficients("ey_z", "a", "z", sub_h, point_size=15, cmap="brg", normalization=None)
-# p.camera_position = "xy"
-# p.camera.zoom(1.8)
-# p.show()
-
-# p = s.plot_monitor(["mon1"], el=0, zoom=1.1, az=0, view="xy", opacity=[0.8, 1], linear=False, cmap="jet")
-# p.show(title="EM Solver")
-
-frequency: np.ndarray = np.arange(5e9, 15e9, 10e6)
-
-
-sdata = s.get_sparameters(frequency)
-S11 = sdata[:, 0]
-
-# compute line impedance
-line_i = self.vi_probe_values("c1")
-line_v = self.vi_probe_values("v1")
-
-IP = utils.dtft(self.vi_probe_values("c1"), frequency, 1 / s.dt)
-VP = utils.dtft(self.vi_probe_values("v1"), frequency, 1 / s.dt)
-ZP = VP / IP
-
-S11_z = conv.gamma_z(ZP)
-
-fig, ax = plt.subplots()
-rfn.plots.draw_smithchart(ax)
-plt.plot(S11.real, S11.imag)
-plt.plot(S11_z.real, S11_z.imag)
-
-fig, ax = plt.subplots()
-ax.plot(frequency/1e9, rfn.conv.db20_lin(S11))
-
-
-fig, ax = plt.subplots()
-ax.plot(frequency/1e9, rfn.conv.z_gamma(S11))
-ax.plot(frequency/1e9, ZP.real)
-ax.set_ylim([0, 120])
-mplm.axis_marker(y=z_ref)
-ax.set_xlabel("Frequency [GHz]")
-# plt.show()
-
-
-# fig, ax = plt.subplots()
-# plt.plot(s.probes["c1_1"]["values"])
-# mplm.axis_marker(y = np.max(s.probes["c1_1"]["values"]))
-# plt.show()
-
-
-
-# 
-# Nx, Ny, Nz = 126, 26, 26
+print(f"(4) Solve Time: {time.time()-stime:.3f}")

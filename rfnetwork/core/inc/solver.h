@@ -3,6 +3,7 @@
 
 #include <string>
 #include <vector>
+#include <thread>
 
 #define N_FIELDS 18
 #define N_COEFF 24
@@ -136,17 +137,20 @@ struct Monitor {
     int N1N2;
 };
 
-struct Source {
-    float * values;
-    float * ez;
-    float * ez_x;
-    float * ez_y;
-    int x_idx; // x index for ez component
-};
-
 struct Probe {
     float * values; // array of values for all time steps
-    float * field; // single pointer to the field value in the grid
+    float * field_p; // pointer to field in grid
+    int field_type;
+    int x_cell; // cell index where the probe is located
+    int yz_offset;
+    bool source;
+};
+
+struct ThreadData {
+    float * hy; // pointer to hz, hy field at the first x-index of the thread grid
+    float * hz;
+    float * ey; // pointer to the ez, ey field at the last x-index of the thread grid
+    float * ez;
 };
 
 int solver_init_fields(PyObject * fields, PyObject * coefficients, int Nx, int Ny, int Nz);

@@ -351,7 +351,6 @@ static PyObject* solver_run(PyObject* self, PyObject* args) {
     PyObject *coefficients;
     PyObject *fields;
     PyObject *probes;
-    PyObject *sources;
     PyObject *monitors;
     
     int Nx;
@@ -361,7 +360,7 @@ static PyObject* solver_run(PyObject* self, PyObject* args) {
     int n_threads;
 
     // Parse arguments: expecting a single Python object
-    if (!PyArg_ParseTuple(args, "OOOOOIIIII", &coefficients, &fields, &sources, &probes, &monitors, &Nx, &Ny, &Nz, &Nt, &n_threads)) {
+    if (!PyArg_ParseTuple(args, "OOOOIIIII", &coefficients, &fields, &probes, &monitors, &Nx, &Ny, &Nz, &Nt, &n_threads)) {
         return PyLong_FromLong(1);
     }
 
@@ -385,13 +384,7 @@ static PyObject* solver_run(PyObject* self, PyObject* args) {
         return PyLong_FromLong(1);
     }
 
-    if (!PyList_Check(sources)) {
-        PyErr_SetString(PyExc_TypeError, "Expected a sources list");
-        return PyLong_FromLong(1);
-    }
-
     solver_init_fields(fields, coefficients, Nx, Ny, Nz);
-    solver_init_sources(sources, Nt);
     solver_init_monitors(monitors, Nt);
     solver_init_probes(probes, Nt);
 
