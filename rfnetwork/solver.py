@@ -140,20 +140,20 @@ class SolverMesh():
 
             return d_list
             
-        pec = list(self.pec_face.values())[0]
-        for pec in self.pec_face.values():
+        # pec = list(self.pec_face.values())[0]
+        # for pec in self.pec_face.values():
 
-            pmin, pmax = np.min(pec.points, axis=0), np.max(pec.points, axis=0)
-            # normal axis
+        #     pmin, pmax = np.min(pec.points, axis=0), np.max(pec.points, axis=0)
+        #     # normal axis
 
-            axis = np.argmin(pmax - pmin)
-            if axis == 2: # pec face is normal to x-axis
-                # get x index for cell on the edge of the face
-                dx = split_cell(dx, np.argmin(np.abs(gx - pmax[0])) - 1, factor=0.8)
-                dx = split_cell(dx, np.argmin(np.abs(gx - pmin[0])), factor=0.2)
+        #     axis = np.argmin(pmax - pmin)
+        #     if axis == 2: # pec face is normal to x-axis
+        #         # get x index for cell on the edge of the face
+        #         dx = split_cell(dx, np.argmin(np.abs(gx - pmax[0])) - 1, factor=0.8)
+        #         dx = split_cell(dx, np.argmin(np.abs(gx - pmin[0])), factor=0.2)
 
-                dy = split_cell(dy, np.argmin(np.abs(gy - pmax[1])) - 1, factor=0.8)
-                dy = split_cell(dy, np.argmin(np.abs(gy - pmin[1])), factor=0.2)
+        #         dy = split_cell(dy, np.argmin(np.abs(gy - pmax[1])) - 1, factor=0.8)
+        #         dy = split_cell(dy, np.argmin(np.abs(gy - pmin[1])), factor=0.2)
                 
 
 
@@ -327,6 +327,8 @@ class SolverMesh():
 
         dx, dy, dz = [conv.m_in(d) for d in self.d_cells]
 
+        dx_h, dy_h, dz_h = [conv.m_in(d) for d in self.dh_cells]
+
         # PEC pattern
         for name, pec in self.pec_face.items():
             
@@ -373,17 +375,63 @@ class SolverMesh():
                 # past the edge of the end of the PEC
                 x0, y0, z0 = self.field_pos_to_idx(np.min(pec.points, axis=0), "ey")
                 x1, y1, z1 = self.field_pos_to_idx(np.max(pec.points, axis=0), "ey")
-                self.Cb["ey_z"][x0+1: x1, y0+1: y1-1, z0] = 0
-                self.Ca["ey_z"][x0+1: x1, y0+1: y1-1, z0] = -1
-                self.Cb["ey_x"][x0+1: x1, y0+1: y1-1, z0] = 0
-                self.Ca["ey_x"][x0+1: x1, y0+1: y1-1, z0] = -1
+                self.Cb["ey_z"][x0: x1+1, y0: y1, z0] = 0
+                self.Ca["ey_z"][x0: x1+1, y0: y1, z0] = -1
+                self.Cb["ey_x"][x0: x1+1, y0: y1, z0] = 0
+                self.Ca["ey_x"][x0: x1+1, y0: y1, z0] = -1
                 # ex cells on x axis are not inclusive, edges on y axis are
                 x0, y0, z0 = self.field_pos_to_idx(np.min(pec.points, axis=0), "ex")
                 x1, y1, z1 = self.field_pos_to_idx(np.max(pec.points, axis=0), "ex")
-                self.Cb["ex_y"][x0+1: x1, y0+1: y1, z0] = 0
-                self.Ca["ex_y"][x0+1: x1, y0+1: y1, z0] = -1
-                self.Cb["ex_z"][x0+1: x1, y0+1: y1, z0] = 0
-                self.Ca["ex_z"][x0+1: x1, y0+1: y1, z0] = -1
+                self.Cb["ex_y"][x0: x1, y0: y1+1, z0] = 0
+                self.Ca["ex_y"][x0: x1, y0: y1+1, z0] = -1
+                self.Cb["ex_z"][x0: x1, y0: y1+1, z0] = 0
+                self.Ca["ex_z"][x0: x1, y0: y1+1, z0] = -1
+
+                # ex edge correction:
+                x0, y0, z0 = self.field_pos_to_idx(np.min(pec.points, axis=0), "ex")
+                x1, y1, z1 = self.field_pos_to_idx(np.max(pec.points, axis=0), "ex")
+                dt = self.dt
+                eps = self.eps_ex[x0, y0, z0]
+                sig_0 = 0.5
+                Ca_0 = (2 * eps - (sig_0 * dt)) / (2 * eps + (sig_0 * dt))
+                Cb_0 = (2 * dt) / ((2 * eps + (sig_0 * dt)))
+
+                x0, y0, z0 = self.field_pos_to_idx(np.min(pec.points, axis=0), "ex")
+                x1, y1, z1 = self.field_pos_to_idx(np.max(pec.points, axis=0), "ex")
+                self.Cb["ex_y"][x0: x1, y0, z0] = Cb_0 #*= (dy_h[y0-1] / ( 0.1 * dy_h[y0-1]))
+                self.Cb["ex_y"][x0: x1, y1, z0] = Cb_0 #*= (dy_h[y1-1] / ( 0.1 * dy_h[y1-1]))
+
+                self.Ca["ex_y"][x0: x1, y0, z0] = Ca_0
+                self.Ca["ex_y"][x0: x1, y1, z0] = Ca_0
+                # ez correction:
+                # x0, y0, z0 = self.field_pos_to_idx(np.min(pec.points, axis=0), "ez")
+                # x1, y1, z1 = self.field_pos_to_idx(np.max(pec.points, axis=0), "ez")
+                # self.Cb["ez_y"][x0: x1+1, y0-1, z0] *= (dy_h[y0-2] / ( 0.2 * dy_h[y0-2]))
+                # self.Cb["ez_y"][x0: x1+1, y1+1, z0] *= (dy_h[y1] / ( 0.2 * dy_h[y1]))
+
+                # self.Cb["ez_y"][x0: x1+1, y0-1, z0-1] *= (dy_h[y0-2] / ( 0.2 * dy_h[y0-2]))
+                # self.Cb["ez_y"][x0: x1+1, y1+1, z0-1] *= (dy_h[y1] / ( 0.2 * dy_h[y1]))
+
+                # hz correction
+                # x0, y0, z0 = self.field_pos_to_idx(np.min(pec.points, axis=0), "hz")
+                # x1, y1, z1 = self.field_pos_to_idx(np.max(pec.points, axis=0), "hz")
+                # self.Db["hz_y"][x0: x1, y0-1, z0] *= dy[y0-2] / (0.2 * dy[y0-2])
+                # self.Db["hz_y"][x0: x1, y1, z0] *= dy[y1-1] / (0.2 * dy[y1-1])
+
+                # x0, y0, z0 = self.field_pos_to_idx(np.min(pec.points, axis=0), "hx")
+                # x1, y1, z1 = self.field_pos_to_idx(np.max(pec.points, axis=0), "hx")
+                # self.Db["hx_y"][x0: x1+1, y0: y1, z0-1] *= (dy[y0: y1] / ( 0.8 * dy[y0: y1]))
+                # self.Db["hx_y"][x0: x1+1, y0: y1, z0] *= (dy[y0: y1] / ( 0.8 * dy[y0: y1]))
+
+
+
+                # x0, y0, z0 = self.field_pos_to_idx(np.min(pec.points, axis=0), "ez")
+                # x1, y1, z1 = self.field_pos_to_idx(np.max(pec.points, axis=0), "ez")
+                # self.Cb["ey_z"][x0: x1+1, y0-1, z0] = 3 * self.dt / self.eps_ey[x0: x1+1, y0-1, z0]
+                # self.Cb["ey_z"][x0: x1+1, y1, z0] = 3 * self.dt / self.eps_ey[x0: x1+1, y0-1, z0]
+                # self.Cb["ey_x"][x0: x1+1, y0-1, z0] = 0.1 * self.dt / self.eps_ey[x0: x1+1, y0-1, z0]
+                # self.Cb["ey_x"][x0: x1+1, y1, z0] = 0.1 * self.dt / self.eps_ey[x0: x1+1, y0-1, z0]
+
 
                 # self.Db["hz_y"][x0_c: x1_c, y0, z0] = 0
                 # self.Db["hz_y"][x0_c: x1_c, y1-1, z0] = 0
@@ -455,9 +503,9 @@ class SolverMesh():
             # face is normal to the x-axis, Resistor is represented by the Ez components
             if (idx_d[0] == 0):
                 # skip buffer cells for +x port, fix for -x
-                x0 += 1
-                y0 += 1
-                y1 -= 1
+                # x0 += 1
+                # y0 += 1
+                # y1 -= 1
     
                 # width of resistor cell centered around the ez component, ez is on the x/y edges
                 dx_r = dx_h[x0-1]
@@ -702,6 +750,7 @@ class SolverMesh():
                 )
             )
 
+        print("Running...")
         core_func.solver_run(coefficients, probes, monitors, Nx, Ny, Nz, Nt, n_threads)
 
         # move monitor values back to the class variable
@@ -1169,7 +1218,7 @@ sbox_len = 1
 sub_h = 0.02
 ms_x = (-0.4, 0.5)
 ms_y = 0
-ms_w = 0.04
+ms_w = 0.02
 
 line = rfn.elements.MSLine(h=sub_h, er=3.66, w=ms_w)
 z_ref = line.get_properties(10e9).sel(value="z0").item()
@@ -1217,12 +1266,14 @@ s.add_lumped_port(1, port1_face)
 
 d0=[0.02, 0.01, 0.01]
 s.mesh(d0=d0)
+
 s.init_ports()
 s.add_xPML(side="upper")
 s.init_pec()
+
 # s.add_field_monitor("mon1", "hz", "z", sub_h, 10)
-# s.add_field_monitor("mon2", "ey", "z", sub_h, 10)
-s.add_field_monitor("mon3", "ez", "z", sub_h, 10)
+s.add_field_monitor("mon2", "ey", "z", sub_h, 10)
+s.add_field_monitor("mon3", "ex", "z", sub_h, 10)
 
 # 43, 4 for course mesh
 # s.add_probe("hz1", "hz", (0, (ms_w / 2) + 0.01, sub_h))
@@ -1246,9 +1297,9 @@ s.add_voltage_probe("v1", voltage_line)
 f0 = 10e9
 pulse_n = 1200
 # width of half pulse in time
-t_half = (s.dt * 100)
+t_half = (s.dt * 150)
 # center of the pulse in time
-t0 = (s.dt * 350)
+t0 = (s.dt * 400)
 
 t = np.linspace(0, s.dt * pulse_n, pulse_n)
 vsrc = 1e-2 * (np.sin(2* np.pi * f0 * (t)) * np.exp(-((t - t0) / t_half)**2)).astype(np.float32)
@@ -1258,11 +1309,12 @@ ports = 1
 v_waveforms = [vsrc]
 
 stime = time.time()
+print("Solving...")
 s.run(1, vsrc, n_threads=4)
 print(f"(2) Solve Time: {time.time()-stime:.3f}")
 print("Grid Cells (k): ", s.Nx * s.Ny * s.Nz / 1e3)
 
-p = s.plot_monitor(["mon3"], el=0, zoom=1.1, az=0, view="xy", opacity=[0.8, 1], linear=False, cmap="jet", style="surface")
+p = s.plot_monitor(["mon2"], el=0, zoom=1.1, az=0, view="xy", opacity=[0.8, 1], linear=False, cmap="jet", style="surface")
 p.show(title="EM Solver")
 
 # stime = time.time()
@@ -1277,6 +1329,12 @@ p.show(title="EM Solver")
 # s.run(1, vsrc, n_threads=4)
 # print(f"(4) Solve Time: {time.time()-stime:.3f}")
 
+Db_0 = s.dt / u0
+Cb_0 = s.dt / e0 
+p = s.plot_cooeficients("ex_y", "b", "z", sub_h, point_size=15, cmap="brg", normalization=Cb_0)
+p.camera_position = "xy"
+p.show()
+
 # compute line impedance
 line_i = self.vi_probe_values("c1")
 line_v = self.vi_probe_values("v1")
@@ -1290,7 +1348,27 @@ frequency: np.ndarray = np.arange(5e9, 15e9, 10e6)
 
 sdata = s.get_sparameters(frequency)
 S11 = sdata[:, 0]
+# fig, ax = plt.subplots()
+# rfn.plots.draw_smithchart(ax)
+# plt.plot(S11.real, S11.imag)
+
+IP = utils.dtft(self.vi_probe_values("c1"), frequency, 1 / s.dt)
+VP = utils.dtft(self.vi_probe_values("v1"), frequency, 1 / s.dt)
+ZP = VP / IP
+
 fig, ax = plt.subplots()
-rfn.plots.draw_smithchart(ax)
-plt.plot(S11.real, S11.imag)
-# plt.show()
+plt.plot(frequency / 1e9, ZP.real)
+plt.plot(frequency / 1e9, conv.z_gamma(S11))
+plt.ylim([0, 100])
+plt.axhline(y=z_ref, linestyle=":", color="k")
+
+S11_z = conv.gamma_z(ZP)
+
+# fig, ax = plt.subplots()
+# rfn.plots.draw_smithchart(ax)
+# plt.plot(S11.real, S11.imag)
+# plt.plot(S11_z.real, S11_z.imag)
+
+# fig, ax = plt.subplots()
+# plt.plot(frequency, conv.db20_lin(S11))
+plt.show()
