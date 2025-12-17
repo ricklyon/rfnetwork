@@ -15,7 +15,7 @@ import matplotlib
 from itertools import product
 # matplotlib.use("qt5agg")
 
-pv.set_jupyter_backend("trame")
+# pv.set_jupyter_backend("trame")
 np.set_printoptions(suppress=True)
 
 sys.argv = sys.argv[0:1]
@@ -92,10 +92,11 @@ class SolverMesh():
         edges = [np.array([], dtype=np.float32) for i in range(3)]
         objects = [self.bounding_box] + list(self.pec_face.values()) + [sub[0] for sub in self.substrate.values()]
         dtype_ = np.float32
+        places_ = 4
 
         for obj in objects:
             # round points to minimum precision supported by the mesh
-            p_edges = np.around(obj.points.T, decimals=3).astype(np.float32)
+            p_edges = np.around(obj.points.T, decimals=places_).astype(np.float32)
         
             for i in range(3):
                 edges[i] = np.unique(np.concatenate([edges[i], p_edges[i]]))
@@ -126,7 +127,7 @@ class SolverMesh():
                     cell_d[i] += [d0_e] * nx
 
         
-        gx, gy, gz = [np.around(np.concatenate([[self.sbox_min[i]], self.sbox_min[i] + np.cumsum(cell_d[i])]), decimals=6) for i in range(3)]
+        gx, gy, gz = [np.around(np.concatenate([[self.sbox_min[i]], self.sbox_min[i] + np.cumsum(cell_d[i])]), decimals=places_) for i in range(3)]
         dx, dy, dz = np.diff(gx).astype(dtype_), np.diff(gy), np.diff(gz)
 
 
@@ -157,11 +158,12 @@ class SolverMesh():
                 
 
 
-        # number of cells along each axis
-        self.n_cells = len(dx), len(dy), len(dz)   
-        cell_d = dx, dy, dz
-        gx, gy, gz = [np.around(np.concatenate([[self.sbox_min[i]], self.sbox_min[i] + np.cumsum(cell_d[i])]), decimals=6) for i in range(3)]
-         
+        # # number of cells along each axis
+        #  
+        # cell_d = dx, dy, dz
+        # gx, gy, gz = [np.around(np.concatenate([[self.sbox_min[i]], self.sbox_min[i] + np.cumsum(cell_d[i])]), decimals=6) for i in range(3)]
+        
+        self.n_cells = len(dx), len(dy), len(dz)  
         self.grid_mesh = pv.RectilinearGrid(gx, gy, gz)
 
 
@@ -392,17 +394,33 @@ class SolverMesh():
                 x1, y1, z1 = self.field_pos_to_idx(np.max(pec.points, axis=0), "ex")
                 dt = self.dt
                 eps = self.eps_ex[x0, y0, z0]
-                sig_0 = 0.5
+                sig_0 = 0
                 Ca_0 = (2 * eps - (sig_0 * dt)) / (2 * eps + (sig_0 * dt))
                 Cb_0 = (2 * dt) / ((2 * eps + (sig_0 * dt)))
 
-                x0, y0, z0 = self.field_pos_to_idx(np.min(pec.points, axis=0), "ex")
-                x1, y1, z1 = self.field_pos_to_idx(np.max(pec.points, axis=0), "ex")
                 self.Cb["ex_y"][x0: x1, y0, z0] = Cb_0 #*= (dy_h[y0-1] / ( 0.1 * dy_h[y0-1]))
                 self.Cb["ex_y"][x0: x1, y1, z0] = Cb_0 #*= (dy_h[y1-1] / ( 0.1 * dy_h[y1-1]))
 
                 self.Ca["ex_y"][x0: x1, y0, z0] = Ca_0
                 self.Ca["ex_y"][x0: x1, y1, z0] = Ca_0
+
+                # ey edge correction:
+                # x0, y0, z0 = self.field_pos_to_idx(np.min(pec.points, axis=0), "ey")
+                # x1, y1, z1 = self.field_pos_to_idx(np.max(pec.points, axis=0), "ey")
+                # dt = self.dt
+                # eps = self.eps_ey[x0, y0, z0]
+                # sig_0 = 0
+                # Ca_0 = (2 * eps - (sig_0 * dt)) / (2 * eps + (sig_0 * dt))
+                # Cb_0 = (2 * dt) / ((2 * eps + (sig_0 * dt)))
+
+                # if x0 > 0:
+                #     self.Cb["ey_x"][x0, y0: y1, z0] = Cb_0 #*= (dy_h[y0-1] / ( 0.1 * dy_h[y0-1]))
+                #     self.Ca["ey_x"][x0, y0: y1, z0] = Ca_0
+
+                # if x1 < self.fshape["ex"][0]:
+                #     self.Ca["ey_x"][x1, y0: y1, z0] = Ca_0
+                #     self.Cb["ey_x"][x1, y0: y1, z0] = Cb_0 #*= (dy_h[y1-1] / ( 0.1 * dy_h[y1-1]))
+
                 # ez correction:
                 # x0, y0, z0 = self.field_pos_to_idx(np.min(pec.points, axis=0), "ez")
                 # x1, y1, z1 = self.field_pos_to_idx(np.max(pec.points, axis=0), "ez")
@@ -504,8 +522,6 @@ class SolverMesh():
             if (idx_d[0] == 0):
                 # skip buffer cells for +x port, fix for -x
                 # x0 += 1
-                # y0 += 1
-                # y1 -= 1
     
                 # width of resistor cell centered around the ez component, ez is on the x/y edges
                 dx_r = dx_h[x0-1]
@@ -671,6 +687,16 @@ class SolverMesh():
             Db_hz_y = self.Db["hz_y"] * dy_inv,
         )
 
+        temp_mem_size = 0
+        for s in self.fshape.values():
+            # three copies of each field, two for the split fields and one combined field
+            # the first components at x=0 are not updated and not included in the memory buffer
+            temp_mem_size += 3 * np.prod((Nx,) + s[1:])
+
+        # add a buffer for each thread, and the endpoints for the edge components
+        temp_mem_size += (4 * (Ny + 1) * (Nz + 1)) * n_threads * 8
+
+        mem = np.zeros(temp_mem_size, dtype=dtype_)
 
         # # field values
         # fields = dict(
@@ -751,7 +777,7 @@ class SolverMesh():
             )
 
         print("Running...")
-        core_func.solver_run(coefficients, probes, monitors, Nx, Ny, Nz, Nt, n_threads)
+        core_func.solver_run(coefficients, probes, monitors, mem, Nx, Ny, Nz, Nt, n_threads)
 
         # move monitor values back to the class variable
         for i, (k, m) in enumerate(self.monitors.items()):
@@ -1210,15 +1236,21 @@ class SolverMesh():
         return plotter
     
 
-        
-sbox_h = 0.5
-sbox_w = 0.5
-sbox_len = 1
+print("start")
+
+# remove e edge conductive on x sides as well if there is no port attached to it
+# allocate block memory in python and assign section to each thread, that way multiple runs can share the same
+# memory without reallocating it.
+
+ms_y = 0
+ms_w = 0.04
+
+sbox_h = 0.4
+sbox_w = 0.4
+sbox_len = 0.5
 
 sub_h = 0.02
-ms_x = (-0.4, 0.5)
-ms_y = 0
-ms_w = 0.02
+ms_x = (-sbox_len/2 + 0.1, sbox_len/2)
 
 line = rfn.elements.MSLine(h=sub_h, er=3.66, w=ms_w)
 z_ref = line.get_properties(10e9).sel(value="z0").item()
@@ -1264,14 +1296,14 @@ s.add_pec_face("ms1", ms_trace, color="gold")
 s.add_lumped_port(1, port1_face)
 # s.add_lumped_port(2, port2_face)
 
-d0=[0.02, 0.01, 0.01]
+d0=[0.010, ms_w/2, 0.005]
 s.mesh(d0=d0)
 
 s.init_ports()
 s.add_xPML(side="upper")
 s.init_pec()
 
-# s.add_field_monitor("mon1", "hz", "z", sub_h, 10)
+s.add_field_monitor("mon1", "ez", "z", sub_h - 0.005, 10)
 s.add_field_monitor("mon2", "ey", "z", sub_h, 10)
 s.add_field_monitor("mon3", "ex", "z", sub_h, 10)
 
@@ -1310,11 +1342,11 @@ v_waveforms = [vsrc]
 
 stime = time.time()
 print("Solving...")
+print("Grid Cells (k): ", s.Nx * s.Ny * s.Nz / 1e3)
 s.run(1, vsrc, n_threads=4)
 print(f"(2) Solve Time: {time.time()-stime:.3f}")
-print("Grid Cells (k): ", s.Nx * s.Ny * s.Nz / 1e3)
 
-p = s.plot_monitor(["mon2"], el=0, zoom=1.1, az=0, view="xy", opacity=[0.8, 1], linear=False, cmap="jet", style="surface")
+p = s.plot_monitor(["mon1"], el=0, zoom=1.1, az=0, view="xy", opacity=[0.8, 1], linear=False, cmap="jet", style="surface")
 p.show(title="EM Solver")
 
 # stime = time.time()
@@ -1331,7 +1363,7 @@ p.show(title="EM Solver")
 
 Db_0 = s.dt / u0
 Cb_0 = s.dt / e0 
-p = s.plot_cooeficients("ex_y", "b", "z", sub_h, point_size=15, cmap="brg", normalization=Cb_0)
+p = s.plot_cooeficients("ey_x", "b", "z", sub_h, point_size=15, cmap="brg", normalization=Cb_0)
 p.camera_position = "xy"
 p.show()
 
@@ -1359,7 +1391,7 @@ ZP = VP / IP
 fig, ax = plt.subplots()
 plt.plot(frequency / 1e9, ZP.real)
 plt.plot(frequency / 1e9, conv.z_gamma(S11))
-plt.ylim([0, 100])
+plt.ylim([0, 110])
 plt.axhline(y=z_ref, linestyle=":", color="k")
 
 S11_z = conv.gamma_z(ZP)

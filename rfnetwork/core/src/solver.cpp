@@ -70,12 +70,55 @@ bool e_updates_done = false;
 bool h_updates_done = false;
 bool th_init_done = false;
 
-
+static struct mbuffer_t m_pool = {NULL, NULL, 0};
 
 
 long long t0 = std::chrono::duration_cast<std::chrono::milliseconds>(
                     std::chrono::system_clock::now().time_since_epoch()
                 ).count();
+
+
+void mbuffer_init(float * base_addr, uint64_t size)
+{
+    m_pool.base_addr = base_addr;
+    m_pool.next_addr = base_addr;
+    m_pool.available_size = size;
+}
+
+
+/*
+Reserves a contigious section of memory of given size (size is number of floats) 
+and returns the pointer to the memory section.
+Returns NULL if requested size does not fit within the memory block.
+*/
+float * mbuffer_allocate(uint64_t size)
+{   
+    // allow only one thread at a time
+    std::unique_lock<std::mutex> lock(mutex);
+
+    // check that buffer has been initialized
+    if (m_pool.base_addr == NULL)
+    {
+        throw std::runtime_error("Memory buffer not initialized.");
+        return NULL;
+    }
+
+    // check that buffer has enough space
+    if (size > m_pool.available_size)
+    {
+        throw std::runtime_error("Memory buffer has insufficent space.");
+        return NULL;
+    }
+
+    float * addr = m_pool.next_addr;
+    // increment buffer pointer for the next allocation
+    m_pool.next_addr = m_pool.next_addr + size;
+    // update available size
+    m_pool.available_size -= size;
+
+    return addr;
+}
+
 
 // get the array of the given name from a python dictionary. Validate the shape
 // matches Nx, Ny, Nz
@@ -156,8 +199,37 @@ float * get_source_array(PyObject * dict, int Nt)
 }
 
 
-int solver_init_fields(PyObject * coefficients, int Nx, int Ny, int Nz)
+int solver_init_fields(PyObject * py_mem, PyObject * coefficients, int Nx, int Ny, int Nz)
 {
+
+    // error check memory buffer
+    std::ostringstream oss;
+    PyArrayObject * mem_array = (PyArrayObject *) py_mem;
+
+    if (PyArray_TYPE(mem_array) != NPY_FLOAT)
+    {
+        throw std::runtime_error("Invalid data array. Must be float type.");
+        return NULL;
+    }
+
+    if (!(PyArray_FLAGS(mem_array) & NPY_ARRAY_C_CONTIGUOUS))
+    {
+        oss << "Invalid memory data array. Must be row ordered (C-style)";
+        throw std::runtime_error(oss.str());
+        return NULL;
+    }
+
+    if ((int) PyArray_NDIM(mem_array) != 1)
+    {
+        throw std::runtime_error("Invalid memory buffer array. Must be 1 dimension.");
+        return NULL;
+    }
+
+    npy_intp * npy_shape = PyArray_SHAPE(mem_array); 
+
+    // init memory buffer
+    mbuffer_init((float *) PyArray_DATA(mem_array), (uint64_t) npy_shape[0]);
+
     // initialize ex pointers
     Ex.Nx = Nx;
     Ex.Ny = Ny + 1;
@@ -165,29 +237,27 @@ int solver_init_fields(PyObject * coefficients, int Nx, int Ny, int Nz)
     Ex.NyNz = Ex.Ny * Ex.Nz;
 
     // y and z endpoints do not get updated and don't have coefficients 
-    Cx.Nx = Nx; 
     Cx.Ny = Ny - 1; 
     Cx.Nz = Nz - 1;
-    Cx.Cb_ex_y = get_solver_array(coefficients, "Cb_ex_y", Cx.Nx, Cx.Ny, Cx.Nz);
-    Cx.Cb_ex_z = get_solver_array(coefficients, "Cb_ex_z", Cx.Nx, Cx.Ny, Cx.Nz);
-    Cx.Ca_ex_y = get_solver_array(coefficients, "Ca_ex_y", Cx.Nx, Cx.Ny, Cx.Nz);
-    Cx.Ca_ex_z = get_solver_array(coefficients, "Ca_ex_z", Cx.Nx, Cx.Ny, Cx.Nz);
+    Cx.Cb_ex_y = get_solver_array(coefficients, "Cb_ex_y", Nx, Cx.Ny, Cx.Nz);
+    Cx.Cb_ex_z = get_solver_array(coefficients, "Cb_ex_z", Nx, Cx.Ny, Cx.Nz);
+    Cx.Ca_ex_y = get_solver_array(coefficients, "Ca_ex_y", Nx, Cx.Ny, Cx.Nz);
+    Cx.Ca_ex_z = get_solver_array(coefficients, "Ca_ex_z", Nx, Cx.Ny, Cx.Nz);
     Cx.NyNz = Cx.Ny * Cx.Nz;
 
     // initialize ey pointers
-    Ey.Nx = Nx + 1;
+    Ey.Nx = Nx;
     Ey.Ny = Ny;
     Ey.Nz = Nz + 1;
     Ey.NyNz = Ey.Ny * Ey.Nz;
 
     // x and z endpoints do not get updated and don't have coefficients 
-    Cy.Nx = Nx; 
     Cy.Ny = Ny; 
     Cy.Nz = Nz - 1;
-    Cy.Cb_ey_z = get_solver_array(coefficients, "Cb_ey_z", Cy.Nx, Cy.Ny, Cy.Nz);
-    Cy.Cb_ey_x = get_solver_array(coefficients, "Cb_ey_x", Cy.Nx, Cy.Ny, Cy.Nz);
-    Cy.Ca_ey_z = get_solver_array(coefficients, "Ca_ey_z", Cy.Nx, Cy.Ny, Cy.Nz);
-    Cy.Ca_ey_x = get_solver_array(coefficients, "Ca_ey_x", Cy.Nx, Cy.Ny, Cy.Nz);
+    Cy.Cb_ey_z = get_solver_array(coefficients, "Cb_ey_z", Nx, Cy.Ny, Cy.Nz);
+    Cy.Cb_ey_x = get_solver_array(coefficients, "Cb_ey_x", Nx, Cy.Ny, Cy.Nz);
+    Cy.Ca_ey_z = get_solver_array(coefficients, "Ca_ey_z", Nx, Cy.Ny, Cy.Nz);
+    Cy.Ca_ey_x = get_solver_array(coefficients, "Ca_ey_x", Nx, Cy.Ny, Cy.Nz);
     Cy.NyNz = Cy.Ny * Cy.Nz;
     // ensure coefficients at the end of the x-axis are zero to create a PEC boundary
     memset(Cy.Cb_ey_z + ((Nx - 1) * Cy.NyNz), 0, Cy.NyNz * sizeof(float));
@@ -197,19 +267,18 @@ int solver_init_fields(PyObject * coefficients, int Nx, int Ny, int Nz)
 
 
     // initialize ez pointers
-    Ez.Nx = Nx + 1;
+    Ez.Nx = Nx;
     Ez.Ny = Ny + 1;
     Ez.Nz = Nz;
     Ez.NyNz = Ez.Ny * Ez.Nz;
 
     // x and y endpoints do not get updated and don't have coefficients 
-    Cz.Nx = Nx; 
     Cz.Ny = Ny - 1; 
     Cz.Nz = Nz;
-    Cz.Cb_ez_x = get_solver_array(coefficients, "Cb_ez_x", Cz.Nx, Cz.Ny, Cz.Nz);
-    Cz.Cb_ez_y = get_solver_array(coefficients, "Cb_ez_y", Cz.Nx, Cz.Ny, Cz.Nz);
-    Cz.Ca_ez_x = get_solver_array(coefficients, "Ca_ez_x", Cz.Nx, Cz.Ny, Cz.Nz);
-    Cz.Ca_ez_y = get_solver_array(coefficients, "Ca_ez_y", Cz.Nx, Cz.Ny, Cz.Nz);
+    Cz.Cb_ez_x = get_solver_array(coefficients, "Cb_ez_x", Nx, Cz.Ny, Cz.Nz);
+    Cz.Cb_ez_y = get_solver_array(coefficients, "Cb_ez_y", Nx, Cz.Ny, Cz.Nz);
+    Cz.Ca_ez_x = get_solver_array(coefficients, "Ca_ez_x", Nx, Cz.Ny, Cz.Nz);
+    Cz.Ca_ez_y = get_solver_array(coefficients, "Ca_ez_y", Nx, Cz.Ny, Cz.Nz);
     Cz.NyNz = Cz.Ny * Cz.Nz;
     // ensure coefficients at the end of the x-axis are zero to create a PEC boundary
     memset(Cz.Cb_ez_x + ((Nx - 1) * Cz.NyNz), 0, Cz.NyNz * sizeof(float));
@@ -218,15 +287,15 @@ int solver_init_fields(PyObject * coefficients, int Nx, int Ny, int Nz)
     memset(Cz.Ca_ez_y + ((Nx - 1) * Cz.NyNz), 0, Cz.NyNz * sizeof(float));
 
     // initialize hx pointers
-    Hx.Nx = Nx + 1;
+    Hx.Nx = Nx;
     Hx.Ny = Ny;
     Hx.Nz = Nz;
     Hx.NyNz = Hx.Ny * Hx.Nz;
 
-    Dx.Db_hx_y = get_solver_array(coefficients, "Db_hx_y", Hx.Nx-1, Hx.Ny, Hx.Nz);
-    Dx.Db_hx_z = get_solver_array(coefficients, "Db_hx_z", Hx.Nx-1, Hx.Ny, Hx.Nz);
-    Dx.Da_hx_y = get_solver_array(coefficients, "Da_hx_y", Hx.Nx-1, Hx.Ny, Hx.Nz);
-    Dx.Da_hx_z = get_solver_array(coefficients, "Da_hx_z", Hx.Nx-1, Hx.Ny, Hx.Nz);
+    Dx.Db_hx_y = get_solver_array(coefficients, "Db_hx_y", Nx, Hx.Ny, Hx.Nz);
+    Dx.Db_hx_z = get_solver_array(coefficients, "Db_hx_z", Nx, Hx.Ny, Hx.Nz);
+    Dx.Da_hx_y = get_solver_array(coefficients, "Da_hx_y", Nx, Hx.Ny, Hx.Nz);
+    Dx.Da_hx_z = get_solver_array(coefficients, "Da_hx_z", Nx, Hx.Ny, Hx.Nz);
     // ensure coefficients at the end of the x-axis are zero to create a PEC boundary
     memset(Dx.Db_hx_y + ((Nx - 1) * Hx.Ny * Hx.Nz), 0, Hx.Ny * Hx.Nz * sizeof(float));
     memset(Dx.Db_hx_z + ((Nx - 1) * Hx.Ny * Hx.Nz), 0, Hx.Ny * Hx.Nz * sizeof(float));
@@ -239,10 +308,10 @@ int solver_init_fields(PyObject * coefficients, int Nx, int Ny, int Nz)
     Hy.Nz = Nz;
     Hy.NyNz = Hy.Ny * Hy.Nz;
 
-    Dy.Db_hy_z = get_solver_array(coefficients, "Db_hy_z", Hy.Nx, Hy.Ny, Hy.Nz);
-    Dy.Db_hy_x = get_solver_array(coefficients, "Db_hy_x", Hy.Nx, Hy.Ny, Hy.Nz);
-    Dy.Da_hy_z = get_solver_array(coefficients, "Da_hy_z", Hy.Nx, Hy.Ny, Hy.Nz);
-    Dy.Da_hy_x = get_solver_array(coefficients, "Da_hy_x", Hy.Nx, Hy.Ny, Hy.Nz);
+    Dy.Db_hy_z = get_solver_array(coefficients, "Db_hy_z", Nx, Hy.Ny, Hy.Nz);
+    Dy.Db_hy_x = get_solver_array(coefficients, "Db_hy_x", Nx, Hy.Ny, Hy.Nz);
+    Dy.Da_hy_z = get_solver_array(coefficients, "Da_hy_z", Nx, Hy.Ny, Hy.Nz);
+    Dy.Da_hy_x = get_solver_array(coefficients, "Da_hy_x", Nx, Hy.Ny, Hy.Nz);
 
     // initialize hz pointers
     Hz.Nx = Nx;
@@ -250,10 +319,10 @@ int solver_init_fields(PyObject * coefficients, int Nx, int Ny, int Nz)
     Hz.Nz = Nz + 1;
     Hz.NyNz = Hz.Ny * Hz.Nz;
 
-    Dz.Db_hz_x = get_solver_array(coefficients, "Db_hz_x", Hz.Nx, Hz.Ny, Hz.Nz);
-    Dz.Db_hz_y = get_solver_array(coefficients, "Db_hz_y", Hz.Nx, Hz.Ny, Hz.Nz);
-    Dz.Da_hz_x = get_solver_array(coefficients, "Da_hz_x", Hz.Nx, Hz.Ny, Hz.Nz);
-    Dz.Da_hz_y = get_solver_array(coefficients, "Da_hz_y", Hz.Nx, Hz.Ny, Hz.Nz);
+    Dz.Db_hz_x = get_solver_array(coefficients, "Db_hz_x", Nx, Hz.Ny, Hz.Nz);
+    Dz.Db_hz_y = get_solver_array(coefficients, "Db_hz_y", Nx, Hz.Ny, Hz.Nz);
+    Dz.Da_hz_x = get_solver_array(coefficients, "Da_hz_x", Nx, Hz.Ny, Hz.Nz);
+    Dz.Da_hz_y = get_solver_array(coefficients, "Da_hz_y", Nx, Hz.Ny, Hz.Nz);
 
     return 0;
 }
@@ -269,7 +338,7 @@ int solver_init_monitors(PyObject * py_monitors, int Nt)
     }
 
     // shapes of field components
-    int Nx[6] = {Ex.Nx, Ey.Nx, Ez.Nx, Hx.Nx, Hy.Nx, Hz.Nx};
+    int Nx[6] = {Ex.Nx, Ey.Nx+1, Ez.Nx+1, Hx.Nx+1, Hy.Nx, Hz.Nx};
     int Ny[6] = {Ex.Ny, Ey.Ny, Ez.Ny, Hx.Ny, Hy.Ny, Hz.Ny};
     int Nz[6] = {Ex.Nz, Ey.Nz, Ez.Nz, Hx.Nz, Hy.Nz, Hz.Nz};
 
@@ -430,22 +499,16 @@ int solver_run(int Nt, int n_th)
     }
 
     // allocate dummy data for endpoints of thread grids. 
-    thread_data[0].ez = new float[Ez.Ny * Ez.Nz]{};
-    thread_data[0].ey = new float[Ey.Ny * Ey.Nz]{};
-    thread_data[n_threads+1].hy = new float[Hy.Ny * Hy.Nz]{};
-    thread_data[n_threads+1].hz = new float[Hz.Ny * Hz.Nz]{};
+    thread_data[0].ez = mbuffer_allocate(Ez.Ny * Ez.Nz);
+    thread_data[0].ey = mbuffer_allocate(Ey.Ny * Ey.Nz);
+    thread_data[n_threads+1].hy = mbuffer_allocate(Hy.Ny * Hy.Nz);
+    thread_data[n_threads+1].hz = mbuffer_allocate(Hz.Ny * Hz.Nz);
 
     // wait for all threads to complete
     for (int t = 0; t < n_threads; t++)
     {
         threads[t].join();
     }
-
-
-    delete[] thread_data[0].ez;
-    delete[] thread_data[0].ey;
-    delete[] thread_data[n_threads+1].hy;
-    delete[] thread_data[n_threads+1].hz;
 
     control_th.join();
 
@@ -505,8 +568,11 @@ long long get_ts()
 // thread responsible for synchronizing field update threads
 void solver_controller(int Nt, int n_threads)
 {
-    std::stringstream msg;
-
+    // std::stringstream msg;
+    // msg.str("");
+    // msg.clear();
+    // msg << "Controller Start... \n";
+    // std::cout << msg.str();
     // wait until all threads have signaled they are done with memory allocation
     {
         // get lock on mutex while shared variables are modified
@@ -586,8 +652,6 @@ void solver_thread(int x_start, int x_stop, int Nt, int thread_idx)
     std::stringstream msg;
     msg << "Starting Thread " << thread_idx << " " << x_start << " " << x_stop << "\n";
     std::cout << msg.str();
-    Eigen::setNbThreads(1);
-
 
     // long long k = 0;
     int x_offset;
@@ -596,34 +660,35 @@ void solver_thread(int x_start, int x_stop, int Nt, int thread_idx)
 
     int Ny;
     int Nz;
+
     
     // allocate memory for this thread's grid.
     // only Nx components are created for all fields, the Ey, Ez, and Hx components that have one extra 
     // component do not track the fields on the first index. They are not updated as they are on the edge of the grid
     // and always remain at zero.
-    float * p_ex_y = new float[Nx * Ex.Ny * Ex.Nz]{0}; // memset(p_ex_y, 0, Nx * Ex.Ny * Ex.Nz * sizeof(float));
-    float * p_ex_z = new float[Nx * Ex.Ny * Ex.Nz]{0}; // memset(p_ex_z, 0, Nx * Ex.Ny * Ex.Nz * sizeof(float));
-    float * p_ex   = new float[Nx * Ex.Ny * Ex.Nz]{0}; // memset(p_ex,   0, Nx * Ex.Ny * Ex.Nz * sizeof(float));
+    float * p_ex_y = mbuffer_allocate(Nx * Ex.Ny * Ex.Nz); // 
+    float * p_ex_z = mbuffer_allocate(Nx * Ex.Ny * Ex.Nz); // 
+    float * p_ex   = mbuffer_allocate(Nx * Ex.Ny * Ex.Nz); // 
 
-    float * p_ey_z = new float[Nx * Ey.Ny * Ey.Nz]{0}; //  memset(p_ey_z, 0, Nx * Ey.Ny * Ey.Nz * sizeof(float));
-    float * p_ey_x = new float[Nx * Ey.Ny * Ey.Nz]{0}; //  memset(p_ey_x, 0, Nx * Ey.Ny * Ey.Nz * sizeof(float));
-    float * p_ey   = new float[Nx * Ey.Ny * Ey.Nz]{0}; //  memset(p_ey,   0, Nx * Ey.Ny * Ey.Nz * sizeof(float));
+    float * p_ey_z = mbuffer_allocate(Nx * Ey.Ny * Ey.Nz); //  
+    float * p_ey_x = mbuffer_allocate(Nx * Ey.Ny * Ey.Nz); //  
+    float * p_ey   = mbuffer_allocate(Nx * Ey.Ny * Ey.Nz); // 
 
-    float * p_ez_x = new float[Nx * Ez.Ny * Ez.Nz]{0}; //  memset(p_ez_x, 0, Nx * Ez.Ny * Ez.Nz * sizeof(float));
-    float * p_ez_y = new float[Nx * Ez.Ny * Ez.Nz]{0}; //  memset(p_ez_y, 0, Nx * Ez.Ny * Ez.Nz * sizeof(float));
-    float * p_ez   = new float[Nx * Ez.Ny * Ez.Nz]{0}; //  memset(p_ez,   0, Nx * Ez.Ny * Ez.Nz * sizeof(float));
+    float * p_ez_x = mbuffer_allocate(Nx * Ez.Ny * Ez.Nz); //  
+    float * p_ez_y = mbuffer_allocate(Nx * Ez.Ny * Ez.Nz); //  
+    float * p_ez   = mbuffer_allocate(Nx * Ez.Ny * Ez.Nz); // 
 
-    float * p_hx_y = new float[Nx * Hx.Ny * Hx.Nz]{0}; //  memset(p_hx_y, 0, Nx * Hx.Ny * Hx.Nz * sizeof(float));
-    float * p_hx_z = new float[Nx * Hx.Ny * Hx.Nz]{0}; //  memset(p_hx_z, 0, Nx * Hx.Ny * Hx.Nz * sizeof(float));
-    float * p_hx   = new float[Nx * Hx.Ny * Hx.Nz]{0}; //  memset(p_hx,   0, Nx * Hx.Ny * Hx.Nz * sizeof(float));
+    float * p_hx_y = mbuffer_allocate(Nx * Hx.Ny * Hx.Nz); //  
+    float * p_hx_z = mbuffer_allocate(Nx * Hx.Ny * Hx.Nz); //  
+    float * p_hx   = mbuffer_allocate(Nx * Hx.Ny * Hx.Nz); //  
 
-    float * p_hy_z = new float[Nx * Hy.Ny * Hy.Nz]{0}; //  memset(p_hy_z, 0, Nx * Hy.Ny * Hy.Nz * sizeof(float));
-    float * p_hy_x = new float[Nx * Hy.Ny * Hy.Nz]{0}; //  memset(p_hy_x, 0, Nx * Hy.Ny * Hy.Nz * sizeof(float));
-    float * p_hy   = new float[Nx * Hy.Ny * Hy.Nz]{0}; //  memset(p_hy,   0, Nx * Hy.Ny * Hy.Nz * sizeof(float));
+    float * p_hy_z = mbuffer_allocate(Nx * Hy.Ny * Hy.Nz); //  
+    float * p_hy_x = mbuffer_allocate(Nx * Hy.Ny * Hy.Nz); //  
+    float * p_hy   = mbuffer_allocate(Nx * Hy.Ny * Hy.Nz); //  
 
-    float * p_hz_x = new float[Nx * Hz.Ny * Hz.Nz]{0}; //  memset(p_hz_x, 0, Nx * Hz.Ny * Hz.Nz * sizeof(float));
-    float * p_hz_y = new float[Nx * Hz.Ny * Hz.Nz]{0}; //  memset(p_hz_x, 0, Nx * Hz.Ny * Hz.Nz * sizeof(float));
-    float * p_hz   = new float[Nx * Hz.Ny * Hz.Nz]{0}; //  memset(p_hz,   0, Nx * Hz.Ny * Hz.Nz * sizeof(float));
+    float * p_hz_x = mbuffer_allocate(Nx * Hz.Ny * Hz.Nz); //  
+    float * p_hz_y = mbuffer_allocate(Nx * Hz.Ny * Hz.Nz); //  
+    float * p_hz   = mbuffer_allocate(Nx * Hz.Ny * Hz.Nz); //  
 
     // populate thread data
     thread_data[thread_idx].hy = p_hy;
@@ -959,11 +1024,12 @@ void solver_thread(int x_start, int x_stop, int Nt, int thread_idx)
         for (Probe * p : h_probes) 
         {
             // apply soft source
-            if (p->is_source)
+          if (p->is_source)
             {
-                *(p->field_p) = *(p->field_p) + (p->values)[n];
+                *(p->field_s1_p) = *(p->field_s1_p) + (p->values)[n];
+                *(p->field_s2_p) = *(p->field_s2_p) + (p->values)[n];
+                *(p->field_p) = *(p->field_s1_p) + *(p->field_s2_p);
             }
-
             // put the resulting total voltage in the source_values array once the value is used for this
             // time step.
             (p->values)[n] = *(p->field_p);
@@ -1034,29 +1100,5 @@ void solver_thread(int x_start, int x_stop, int Nt, int thread_idx)
         }
 
     }
-
-    delete[] p_ex_y;
-    delete[] p_ex_z;
-    delete[] p_ex;
-
-    delete[] p_ey_z ;
-    delete[] p_ey_x ;
-    delete[] p_ey   ;
-
-    delete[] p_ez_x ;
-    delete[] p_ez_y ;
-    delete[] p_ez   ;
-
-    delete[] p_hx_y ;
-    delete[] p_hx_z ;
-    delete[] p_hx   ;
-
-    delete[] p_hy_z ;
-    delete[] p_hy_x ;
-    delete[] p_hy   ;
-
-    delete[] p_hz_x ;
-    delete[] p_hz_y ;
-    delete[] p_hz   ;
 
 }

@@ -8,6 +8,13 @@
 #define N_FIELDS 18
 #define N_COEFF 24
 
+struct mbuffer_t
+{
+    float * base_addr; 
+    float * next_addr;
+    uint64_t available_size;
+};
+
 struct Field_Ex {
     int Nx;
     int Ny;
@@ -66,7 +73,6 @@ struct Coeff_Ey {
     float * Ca_ey_x;
     float * Cb_ey_z;
     float * Cb_ey_x;
-    int Nx;
     int Ny;
     int Nz;
     int NyNz;
@@ -77,7 +83,6 @@ struct Coeff_Ez {
     float * Ca_ez_y;
     float * Cb_ez_x;
     float * Cb_ez_y;
-    int Nx;
     int Ny;
     int Nz;
     int NyNz;
@@ -138,7 +143,7 @@ struct ThreadData {
     float * ez;
 };
 
-int solver_init_fields(PyObject * coefficients, int Nx, int Ny, int Nz);
+int solver_init_fields(PyObject * py_mem, PyObject * coefficients, int Nx, int Ny, int Nz);
 
 int solver_init_monitors(PyObject * py_monitors, int Nt);
 

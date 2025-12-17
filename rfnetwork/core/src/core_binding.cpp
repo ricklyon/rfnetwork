@@ -351,6 +351,7 @@ static PyObject* solver_run(PyObject* self, PyObject* args) {
     PyObject *coefficients;
     PyObject *probes;
     PyObject *monitors;
+    PyObject *mem;
     
     int Nx;
     int Ny;
@@ -359,7 +360,7 @@ static PyObject* solver_run(PyObject* self, PyObject* args) {
     int n_threads;
 
     // Parse arguments: expecting a single Python object
-    if (!PyArg_ParseTuple(args, "OOOIIIII", &coefficients, &probes, &monitors, &Nx, &Ny, &Nz, &Nt, &n_threads)) {
+    if (!PyArg_ParseTuple(args, "OOOOIIIII", &coefficients, &probes, &monitors, &mem, &Nx, &Ny, &Nz, &Nt, &n_threads)) {
         return PyLong_FromLong(1);
     }
 
@@ -378,7 +379,7 @@ static PyObject* solver_run(PyObject* self, PyObject* args) {
         return PyLong_FromLong(1);
     }
 
-    solver_init_fields(coefficients, Nx, Ny, Nz);
+    solver_init_fields(mem, coefficients, Nx, Ny, Nz);
     solver_init_monitors(monitors, Nt);
     solver_init_probes(probes, Nt);
 
@@ -407,6 +408,7 @@ static struct PyModuleDef module = {
 
 PyMODINIT_FUNC PyInit_core_func(void)
 {
+    import_array();  
     Py_Initialize();
     return PyModule_Create(&module);
 }
