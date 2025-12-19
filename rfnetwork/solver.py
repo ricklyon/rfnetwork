@@ -13,6 +13,7 @@ from core import core_func
 import sys
 import matplotlib
 from itertools import product
+from scipy.optimize import root_scalar, fsolve
 # matplotlib.use("qt5agg")
 
 # pv.set_jupyter_backend("trame")
@@ -94,6 +95,7 @@ class SolverMesh():
         dtype_ = np.float32
         places_ = 4
 
+        # build list of edge coordinates along each axis
         for obj in objects:
             # round points to minimum precision supported by the mesh
             p_edges = np.around(obj.points.T, decimals=places_).astype(np.float32)
@@ -101,73 +103,101 @@ class SolverMesh():
             for i in range(3):
                 edges[i] = np.unique(np.concatenate([edges[i], p_edges[i]]))
 
-        # list of cell widths for each axis
+        d = 0.09 # total width of cell
+        a = 0.02 # previous cell width
+        b = 0.02 # next cell width, must be bigger than a
+        
+        def split_cell(a: float, b: float, d: float, r_max: float = 1.5):
+            """
+            Return a list of cell widths that divide a cell with width d into cells that do not exceed the given
+            growth rate r_max. a is the width of the previous cell, b is the width of the next cell.
+            """
+
+            # if no grading is needed, split the cell into equal sections
+            if np.abs(b / a) < r_max:
+                min_ba = np.min([b, a])
+                rmd = (d % min_ba)
+                n = int(d // min_ba)
+                return np.array([min_ba + (rmd / n)] * n, dtype=np.float32)
+            
+            # if d is less than or equal to a, no grading is possible, return d as the cell width
+            if np.abs(d - a) < 1e-3:
+                return np.array([d], dtype=np.float32)
+
+            # number of cells can be no larger than d/a (all cells are of width a)
+            n_max = int(d / a) + 1
+
+            for n in range(1, n_max+1):
+                # growth rate of cells must make the last cell at least 2/3 of b
+                # a * m^n > (2/3) b
+                m_min = ((1 / r_max) * (b/a))**(1/n)
+
+                # if the minimum growth rate is higher than 1.5, the mesh cannot be resolved with this number of cells,
+                # move to the next n
+                if m_min > r_max:
+                    continue
+                
+                # last cell can be no larger than b, and growth rate can be no larger than r_max
+                # a * m^n < b
+                m_max = np.clip((b / a)**(1/n), None, r_max)
+
+                cells_m_min = a * np.array([m_min**r for r in range(1, n+1)])
+                cells_m_max = a * np.array([m_max**r for r in range(1, n+1)])
+                
+                # growth rate must satisfy a(m + m^2 + m^3 + ... m^n) = d
+                # find the min and max widths that can be created by dividing this section into n cells
+                d_min = np.sum(cells_m_min)
+                d_max = np.sum(cells_m_max)
+
+                # print(n, d, d_min, d_max)
+
+                # skip this n if the min/max width it can generate fall outside the target width d
+                if d_min > d or d_max < d:
+                    continue
+
+                # at this point, we know that n can generate the target width d. Find the growth rate that does this.
+                def compute_d(m):
+                    return a * np.sum([m**r for r in range(1, n+1)]) - d
+
+                m0 = np.sqrt(m_min * m_max) # initial guess for growth rate m
+                m = fsolve(compute_d, x0=m0, args=())
+                
+                cells_m = a * np.array([m**r for r in range(1, n+1)], dtype=np.float32).flatten()
+
+                if np.abs(np.sum(cells_m) - d) < 1e-5:
+                    return cells_m
+                else:
+                    raise RuntimeError("Mesh did not converge.")
+
+        # build a list of cell widths along each axis
         cell_d = [[], [], []]
-        n_feature_min = 2
-        # iterate over x, y, z axis
-        for i, d0_i in enumerate(d0):
-            edges_i = edges[i]
+        for axis in range(3):
+            edges_i = edges[axis]
         
             # list of distances between each edge
-            d_e = np.diff(edges_i)
-            
-            for d in d_e:
-                # how many cells of the default size will fit in this interval
-                nx = d / d0_i
-            
-                # use a minimum of two cells between adjacent features
-                if nx < n_feature_min:
-                    cell_d[i] += [d / n_feature_min] * n_feature_min
-            
-                else:
-                    # make the cell a bit smaller than the default to account for the remainder of nx
-                    nx = int(nx + 1) if nx % 1 > 1e-3 else int(nx)
-                    # d0 * nx will be larger than d if there was a remainder on nx, divide up this difference amoung each cell
-                    d0_e = d0_i - (((d0_i * nx) - d) / nx)
-                    cell_d[i] += [d0_e] * nx
+            diff_edges = np.diff(edges_i)
+
+            # split cells in half, ensures at least two cells are between adjacent features of the grid
+            ds = np.array([(d/2, d/2) for d in diff_edges]).flatten()
+
+            for i, d in enumerate(ds):
+                # previous and next cell width
+                dprev = ds[i - 1] if i > 0 else d0[axis]
+                dnext = ds[i + 1] if i < len(ds) - 1 else d0[axis]
+
+                # clip previous and next cells to the maximum allowed cell width
+                dprev = np.clip(dprev, 0, d0[axis])
+                dnext = np.clip(dnext, 0, d0[axis])
+
+                cell_d[axis] += list(split_cell(dprev, dnext, d))
 
         
         gx, gy, gz = [np.around(np.concatenate([[self.sbox_min[i]], self.sbox_min[i] + np.cumsum(cell_d[i])]), decimals=places_) for i in range(3)]
         dx, dy, dz = np.diff(gx).astype(dtype_), np.diff(gy), np.diff(gz)
 
-
-        # Split cells at the edge of PEC faces, move PEC in one cell to compensate for larger traces.
-        # CST has an edge singularity compensation but it doesn't seem to work reliably when the trace goes into  PML
-        # use cell splitting scheme instead.
-        def split_cell(d_list, idx: int, factor: float):
-            if idx > 0 and idx < len(d_list):
-                d_list = np.insert(d_list, idx, d_list[idx] * factor)
-                d_list[idx+1] = d_list[idx+1] * (1 - factor)
-
-            return d_list
-            
-        # pec = list(self.pec_face.values())[0]
-        # for pec in self.pec_face.values():
-
-        #     pmin, pmax = np.min(pec.points, axis=0), np.max(pec.points, axis=0)
-        #     # normal axis
-
-        #     axis = np.argmin(pmax - pmin)
-        #     if axis == 2: # pec face is normal to x-axis
-        #         # get x index for cell on the edge of the face
-        #         dx = split_cell(dx, np.argmin(np.abs(gx - pmax[0])) - 1, factor=0.8)
-        #         dx = split_cell(dx, np.argmin(np.abs(gx - pmin[0])), factor=0.2)
-
-        #         dy = split_cell(dy, np.argmin(np.abs(gy - pmax[1])) - 1, factor=0.8)
-        #         dy = split_cell(dy, np.argmin(np.abs(gy - pmin[1])), factor=0.2)
-                
-
-
-        # # number of cells along each axis
-        #  
-        # cell_d = dx, dy, dz
-        # gx, gy, gz = [np.around(np.concatenate([[self.sbox_min[i]], self.sbox_min[i] + np.cumsum(cell_d[i])]), decimals=6) for i in range(3)]
-        
         self.n_cells = len(dx), len(dy), len(dz)  
         self.grid_mesh = pv.RectilinearGrid(gx, gy, gz)
 
-
-        # Blend large differences in adjacent cell sizes
 
         self.Nx, self.Ny, self.Nz = self.n_cells
         self.dx, self.dy, self.dz = dx, dy, dz
@@ -1236,18 +1266,17 @@ class SolverMesh():
         return plotter
     
 
-print("start")
 
 # remove e edge conductive on x sides as well if there is no port attached to it
 # allocate block memory in python and assign section to each thread, that way multiple runs can share the same
 # memory without reallocating it.
 
 ms_y = 0
-ms_w = 0.04
+ms_w = 0.01
 
-sbox_h = 0.4
+sbox_h = 0.25
 sbox_w = 0.4
-sbox_len = 0.5
+sbox_len = 1
 
 sub_h = 0.02
 ms_x = (-sbox_len/2 + 0.1, sbox_len/2)
@@ -1296,12 +1325,16 @@ s.add_pec_face("ms1", ms_trace, color="gold")
 s.add_lumped_port(1, port1_face)
 # s.add_lumped_port(2, port2_face)
 
-d0=[0.010, ms_w/2, 0.005]
-s.mesh(d0=d0)
+d0=ms_w/2
+self = s
+
+s.mesh(d0=[0.01, 0.01, 0.005])
 
 s.init_ports()
 s.add_xPML(side="upper")
 s.init_pec()
+
+s.render().show()
 
 s.add_field_monitor("mon1", "ez", "z", sub_h - 0.005, 10)
 s.add_field_monitor("mon2", "ey", "z", sub_h, 10)
@@ -1314,7 +1347,7 @@ s.add_field_monitor("mon3", "ex", "z", sub_h, 10)
 # s.add_field_monitor("mon2", "ez", "z", 2, 10)
 # s.add_field_monitor("mon3", "ez", "x", s.Nx // 2, 10)
 
-self = s
+
 
 s.add_current_probe("c1", current_face)
 s.add_voltage_probe("v1", voltage_line)
@@ -1363,9 +1396,9 @@ p.show(title="EM Solver")
 
 Db_0 = s.dt / u0
 Cb_0 = s.dt / e0 
-p = s.plot_cooeficients("ey_x", "b", "z", sub_h, point_size=15, cmap="brg", normalization=Cb_0)
-p.camera_position = "xy"
-p.show()
+# p = s.plot_cooeficients("ey_x", "b", "z", sub_h, point_size=15, cmap="brg", normalization=Cb_0)
+# p.camera_position = "xy"
+# p.show()
 
 # compute line impedance
 line_i = self.vi_probe_values("c1")
