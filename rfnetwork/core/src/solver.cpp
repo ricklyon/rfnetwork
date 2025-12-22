@@ -72,11 +72,15 @@ bool th_init_done = false;
 
 static struct mbuffer_t m_pool = {NULL, NULL, 0};
 
+long long get_milliseconds()
+{
 
-long long t0 = std::chrono::duration_cast<std::chrono::milliseconds>(
-                    std::chrono::system_clock::now().time_since_epoch()
-                ).count();
+    long long ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                       std::chrono::system_clock::now().time_since_epoch()
+                   ).count();
 
+    return ms;
+}
 
 void mbuffer_init(float * base_addr, uint64_t size)
 {
@@ -84,7 +88,6 @@ void mbuffer_init(float * base_addr, uint64_t size)
     m_pool.next_addr = base_addr;
     m_pool.available_size = size;
 }
-
 
 /*
 Reserves a contigious section of memory of given size (size is number of floats) 
@@ -515,55 +518,6 @@ int solver_run(int Nt, int n_th)
     return 0;
 }
 
-// int solver_run(int Nt, int n_threads)
-// {
-//     float data[16] = {
-//         1, 2, 3, 4,
-//         5, 6, 7, 8,
-//         9,10,11,12,
-//         13,14,15,16
-//     };
-
-//     // Stride: how many elements to skip between columns
-//     // OuterStride = elements to skip to move to next column
-//     // InnerStride = elements to skip between rows within a column
-//     Eigen::Stride<Eigen::Dynamic, Eigen::Dynamic> stride(4, 1);
-
-//     // Create a Map with stride: interpret data as 3x3 matrix using only first 3 columns
-//     MatrixFloatStride map(((float *) data) + 5, 2, 2, stride);
-
-//     std::cout << "Mapped matrix with custom stride:\n" << map << "\n";
-
-//     return 0;
-// }
-
-// a way to create a matrix that skips rows/columns. It doesn't turn out to be any faster than using block()
-// Eigen::Stride<Eigen::Dynamic, Eigen::Dynamic> hz_stride(Hz.Nz, 1);
-// Eigen::Stride<Eigen::Dynamic, Eigen::Dynamic> ex_stride(Ex.Nz, 1);
-
-// skip Nz elements to get to next row, increment columns normally by 1
-// hz.block(0, 1, Ny, Nz)
-// MatrixFloatStride hz (p_hz + (x * Hz.NyNz) + 1, Hz.Ny, Nz, hz_stride);
-//.block(1, 0, Ny, Nz))
-// MatrixFloatType hy (p_hy + (x * Hy.NyNz) + Hy.Nz, Ny, Hy.Nz);
-
-// skip Nz elements to get to next row, increment columns normally by 1
-// ex_z.block(1, 1, Ny, Nz)
-// MatrixFloatStride ex_y_block(p_ex_y + (x_offset + Ex.Nz + 1), Ny, Nz, ex_stride);
-// MatrixFloatStride ex_z_block(p_ex_z + (x_offset + Ex.Nz + 1), Ny, Nz, ex_stride);
-// ex_y_block = Ca_ex_y.cwiseProduct(ex_y_block) + (
-//     Cb_ex_y.cwiseProduct((hz.bottomRows(Ny) - hz.topRows(Ny)))
-// );
-
-long long get_ts()
-{
-
-    long long ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                       std::chrono::system_clock::now().time_since_epoch()
-                   ).count();
-
-    return (ms - t0);
-}
 
 // thread responsible for synchronizing field update threads
 void solver_controller(int Nt, int n_threads)
@@ -573,6 +527,7 @@ void solver_controller(int Nt, int n_threads)
     // msg.clear();
     // msg << "Controller Start... \n";
     // std::cout << msg.str();
+
     // wait until all threads have signaled they are done with memory allocation
     {
         // get lock on mutex while shared variables are modified
@@ -601,10 +556,6 @@ void solver_controller(int Nt, int n_threads)
             cv.wait(lock, [n_threads] { return e_updates.load() == n_threads; });
         }
 
-        // msg.str("");
-        // msg.clear();
-        // msg << "E-updates Done For t=" << n << "at " << get_ts() << "\n";
-        // std::cout << msg.str();
 
         // reset e update counter and signal to threads that they can move on to h updates, wait until h updates 
         // are completed on all threads
@@ -618,17 +569,6 @@ void solver_controller(int Nt, int n_threads)
             cv_th.notify_all();
             cv.wait(lock, [n_threads] { return h_updates.load() == n_threads; });
         }
-
-        // msg.str("");
-        // msg.clear();
-        // msg << "H-updates Done For t=" << n << "at " << get_ts() << "\n";
-        // std::cout << msg.str();
-
-        // with e and h field updates completed, update the probes
-        // for (int p = 0; p < n_probes; p++)
-        // {
-        //     (probes[p].values)[n] = *(probes[p].field);
-        // }
     }
 
     // send a final notification that h field updates are complete
@@ -649,9 +589,9 @@ void solver_thread(int x_start, int x_stop, int Nt, int thread_idx)
     // ey, ez, hx components on the RIGHT side of the cell. The first cell does not update the ey, ez, hx compoennts
     // on the left
 
-    std::stringstream msg;
-    msg << "Starting Thread " << thread_idx << " " << x_start << " " << x_stop << "\n";
-    std::cout << msg.str();
+    // std::stringstream msg;
+    // msg << "Starting Thread " << thread_idx << " " << x_start << " " << x_stop << "\n";
+    // std::cout << msg.str();
 
     // long long k = 0;
     int x_offset;
@@ -661,7 +601,6 @@ void solver_thread(int x_start, int x_stop, int Nt, int thread_idx)
     int Ny;
     int Nz;
 
-    
     // allocate memory for this thread's grid.
     // only Nx components are created for all fields, the Ey, Ez, and Hx components that have one extra 
     // component do not track the fields on the first index. They are not updated as they are on the edge of the grid
@@ -711,28 +650,18 @@ void solver_thread(int x_start, int x_stop, int Nt, int thread_idx)
     float * fields_sp1_base[6] = {p_ex_y, p_ey_z, p_ez_x, p_hx_y, p_hy_z, p_hz_x};
     float * fields_sp2_base[6] = {p_ex_z, p_ey_x, p_ez_y, p_hx_z, p_hy_x, p_hz_y};
 
-    // msg.str("");
-    // msg.clear();
-    // msg << "N probes " << n_probes  << "\n";
-    // std::cout << msg.str();
-
     for (int i = 0; i < n_probes; i++)
     {   
         p = &(probes[i]);
         // if probe is inside the grid for this thread
         if (((p->x_cell) >= x_start) && ((p->x_cell) < x_stop))
         {
-            // msg.str("");
-            // msg.clear();
-            // msg << "Probe " << i << ", Thread " << thread_idx << " x-cell " << (p->x_cell) << "\n";
-            // std::cout << msg.str();
-
-            // e-field probe
+            // add e-field probe
             if ((p->field_type) < 3)
             {
                 e_probes.push_back(p);
             }
-            // h-field probe
+            // add h-field probe
             else 
             {
                 h_probes.push_back(p);
@@ -758,14 +687,9 @@ void solver_thread(int x_start, int x_stop, int Nt, int thread_idx)
         cv_th.wait(lock, [] { return th_init_done; });
     }
 
+    // main time stepping loop
     for (int n = 0; n < Nt; n++)
     {
-
-        // msg.str("");
-        // msg.clear();
-        // msg << "E-updates..." << thread_idx << " " << get_ts() << "\n";
-        // std::cout << msg.str();
-        
 
         // operate on a single slice of the field on the x axis
         for (int x = 0; x < Nx; x++)
@@ -830,14 +754,15 @@ void solver_thread(int x_start, int x_stop, int Nt, int thread_idx)
             // ----------------- update ex -------------------------- //
             Ny = Cx.Ny;
             Nz = Cx.Nz;
-            // ex_zd = Cb_ex_z * np.diff(hy, axis=2)[:, 1:-1, :]
+            // ex_y update
+            // ex_yd = Cb_ex_y * np.diff(hz, axis=1)[:, :, 1:-1]
             // ex_y[:, 1:-1, 1:-1] = (Ca_ex_y * ex_y[:, 1:-1, 1:-1]) + ex_yd
             ex_y.block(1, 1, Ny, Nz) = Ca_ex_y.cwiseProduct(ex_y.block(1, 1, Ny, Nz)) + (
                 Cb_ex_y.cwiseProduct((hz.bottomRows(Ny) - hz.topRows(Ny)).block(0, 1, Ny, Nz))
             );
 
-            // update ex_z
-            // ex_yd = Cb_ex_y * np.diff(hz, axis=1)[:, :, 1:-1]
+            // ex_z update
+            // ex_zd = Cb_ex_z * np.diff(hy, axis=2)[:, 1:-1, :]
             // ex_z[:, 1:-1, 1:-1] = (Ca_ex_z * ex_z[:, 1:-1, 1:-1]) + ex_zd
             ex_z.block(1, 1, Ny, Nz) = Ca_ex_z.cwiseProduct(ex_z.block(1, 1, Ny, Nz)) + (
                 Cb_ex_z.cwiseProduct((hy.rightCols(Nz) - hy.leftCols(Nz)).block(1, 0, Ny, Nz))
@@ -846,12 +771,15 @@ void solver_thread(int x_start, int x_stop, int Nt, int thread_idx)
             // ----------------- update ey -------------------------- //
             Ny = Cy.Ny;
             Nz = Cy.Nz;
+            // ey_z update
+            // ey_zd = Cb_ey_z * np.diff(hx, axis=2)[1:-1, :, :]
             // ey_z[1:-1, :, 1:-1] = (Ca_ey_z * ey_z[1:-1, :, 1:-1]) + ey_zd
             ey_z.block(0, 1, Ny, Nz) = Ca_ey_z.cwiseProduct(ey_z.block(0, 1, Ny, Nz)) + (
                 Cb_ey_z.cwiseProduct(hx.rightCols(Nz) - hx.leftCols(Nz))
             );
 
-            // update ey_x
+            // ey_x update
+            // ey_xd = Cb_ey_x * np.diff(hz, axis=0)[:, :, 1:-1]
             // ey_x[1:-1, :, 1:-1] = (Ca_ey_x * ey_x[1:-1, :, 1:-1]) + ey_xd
             ey_x.block(0, 1, Ny, Nz) = Ca_ey_x.cwiseProduct(ey_x.block(0, 1, Ny, Nz)) + (
                 Cb_ey_x.cwiseProduct((hz_1 - hz).block(0, 1, Ny, Nz))
@@ -860,12 +788,16 @@ void solver_thread(int x_start, int x_stop, int Nt, int thread_idx)
             // ----------------- update ez -------------------------- //
             Ny = Cz.Ny;
             Nz = Cz.Nz;
+            // ex_z update
+            // ez_xd = Cb_ez_x * np.diff(hy, axis=0)[:, 1:-1, :]
+            // ez_x[1:-1, 1:-1, :] = (Ca_ez_x * ez_x[1:-1, 1:-1, :]) + ez_xd
             // get hy components on either side of x-slice, the hz component below ez is in the same cell,
             ez_x.block(1, 0, Ny, Nz) = Ca_ez_x.cwiseProduct(ez_x.block(1, 0, Ny, Nz)) + (
                 Cb_ez_x.cwiseProduct((hy_1 - hy).block(1, 0, Ny, Nz))
             );
 
             // update ez_y
+            // ez_yd = Cb_ez_y * np.diff(hx, axis=1)[1:-1, :, :]
             // ez_y[1:-1, 1:-1, :] = (Ca_ez_y * ez_y[1:-1, 1:-1, :]) + ez_yd
             ez_y.block(1, 0, Ny, Nz) = Ca_ez_y.cwiseProduct(ez_y.block(1, 0, Ny, Nz)) + (
                 Cb_ez_y.cwiseProduct(hx.bottomRows(Ny) - hx.topRows(Ny))
@@ -969,12 +901,15 @@ void solver_thread(int x_start, int x_stop, int Nt, int thread_idx)
             // ----------------- update hx -------------------------- //
             Ny = Hx.Ny;
             Nz = Hx.Nz;
+            // hx_y update
             // hx_yd = Db_hx_y * np.diff(ez, axis=1)
+            // hx_y = Da_hx_y * hx_y + hx_yd
             hx_y = Da_hx_y.cwiseProduct(hx_y) + (
                 Db_hx_y.cwiseProduct(ez.bottomRows(Ny) - ez.topRows(Ny))
             );
 
-            // update hx_z
+            // hx_z update
+            // hx_zd = Db_hx_z * np.diff(ey, axis=2)
             // hx_z = Da_hx_z * hx_z + hx_zd
             hx_z = Da_hx_z.cwiseProduct(hx_z) + (
                 Db_hx_z.cwiseProduct(ey.rightCols(Nz) - ey.leftCols(Nz))
@@ -983,12 +918,15 @@ void solver_thread(int x_start, int x_stop, int Nt, int thread_idx)
             // ----------------- update hy -------------------------- //
             Ny = Hy.Ny;
             Nz = Hy.Nz;
+            // hy_z update
+            // hy_zd = Db_hy_z * np.diff(ex, axis=2)
             // hy_z = Da_hy_z * hy_z + hy_zd
             hy_z = Da_hy_z.cwiseProduct(hy_z) + (
                 Db_hy_z.cwiseProduct(ex.rightCols(Nz) - ex.leftCols(Nz))
             );
 
             // update hy_x
+            // hy_xd = Db_hy_x * np.diff(ez, axis=0)
             // hy_x = Da_hy_x * hy_x + hy_xd
             hy_x = Da_hy_x.cwiseProduct(hy_x) + (
                 Db_hy_x.cwiseProduct(ez - ez_0)
@@ -997,12 +935,15 @@ void solver_thread(int x_start, int x_stop, int Nt, int thread_idx)
             // ----------------- update hz -------------------------- //
             Ny = Hz.Ny;
             Nz = Hz.Nz;
+            // hz_x update
+            // hz_xd = Db_hz_x * np.diff(ey, axis=0) 
             // hz_x = Da_hz_x * hz_x + hz_xd
             hz_x = Da_hz_x.cwiseProduct(hz_x) + (
                 Db_hz_x.cwiseProduct(ey - ey_0)
             );
 
             // update hz_y
+            // hz_yd = Db_hz_y * np.diff(ex, axis=1)
             // hz_y = Da_hz_y * hz_y + hz_yd
             hz_y = Da_hz_y.cwiseProduct(hz_y) + (
                 Db_hz_y.cwiseProduct(ex.bottomRows(Ny) - ex.topRows(Ny))
@@ -1012,11 +953,6 @@ void solver_thread(int x_start, int x_stop, int Nt, int thread_idx)
             hx = hx_y + hx_z;
             hy = hy_z + hy_x;
             hz = hz_x + hz_y;
-
-            // msg.str("");
-            // msg.clear();
-            // msg << "Thread " << thread_idx << " H-updates Done For t=" << n << "\n";
-            // std::cout << msg.str();
 
         }
 
