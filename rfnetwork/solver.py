@@ -1,12 +1,10 @@
+import itertools
+import time
 import numpy as np 
-from rfnetwork import const, conv, utils
+
 import pyvista as pv
 
-from core import core_func
-
-import itertools
-from utils import blend_cell_widths
-
+from rfnetwork import const, conv, utils, core
 
 u0 = const.u0
 e0 = const.e0
@@ -112,7 +110,6 @@ class Solver_PCB():
             sub_z_max = np.max([sub_z_max, np.max(sub.points[:, 2])])
             sub_er_max = np.max([sub_er_max, sub_er])
 
-        
         # build a list of cell widths along each axis
         cell_d = [[], [], []]
         for axis in range(3):
@@ -193,14 +190,23 @@ class Solver_PCB():
 
                 # if PEC cell, use constant cell widths matched to the smallest adjacent cell if not using blend pec
                 if is_pec_axis[i] and not blend_pec:
-                    w = min(dprev, dnext)
+                    min_neighbor_w = min(dprev, dnext)
+                    # minimum number of sub-cells this cell must be broken up into
+                    n = int(np.clip(d_axis[i] / dmax_axis[i], nmin_axis[i], None))
 
-                    rmd = (d_axis[i] % w)
-                    n = int(d_axis[i] // w)
-                    sub_cell_w = np.array([w + (rmd / n)] * n, dtype=dtype_)
-
+                    # match cell size to the smallest neighboring cell if it meets the min number of sub-cells needed
+                    # for this cell
+                    if min_neighbor_w < (d_axis[i] / n):
+                        rmd = (d_axis[i] % min_neighbor_w)
+                        n_subcell = int(d_axis[i] // min_neighbor_w)
+                        sub_cell_w = np.array([min_neighbor_w + (rmd / n_subcell)] * n_subcell, dtype=dtype_)
+                    # otherwise, break up into the number of required cells
+                    else:
+                        sub_cell_w = np.array([d_axis[i] / n] * n)
                 else:
-                    sub_cell_w = list(blend_cell_widths(dprev, dnext, d_axis[i], n_min = nmin_axis[i]), tol=tol_)
+                    sub_cell_w = list(
+                        utils.blend_cell_widths(dprev, dnext, d_axis[i], n_min = nmin_axis[i], tol=tol_)
+                    )
 
                 d_subcells[i] = sub_cell_w
                 d_sides[i] = (sub_cell_w[0], sub_cell_w[-1])
@@ -794,8 +800,10 @@ class Solver_PCB():
                 )
             )
 
-        print("Running...")
-        core_func.solver_run(coefficients, probes, monitors, mem, Nx, Ny, Nz, Nt, n_threads)
+        print(f"Running solver with {self.Nx * self.Ny * self.Nz / 1e3:.1f}k cells")
+        stime = time.time()
+        core.core_func.solver_run(coefficients, probes, monitors, mem, Nx, Ny, Nz, Nt, n_threads)
+        print(f"Done in {time.time() - stime:.3f}s")
 
         # move monitor values back to the class variable
         for i, (k, m) in enumerate(self.monitors.items()):
@@ -1083,17 +1091,17 @@ class Solver_PCB():
         z_idx = self.ports[source_port-1]["idx"][2]
 
         # source port voltage at each component
-        src_voltage = -np.sum(s.ports[source_port-1]["values"] * conv.m_in(self.dz[z_idx])[None, ..., None], axis=1)
+        src_voltage = -np.sum(self.ports[source_port-1]["values"] * conv.m_in(self.dz[z_idx])[None, ..., None], axis=1)
         # average voltage across y
         src_vp = np.mean(src_voltage, axis=0)
         # source port applied voltage
-        src_applied = s.ports[source_port-1]["src"]
+        src_applied = self.ports[source_port-1]["src"]
 
         # plt.plot(src_applied)
         # plt.plot(src_vp)
         # source port S11
-        A = utils.dtft(src_applied, frequency, 1 / s.dt) #* np.exp(-1j * 2 * np.pi * frequency * 3 * s.dt / 2)
-        V = utils.dtft(src_vp, frequency, 1 / s.dt)
+        A = utils.dtft(src_applied, frequency, 1 / self.dt) #* np.exp(-1j * 2 * np.pi * frequency * 3 * s.dt / 2)
+        V = utils.dtft(src_vp, frequency, 1 / self.dt)
         
         B[:, source_port-1] = V - (A)
 
