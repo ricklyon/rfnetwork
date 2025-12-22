@@ -1,6 +1,7 @@
 import re
 from pathlib import Path
 import numpy as np
+from scipy.optimize import fsolve
 
 def dtft(xn: np.ndarray, f: np.ndarray, fs: float):
     """
@@ -119,3 +120,78 @@ def lp_filter_prototype(n: int, ripple: float = 0.5):
     }
 
     return lp_table[f"{ripple:.1f}"][n]
+
+def blend_cell_widths(
+    a: float, b: float, d: float, r_max: float = 1.5, n_min: int = 1, tol: float = 0.0001, dtype_=np.float32
+):
+    """
+    Return a list of cell widths that divide a cell with width d into cells that do not exceed the given
+    growth rate r_max. a is the width of the previous cell, b is the width of the next cell.
+    """
+
+    # swap a and b if a is larger than b. Always start with the smaller cell and increase up to b
+    flip_a_b = False
+    if (b < a):
+        a, b = b, a
+        flip_a_b = True
+
+    # if no grading is needed, split the cell into equal sections
+    if ((b / a) < r_max):
+        # get number of cells that divides this cell into equal sections as close to a as possible
+        n = d / a
+        n = np.clip(int(n + 1 if n % 1 > 0.5 else n), n_min, None)
+        
+        return np.array([d / n] * n, dtype=np.float32)
+    
+    # if d is less than or equal to a, no grading is possible, return d as the cell width
+    if np.abs(d - a) < tol:
+        return np.array([d])
+
+    # number of cells can be no larger than d/a (with all cells are of width a)
+    n_max = int(d / a) + 1
+
+    for n in range(n_min, n_max+1):
+        # growth rate of cells must make the last cell at least 2/3 of b
+        # a * m^n > (2/3) b
+        m_min = ((1 / r_max) * (b/a))**(1/n)
+
+        # if the minimum growth rate is higher than 1.5, the mesh cannot be resolved with this number of cells,
+        # move to the next n
+        if m_min > r_max:
+            continue
+        
+        # last cell can be no larger than b, and growth rate can be no larger than r_max
+        # a * m^n < b
+        m_max = np.clip((b / a)**(1/n), None, r_max)
+
+        cells_m_min = a * np.array([m_min**r for r in range(1, n+1)])
+        cells_m_max = a * np.array([m_max**r for r in range(1, n+1)])
+        
+        # growth rate must satisfy a(m + m^2 + m^3 + ... m^n) = d
+        # find the min and max widths that can be created by dividing this section into n cells
+        d_min = np.sum(cells_m_min)
+        d_max = np.sum(cells_m_max)
+
+        # print(n, d, d_min, d_max)
+
+        # skip this n if the min/max width it can generate fall outside the target width d
+        if d_min > d or d_max < d:
+            continue
+
+        # at this point, we know that n can generate the target width d. Find the growth rate that does this.
+        def compute_d(m):
+            return a * np.sum([m**r for r in range(1, n+1)]) - d
+
+        m0 = np.sqrt(m_min * m_max) # initial guess for growth rate m
+        m = fsolve(compute_d, x0=m0, args=())
+        
+        cells_m = a * np.array([m**r for r in range(1, n+1)], dtype=np.float32).flatten()
+
+        if np.abs(np.sum(cells_m) - d) < tol:
+            return np.flip(cells_m).astype(dtype_) if flip_a_b else cells_m
+        else:
+            raise RuntimeError("Mesh did not converge.")
+        
+    # if no n is able to produce a cell with total width d using a growth rate less than r_max,
+    # split the cell equally as a last resort
+    return np.array([d / n_min] * n_min)

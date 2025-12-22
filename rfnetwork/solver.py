@@ -1,33 +1,22 @@
 import numpy as np 
-import matplotlib.pyplot as plt 
 from rfnetwork import const, conv, utils
 import pyvista as pv
-import time
 
-from IPython.display import Image as ipyimage
-import rfnetwork as rfn
-import mpl_markers as mplm
-import matplotlib.colors as mcolors
 from core import core_func
 
-import sys
-import matplotlib
 import itertools
-from scipy.optimize import root_scalar, fsolve
-# matplotlib.use("qt5agg")
+from utils import blend_cell_widths
 
-# pv.set_jupyter_backend("trame")
-np.set_printoptions(suppress=True)
-
-sys.argv = sys.argv[0:1]
 
 u0 = const.u0
 e0 = const.e0
 c0 = const.c0
 
 
-
-class SolverMesh():
+class Solver_PCB():
+    """
+    3D EM Solver for PCB geometries, substrates are normal to the z-axis.
+    """
 
     def __init__(self, bounding_box, nports=1):
         self.substrate = dict()
@@ -86,7 +75,7 @@ class SolverMesh():
         
         return tuple(idx)
     
-    def init_mesh(self, d0, d_pec, n_min_pec, d_sub, n_min_sub, blend_pec = False):
+    def init_mesh(self, d0, n0, d_pec, n_min_pec, d_sub, n_min_sub, blend_pec = False):
         """
         Initialize the spatial grid.
         """
@@ -95,6 +84,7 @@ class SolverMesh():
         objects = [self.bounding_box] + list(self.pec_face.values()) + [sub[0] for sub in self.substrate.values()]
         dtype_ = np.float32
         places_ = 4
+        tol_ = (1 / 10 ** places_)
 
         # build list of edge coordinates along each axis
         for obj in objects:
@@ -122,79 +112,6 @@ class SolverMesh():
             sub_z_max = np.max([sub_z_max, np.max(sub.points[:, 2])])
             sub_er_max = np.max([sub_er_max, sub_er])
 
-        def split_cell(a: float, b: float, d: float, r_max: float = 1.5, n_min: int = 1):
-            """
-            Return a list of cell widths that divide a cell with width d into cells that do not exceed the given
-            growth rate r_max. a is the width of the previous cell, b is the width of the next cell.
-            """
-
-            # swap a and b if a is larger than b. Always start with the smaller cell and increase up to b
-            flip_a_b = False
-            if (b < a):
-                a, b = b, a
-                flip_a_b = True
-
-            # if no grading is needed, split the cell into equal sections
-            if ((b / a) < r_max):
-                # get number of cells that divides this cell into equal sections as close to a as possible
-                n = d / a
-                n = np.clip(int(n + 1 if n % 1 > 0.5 else n), n_min, None)
-                
-                return np.array([d / n] * n, dtype=np.float32)
-            
-            # if d is less than or equal to a, no grading is possible, return d as the cell width
-            if np.abs(d - a) < (1 / 10 ** places_):
-                return np.array([d])
-
-            # number of cells can be no larger than d/a (with all cells are of width a)
-            n_max = int(d / a) + 1
-
-            for n in range(n_min, n_max+1):
-                # growth rate of cells must make the last cell at least 2/3 of b
-                # a * m^n > (2/3) b
-                m_min = ((1 / r_max) * (b/a))**(1/n)
-
-                # if the minimum growth rate is higher than 1.5, the mesh cannot be resolved with this number of cells,
-                # move to the next n
-                if m_min > r_max:
-                    continue
-                
-                # last cell can be no larger than b, and growth rate can be no larger than r_max
-                # a * m^n < b
-                m_max = np.clip((b / a)**(1/n), None, r_max)
-
-                cells_m_min = a * np.array([m_min**r for r in range(1, n+1)])
-                cells_m_max = a * np.array([m_max**r for r in range(1, n+1)])
-                
-                # growth rate must satisfy a(m + m^2 + m^3 + ... m^n) = d
-                # find the min and max widths that can be created by dividing this section into n cells
-                d_min = np.sum(cells_m_min)
-                d_max = np.sum(cells_m_max)
-
-                # print(n, d, d_min, d_max)
-
-                # skip this n if the min/max width it can generate fall outside the target width d
-                if d_min > d or d_max < d:
-                    continue
-
-                # at this point, we know that n can generate the target width d. Find the growth rate that does this.
-                def compute_d(m):
-                    return a * np.sum([m**r for r in range(1, n+1)]) - d
-
-                m0 = np.sqrt(m_min * m_max) # initial guess for growth rate m
-                m = fsolve(compute_d, x0=m0, args=())
-                
-                cells_m = a * np.array([m**r for r in range(1, n+1)], dtype=np.float32).flatten()
-
-                if np.abs(np.sum(cells_m) - d) < (1 / (10 ** places_)):
-                    return np.flip(cells_m).astype(dtype_) if flip_a_b else cells_m
-                else:
-                    raise RuntimeError("Mesh did not converge.")
-                
-            # if no n is able to produce a cell with total width d using a growth rate less than r_max,
-            # split the cell equally as a last resort
-            return np.array([d / n_min] * n_min)
-
         
         # build a list of cell widths along each axis
         cell_d = [[], [], []]
@@ -204,13 +121,10 @@ class SolverMesh():
             d_axis_const = np.diff(edges[axis])
             d_axis = []
 
-            tol_ = 1 / (10 ** places_)
-
             dmax_axis = []  # maximum sub-cell size within each cell
             nmin_axis = []  # minimum number of sub-cells within each cell
             is_pec_axis = []
 
-            
             for i, cell_w in enumerate(d_axis_const):
                 # edges of this cell
                 cell_min, cell_max = edges[axis][i:i+2]
@@ -227,7 +141,7 @@ class SolverMesh():
                     d_max = d_sub
                 # otherwise use global settings
                 else:
-                    n_min = 2
+                    n_min = n0
                     d_max = d0 
 
                 # split cells larger than d0*5 into two cells, this prevents large cells bounded by 
@@ -286,7 +200,7 @@ class SolverMesh():
                     sub_cell_w = np.array([w + (rmd / n)] * n, dtype=dtype_)
 
                 else:
-                    sub_cell_w = list(split_cell(dprev, dnext, d_axis[i], n_min = nmin_axis[i]))
+                    sub_cell_w = list(blend_cell_widths(dprev, dnext, d_axis[i], n_min = nmin_axis[i]), tol=tol_)
 
                 d_subcells[i] = sub_cell_w
                 d_sides[i] = (sub_cell_w[0], sub_cell_w[-1])
@@ -829,33 +743,6 @@ class SolverMesh():
 
         mem = np.zeros(temp_mem_size, dtype=dtype_)
 
-        # # field values
-        # fields = dict(
-        #     ex_y = np.zeros((Nx, Ny+1, Nz+1), dtype=dtype_),
-        #     ex_z = np.zeros((Nx, Ny+1, Nz+1), dtype=dtype_),
-        #     ex = np.zeros((Nx, Ny+1, Nz+1), dtype=dtype_),
-            
-        #     ey_z = np.zeros((Nx+1, Ny, Nz+1), dtype=dtype_),
-        #     ey_x = np.zeros((Nx+1, Ny, Nz+1), dtype=dtype_),
-        #     ey = np.zeros((Nx+1, Ny, Nz+1), dtype=dtype_),
-            
-        #     ez_x = np.zeros((Nx+1, Ny+1, Nz), dtype=dtype_),
-        #     ez_y = np.zeros((Nx+1, Ny+1, Nz), dtype=dtype_),
-        #     ez = np.zeros((Nx+1, Ny+1, Nz), dtype=dtype_),
-            
-        #     hx_y = np.zeros((Nx+1, Ny, Nz), dtype=dtype_),
-        #     hx_z = np.zeros((Nx+1, Ny, Nz), dtype=dtype_),
-        #     hx = np.zeros((Nx+1, Ny, Nz), dtype=dtype_),
-            
-        #     hy_z = np.zeros((Nx, Ny+1, Nz), dtype=dtype_),
-        #     hy_x = np.zeros((Nx, Ny+1, Nz), dtype=dtype_),
-        #     hy = np.zeros((Nx, Ny+1, Nz), dtype=dtype_),
-            
-        #     hz_x = np.zeros((Nx, Ny, Nz+1), dtype=dtype_),
-        #     hz_y = np.zeros((Nx, Ny, Nz+1), dtype=dtype_),
-        #     hz = np.zeros((Nx, Ny, Nz+1), dtype=dtype_),
-        # )
-
         # initialize probes and sources. Sources act like probes, but the values are input to the 
         # field grid before being replaced by the actual component value.
         probes = []
@@ -1368,178 +1255,3 @@ class SolverMesh():
     
 
 
-# remove e edge conductive on x sides as well if there is no port attached to it
-# allocate block memory in python and assign section to each thread, that way multiple runs can share the same
-# memory without reallocating it.
-
-ms_w = 0.03
-ms_sp = 0.005
-
-ms1_y = -(ms_w / 2) - (ms_sp / 2)
-ms2_y = (ms_w / 2) + (ms_sp / 2)
-
-sbox_h = 0.25
-sbox_w = 0.4
-sbox_len = 1
-
-sub_h = 0.02
-ms_x = (-sbox_len/2 + 0.1, sbox_len/2)
-
-line = rfn.elements.MSLine(h=sub_h, er=3.66, w=ms_w)
-z_ref = line.get_properties(10e9).sel(value="z0").item()
-
-
-substrate = pv.Cube(center=(0, 0, sub_h/2), x_length=sbox_len, y_length=sbox_w, z_length=sub_h)
-
-sbox = pv.Cube(center=(0, 0, sbox_h/2), x_length=sbox_len, y_length=sbox_w, z_length=sbox_h)
-
-ms1_trace = pv.Rectangle([
-    (ms_x[0], ms1_y - ms_w/2, sub_h),
-    (ms_x[0], ms1_y + ms_w/2, sub_h),
-    (ms_x[1], ms1_y + ms_w/2, sub_h)
-])
-
-ms2_trace = pv.Rectangle([
-    (ms_x[0], ms2_y - ms_w/2, sub_h),
-    (ms_x[0], ms2_y + ms_w/2, sub_h),
-    (ms_x[1], ms2_y + ms_w/2, sub_h)
-])
-
-port1_face = pv.Rectangle([
-    (ms_x[0], ms1_y - ms_w/2, sub_h),
-    (ms_x[0], ms1_y + ms_w/2, sub_h),
-    (ms_x[0], ms1_y + ms_w/2, 0),
-])
-
-port2_face = pv.Rectangle([
-    (ms_x[0], ms2_y - ms_w/2, sub_h),
-    (ms_x[0], ms2_y + ms_w/2, sub_h),
-    (ms_x[0], ms2_y + ms_w/2, 0),
-])
-
-
-# current_face = pv.Rectangle([
-#     (0, ms_y - ms_w/2, sub_h + 0.001),
-#     (0, ms_y + ms_w/2, sub_h + 0.001),
-#     (0, ms_y + ms_w/2, sub_h - 0.001),
-# ])
-
-
-# voltage_line = pv.Line(
-#     [0, 0, 0], [0, 0, sub_h]
-# )
-
-
-# port2_face = pv.Rectangle([
-#     (ms_x[1], ms_y - ms_w/2, sub_h),
-#     (ms_x[1], ms_y + ms_w/2, sub_h),
-#     (ms_x[1], ms_y + ms_w/2, 0),
-# ])
-
-s = SolverMesh(sbox, nports=2)
-s.add_substrate("sub", substrate, er=3.66, opacity=0.0)
-s.add_pec_face("ms1", ms1_trace, color="gold")
-s.add_pec_face("ms2", ms2_trace, color="gold")
-s.add_lumped_port(1, port1_face)
-s.add_lumped_port(2, port2_face)
-# s.add_lumped_port(2, port2_face)
-
-self = s
-
-d0 = 0.02
-d_pec = 0.01
-n_min_pec=4
-d_sub=0.01
-n_min_sub=4
-
-s.init_mesh(d0 = 0.02, d_pec = 0.01, n_min_pec=3, d_sub=0.01, n_min_sub=4, blend_pec=False)
-s.init_coefficients()
-
-s.init_ports()
-s.add_xPML(side="upper")
-s.init_pec()
-
-s.add_field_monitor("mon1", "ez", "z", sub_h - 0.005, 10)
-s.add_field_monitor("mon2", "ey", "z", sub_h, 10)
-s.add_field_monitor("mon3", "ex", "z", sub_h, 10)
-
-# s.add_current_probe("c1", current_face)
-# s.add_voltage_probe("v1", voltage_line)
-
-plotter = s.render(show_probes=False)
-plotter.camera_position = "yz"
-plotter.show()
-# # print(s.Nx, s.Ny, s.Nz)
-
-# # p.camera.zoom(1.8)
-
-f0 = 10e9
-pulse_n = 1200
-# width of half pulse in time
-t_half = (s.dt * 250)
-# center of the pulse in time
-t0 = (s.dt * 500)
-
-t = np.linspace(0, s.dt * pulse_n, pulse_n)
-vsrc = 1e-2 * (np.sin(2* np.pi * f0 * (t)) * np.exp(-((t - t0) / t_half)**2)).astype(np.float32)
-# plt.plot(vsrc)
-
-
-stime = time.time()
-print("Solving...")
-print("Grid Cells (k): ", s.Nx * s.Ny * s.Nz / 1e3)
-
-s.run([1, 2], [vsrc, -vsrc], n_threads=4)
-print(f"(2) Solve Time: {time.time()-stime:.3f}")
-
-p = s.plot_monitor(["mon1"], el=0, zoom=1.1, az=0, view="xy", opacity=[0.8, 1], linear=True, cmap="RdBu", style="surface")
-p.show(title="EM Solver")
-
-# Db_0 = s.dt / u0
-# Cb_0 = s.dt / e0 
-# # p = s.plot_cooeficients("ey_x", "b", "z", sub_h, point_size=15, cmap="brg", normalization=Cb_0)
-# # p.camera_position = "xy"
-# # p.show()
-
-# compute line impedance
-line_i = self.vi_probe_values("c1")
-line_v = self.vi_probe_values("v1")
-
-
-# fig, ax = plt.subplots()
-# ax.plot(line_v)
-
-frequency: np.ndarray = np.arange(5e9, 15e9, 10e6)
-
-
-sdata = s.get_sparameters(frequency)
-S11 = sdata[:, 0]
-# fig, ax = plt.subplots()
-# rfn.plots.draw_smithchart(ax)
-# plt.plot(S11.real, S11.imag)
-
-# IP = utils.dtft(self.vi_probe_values("c1"), frequency, 1 / s.dt)
-# VP = utils.dtft(self.vi_probe_values("v1"), frequency, 1 / s.dt)
-# ZP = VP / IP
-
-fig, ax = plt.subplots()
-# plt.plot(frequency / 1e9, ZP.real)
-plt.plot(frequency / 1e9, conv.z_gamma(S11))
-plt.ylim([0, 110])
-# plt.axhline(y=z_ref, linestyle=":", color="k")
-plt.axhline(y=72, linestyle=":", color="k")
-plt.axhline(y=45, linestyle=":", color="k")
-ax.set_xlabel("Frequency [GHz]")
-ax.set_ylabel("Impedance [Ohm]")
-ax.legend(["Probe", "Port"])
-
-# S11_z = conv.gamma_z(ZP)
-
-# fig, ax = plt.subplots()
-# rfn.plots.draw_smithchart(ax)
-# plt.plot(S11.real, S11.imag)
-# plt.plot(S11_z.real, S11_z.imag)
-
-# fig, ax = plt.subplots()
-# plt.plot(frequency, conv.db20_lin(S11))
-plt.show()
