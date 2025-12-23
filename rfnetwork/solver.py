@@ -559,6 +559,10 @@ class Solver_PCB():
             
             x0, y0, z0 = self.pos_to_idx(np.min(face.points, axis=0))
             x1, y1, z1 = self.pos_to_idx(np.max(face.points, axis=0))
+
+            # don't include y endpoints in port, the edge of the ms traces use a edge correction method
+            y0 += 1
+            y1 -= 1
     
             x0_c, y0_c, z0_c = self.pos_to_idx(np.min(face.points, axis=0), mode="cell")
             x1_c, y1_c, z1_c = self.pos_to_idx(np.max(face.points, axis=0), mode="cell")
@@ -1141,12 +1145,27 @@ class Solver_PCB():
         # source port applied voltage
         src_applied = self.ports[source_port-1]["src"]
 
+        i_s = self.vi_probe_values(f"port{source_port}")
+        Is = utils.dtft(i_s, frequency, 1 / self.dt)
+
+        Vs = utils.dtft(src_vp, frequency, 1 / self.dt)
+
+        # delay current by half a time-step to be at the same time sample as the voltage
+        # h components are ahead of the e components by half a time step
+        # Is = Is * np.exp(1j * 2 * np.pi * frequency * self.dt / 2)
+
+        # As = (Vs + z0 * Is) / (2 * np.sqrt(z0.real))
+        # Bs = (Vs - np.conj(z0) * Is) / (2 * np.sqrt(z0.real))
+
+        # B[:, source_port-1] = Bs
+
+
         # source port S11, reflected wave (b) is the difference of the total voltage across the port,
         # and the incident wave V = a + b
-        A = utils.dtft(src_applied, frequency, 1 / self.dt)
+        As = utils.dtft(src_applied, frequency, 1 / self.dt)
         V = utils.dtft(src_vp, frequency, 1 / self.dt)
-        
-        B[:, source_port-1] = V - (A)
+        B[:, source_port-1] = V - (As)
+
 
         # the exiting waves on other ports is the voltage that appears across the terminations. Note this is
         # different than the total voltage across the port because that is the sum of the reflected wave that
@@ -1162,7 +1181,7 @@ class Solver_PCB():
             B[:, p-1] = Vp
         
         # return a single column of the full s-matrix
-        return B / A[..., None]
+        return B / As[..., None]
     
     def plot_monitor(
         self,
