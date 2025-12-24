@@ -29,6 +29,9 @@ class Solver_PCB():
         self.sbox_max = np.max(bounding_box.points, axis=0)
         self.sbox_min = np.min(bounding_box.points, axis=0)
 
+        self._places = 5 # hundredth of a mil
+        self._tol = 1 / (10 ** self._places)
+
     def add_substrate(self, name, obj, er: float, **kwargs):
         self.substrate[name] = (obj, er)
         self.styles[name] = kwargs
@@ -53,7 +56,7 @@ class Solver_PCB():
             diff = (g - p[i])
             # if no cell is above the point, return the length of the axis, otherwise return the first cell that is 
             # larger than the point.
-            idx += [np.argmax(diff >= -1e-3) if diff[-1] > 0 else len(g)]
+            idx += [np.argmax(diff >= -self._tol) if diff[-1] > -self._tol else len(g)]
 
         return tuple(idx)
 
@@ -69,7 +72,7 @@ class Solver_PCB():
             diff = (g - position[i])
             # if no cell is above the point, return the length of the axis, otherwise return the first cell that is 
             # larger than the point.
-            idx += [np.argmax(diff >= -1e-3) if diff[-1] > 0 else len(g)]
+            idx += [np.argmax(diff >= -self._tol) if diff[-1] > -self._tol else len(g)]
         
         return tuple(idx)
     
@@ -81,13 +84,11 @@ class Solver_PCB():
 
         objects = [self.bounding_box] + list(self.pec_face.values()) + [sub[0] for sub in self.substrate.values()]
         dtype_ = np.float32
-        places_ = 4
-        tol_ = (1 / 10 ** places_)
 
         # build list of edge coordinates along each axis
         for obj in objects:
             # round points to minimum precision supported by the mesh
-            p_edges = np.around(obj.points.T, decimals=places_).astype(np.float32)
+            p_edges = np.around(obj.points.T, decimals=self._places).astype(np.float32)
         
             for i in range(3):
                 edges_i = np.unique(np.concatenate([edges[i], p_edges[i]]))
@@ -127,13 +128,13 @@ class Solver_PCB():
                 cell_min, cell_max = edges[axis][i:i+2]
                 # if the cell is inside a PEC object, use PEC mesh settings
                 is_pec = False
-                if np.any((cell_min + tol_ >= pec_bounds[axis][:, 0]) & (cell_max - tol_ <= pec_bounds[axis][:, 1])):
+                if np.any((cell_min + self._tol >= pec_bounds[axis][:, 0]) & (cell_max - self._tol <= pec_bounds[axis][:, 1])):
                     # divide cell into sub-cells that are no larger than d_pec, and at least n_min_pec cells
                     n_min = n_min_pec
                     d_max = d_pec
                     is_pec = True
                 # if on the z-axis and cell is inside a substrate, use substrate mesh settings
-                elif axis == 2 and (cell_max - tol_) <= sub_z_max:
+                elif axis == 2 and (cell_max - self._tol) <= sub_z_max:
                     n_min = n_min_sub
                     d_max = d_sub
                 # otherwise use global settings
@@ -205,7 +206,7 @@ class Solver_PCB():
                         sub_cell_w = np.array([d_axis[i] / n] * n)
                 else:
                     sub_cell_w = list(
-                        utils.blend_cell_widths(dprev, dnext, d_axis[i], n_min = nmin_axis[i], tol=tol_)
+                        utils.blend_cell_widths(dprev, dnext, d_axis[i], n_min = nmin_axis[i], tol=self._tol)
                     )
 
                 d_subcells[i] = sub_cell_w
@@ -215,7 +216,7 @@ class Solver_PCB():
             cell_d[axis] = list(itertools.chain(*d_subcells))
 
         
-        gx, gy, gz = [np.around(np.concatenate([[self.sbox_min[i]], self.sbox_min[i] + np.cumsum(cell_d[i])]), decimals=places_) for i in range(3)]
+        gx, gy, gz = [np.around(np.concatenate([[self.sbox_min[i]], self.sbox_min[i] + np.cumsum(cell_d[i])]), decimals=self._places) for i in range(3)]
         dx, dy, dz = np.diff(gx).astype(dtype_), np.diff(gy).astype(dtype_), np.diff(gz).astype(dtype_)
 
         self.n_cells = len(dx), len(dy), len(dz)  
