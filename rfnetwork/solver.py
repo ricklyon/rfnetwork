@@ -560,10 +560,6 @@ class Solver_PCB():
             
             x0, y0, z0 = self.pos_to_idx(np.min(face.points, axis=0))
             x1, y1, z1 = self.pos_to_idx(np.max(face.points, axis=0))
-
-            # don't include y endpoints in port, the edge of the ms traces use a edge correction method
-            y0 += 1
-            y1 -= 1
     
             x0_c, y0_c, z0_c = self.pos_to_idx(np.min(face.points, axis=0), mode="cell")
             x1_c, y1_c, z1_c = self.pos_to_idx(np.max(face.points, axis=0), mode="cell")
@@ -573,28 +569,40 @@ class Solver_PCB():
     
             if np.count_nonzero(idx_d) != 2:
                 raise ValueError("Port face must be on cartesian grid, and must be 2D.")
+            
+            # axis that is normal to the port face. Face will have zero width along the normal axis
+            axis = np.argmin(idx_d)
                 
-            # face is normal to the x-axis, Resistor is represented by the Ez components
-            if (idx_d[0] == 0):
-                # skip buffer cells for +x port, fix for -x
-                # x0 += 1
+            # face is normal to the x-axis or y-axis, Resistor is represented by the Ez components
+            if (axis == 0) or (axis == 1):
     
+                if (axis == 0):
+                    # don't include y endpoints in port, the edge of the ms traces use a edge correction method
+                    y0 += 1
+                    y1 -= 1
+                else:
+                    # don't include x endpoints in port, the edge of the ms traces use a edge correction method
+                    x0 += 1
+                    x1 -= 1
+
                 # width of resistor cell centered around the ez component, ez is on the x/y edges
-                dx_r = dx_h[x0-1]
-                dy_r = dy_h[y0-1: y1][..., None]
+                dx_r = dx_h[x0-1: x1][..., None, None]
+                dy_r = dy_h[y0-1: y1][None, :, None]
                 # z axis is in center of cell
-                dz_r = dz[z0: z1][None]
+                dz_r = dz[z0: z1][None, None]
         
                 # epsilon of resistor cells
-                eps_r = self.eps_ez[x0, y0: y1+1, z0: z1]
-        
+                eps_r = self.eps_ez[x0: x1+1, y0: y1+1, z0: z1]
+
+                # number of components in the xy plane
+                n_xy = (eps_r.shape[0] * eps_r.shape[1])
                 # resistance of each cell is spilt so the combined resistance of all cells equals r0
-                r_cell = r0 * (eps_r.shape[0] / eps_r.shape[1])
+                r_cell = r0 * (n_xy) / eps_r.shape[2]
         
                 rterm = (r_cell * dx_r * dy_r)
                 denom = (eps_r / self.dt) + (dz_r / (2 * rterm))
 
-                ez_idx = tuple([x0, slice(y0, y1+1), slice(z0_c, z1_c)])
+                ez_idx = tuple([slice(x0, x1+1), slice(y0, y1+1), slice(z0_c, z1_c)])
                 
                 self.Ca["ez_x"][ez_idx] = ((eps_r / self.dt) - (dz_r / (2 * rterm))) / denom
                 self.Cb["ez_x"][ez_idx] = 1 / (denom)
@@ -602,7 +610,9 @@ class Solver_PCB():
                 self.Ca["ez_y"][ez_idx] = ((eps_r / self.dt) - (dz_r / (2 * rterm))) / denom
                 self.Cb["ez_y"][ez_idx] = 1 / (denom)
 
-                self.ports[i] = dict(idx=ez_idx, Vs_a=1 / (denom * rterm * eps_r.shape[1]), field="ez")
+                # voltage source coefficient is divided by the number of z components so the total voltage across
+                # the port is Vs
+                self.ports[i] = dict(idx=ez_idx, Vs_a=-1 / (denom * rterm * eps_r.shape[2]), field="ez", axis=axis)
 
                 # add current probe of current in the termination, normal to the z-axis
                 fx0, fy0, fz0 = np.min(face.points, axis=0)
@@ -611,14 +621,14 @@ class Solver_PCB():
                 iface_z = (fz1 - fz0) / 2
                 current_face = pv.Rectangle([
                     [fx0 - 0.001, fy0 - 0.001, iface_z],
-                    [fx0 + 0.001, fy0 - 0.001, iface_z],
-                    [fx0 + 0.001, fy1 + 0.001, iface_z]
+                    [fx1 + 0.001, fy0 - 0.001, iface_z],
+                    [fx1 + 0.001, fy1 + 0.001, iface_z]
                 ])
 
                 self.add_current_probe(f"port{i+1}", current_face)
         
             else:
-                raise ValueError(f"Port face is not 2D")
+                raise NotImplementedError(f"Port face normal to the z-axis not implemented yet")
 
     def add_xPML(self, d_pml=10, side="upper"):
         """
@@ -784,7 +794,7 @@ class Solver_PCB():
             for j, idx_j in enumerate(itertools.product(*idx_list)):
                 probes.append(
                     dict(
-                        values=np.array(-Vs_a_flt[j] * v_waveforms[i], dtype=dtype_, order="C"), 
+                        values=np.array(Vs_a_flt[j] * v_waveforms[i], dtype=dtype_, order="C"), 
                         field=int(list(self.fshape.keys()).index(field)),
                         idx=[int(id) for id in idx_j],
                         is_source=int(1)
@@ -1139,10 +1149,15 @@ class Solver_PCB():
         ports = np.arange(1, nports+1)
         z_idx = self.ports[source_port-1]["idx"][2]
 
-        # source port voltage at each component
-        src_voltage = -np.sum(self.ports[source_port-1]["values"] * conv.m_in(self.dz[z_idx])[None, ..., None], axis=1)
-        # average voltage across y
-        src_vp = np.mean(src_voltage, axis=0)
+        # source port voltage at each component, shape is x, y, z, time
+        src_component_v = self.ports[source_port-1]["values"] * (conv.m_in(self.dz[z_idx])[None, None, :, None])
+
+        # add voltage along z
+        src_voltage = -np.sum(src_component_v, axis=2)
+        # average voltage across edge of port, if port is normal to y this is the x axis, if normal to x, average
+        # along y
+        src_axis = self.ports[source_port-1]["axis"]
+        src_vp = np.mean(src_voltage, axis=1 if src_axis == 0 else 0).squeeze()
         # source port applied voltage
         src_applied = self.ports[source_port-1]["src"]
 
