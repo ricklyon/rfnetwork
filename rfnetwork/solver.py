@@ -391,40 +391,15 @@ class Solver_PCB():
             
             pmin, pmax = np.min(pec.points, axis=0), np.max(pec.points, axis=0)
             # normal axis
-
             axis = np.argmin(pmax - pmin)
     
             if np.count_nonzero(pmax - pmin) != 2:
                 raise ValueError("PEC face must be on cartesian grid, and must be 2D.")
                     
-            # PEC is normal to the x-axis, Ez and Ey are parallel to surface
-            if (axis == 0):
-                # ez edges on y axis are inclusive, interior cells on z axis are not
-                self.Cb["ez_x"][x0, y0: y1, z0_c: z1_c] = 0
-                self.Ca["ez_x"][x0, y0: y1, z0_c: z1_c] = -1
-                self.Cb["ez_y"][x0, y0: y1, z0_c: z1_c] = 0
-                self.Ca["ez_y"][x0, y0: y1, z0_c: z1_c] = -1
-                # ey cells on y axis are not inclusive, edges on z axis are
-                self.Cb["ey_z"][x0, y0_c: y1_c, z0: z1 + 1] = 0
-                self.Ca["ey_z"][x0, y0_c: y1_c, z0: z1 + 1] = -1
-                self.Cb["ey_x"][x0, y0_c: y1_c, z0: z1 + 1] = 0
-                self.Ca["ey_x"][x0, y0_c: y1_c, z0: z1 + 1] = -1
-            # PEC is normal to the y-axis, Ez and Ex are parallel to surface
-            elif (axis == 1):
-                # ez edges on x axis are inclusive, interior cells on z axis are not
-                self.Cb["ez_x"][x0: x1+1, y0, z0_c: z1_c] = 0
-                self.Ca["ez_x"][x0: x1+1, y0, z0_c: z1_c] = -1
-                self.Cb["ez_y"][x0: x1+1, y0, z0_c: z1_c] = 0
-                self.Ca["ez_y"][x0: x1+1, y0, z0_c: z1_c] = -1
-                # ex cells on x axis are not inclusive, edges on y axis are
-                self.Cb["ex_y"][x0_c: x1_c, y0, z0: z1 + 1] = 0
-                self.Ca["ex_y"][x0_c: x1_c, y0, z0: z1 + 1] = -1
-                self.Cb["ex_z"][x0_c: x1_c, y0, z0: z1 + 1] = 0
-                self.Ca["ex_z"][x0_c: x1_c, y0, z0: z1 + 1] = -1
-            # PEC is normal to the z-axis, Ex and Ey are parallel to surface
-            elif (axis == 2):
 
-                # edge cells are buffers and not included in the PEC, along y and x axis
+            # PEC is normal to the z-axis, Ex and Ey are parallel to surface
+            if (axis == 2):
+
                 # field pos returns the first index that is greater than the given position, so y1 index is just
                 # past the edge of the end of the PEC
                 x0, y0, z0 = self.field_pos_to_idx(np.min(pec.points, axis=0), "ey")
@@ -441,108 +416,74 @@ class Solver_PCB():
                 self.Cb["ex_z"][x0: x1, y0: y1+1, z0] = 0
                 self.Ca["ex_z"][x0: x1, y0: y1+1, z0] = -1
 
-                # ex edge correction:
-                x0, y0, z0 = self.field_pos_to_idx(np.min(pec.points, axis=0), "ex")
-                x1, y1, z1 = self.field_pos_to_idx(np.max(pec.points, axis=0), "ex")
-                dt = self.dt
-                eps = self.eps_ex[x0, y0, z0]
-                sig_0 = 0
-                Ca_0 = (2 * eps - (sig_0 * dt)) / (2 * eps + (sig_0 * dt))
-                Cb_0 = (2 * dt) / ((2 * eps + (sig_0 * dt)))
+                # ex edge correction, turn off conductivity in the split field component with a spatial
+                # dependence in the y direction
 
-                self.Cb["ex_y"][x0: x1, y0, z0] = Cb_0 #*= (dy_h[y0-1] / ( 0.1 * dy_h[y0-1]))
-                self.Cb["ex_y"][x0: x1, y1, z0] = Cb_0 #*= (dy_h[y1-1] / ( 0.1 * dy_h[y1-1]))
+                # don't correct the corners
+                # x0 += 1
+                # x1 -= 1
 
-                self.Ca["ex_y"][x0: x1, y0, z0] = Ca_0
-                self.Ca["ex_y"][x0: x1, y1, z0] = Ca_0
+                # Ca_0 = (2 * eps - (sig_0 * self.dt)) / (2 * eps + (sig_0 * self.dt))
+                # Cb_0 = (2 * self.dt) / ((2 * eps + (sig_0 * self.dt)))
 
-                # ey edge correction:
-                # x0, y0, z0 = self.field_pos_to_idx(np.min(pec.points, axis=0), "ey")
-                # x1, y1, z1 = self.field_pos_to_idx(np.max(pec.points, axis=0), "ey")
-                # dt = self.dt
-                # eps = self.eps_ey[x0, y0, z0]
-                # sig_0 = 0
-                # Ca_0 = (2 * eps - (sig_0 * dt)) / (2 * eps + (sig_0 * dt))
-                # Cb_0 = (2 * dt) / ((2 * eps + (sig_0 * dt)))
+                # get ports that attach to the edges of this PEC face
+                x0_ports = []
+                x1_ports = []
+                y0_ports = []
+                y1_ports = []
+                for port in self.ports:
+                    px, py, pz = port["idx"]
+                    # port is normal to the x-axis
+                    if port["axis"] == 0:
+                        # compare ey indices with the port ez indices, add to overlap list if it overlaps with the
+                        # current pec edge. ez and ey have the same x indices
+                        if py.start <= y1 and py.stop >= y0:
+                            if px.start == x0:
+                                x0_ports += [port]
+                            elif px.start == x1:
+                                x1_ports += [port]
 
-                # if x0 > 0:
-                #     self.Cb["ey_x"][x0, y0: y1, z0] = Cb_0 #*= (dy_h[y0-1] / ( 0.1 * dy_h[y0-1]))
-                #     self.Ca["ey_x"][x0, y0: y1, z0] = Ca_0
+                    # port is normal to the y-axis
+                    elif port["axis"] == 1:
+                        # compare ex indices with the port ez indices, add to overlap list if it overlaps with the
+                        # current pec edge. ez and ex have the same y indices
+                        if px.start <= x1 and px.stop >= x0:
+                            if py.start == y0:
+                                y0_ports += [port]
+                            elif py.start == y1:
+                                y1_ports += [port]
 
-                # if x1 < self.fshape["ex"][0]:
-                #     self.Ca["ey_x"][x1, y0: y1, z0] = Ca_0
-                #     self.Cb["ey_x"][x1, y0: y1, z0] = Cb_0 #*= (dy_h[y1-1] / ( 0.1 * dy_h[y1-1]))
+                # apply correction if no ports attach to the x0 edge
+                if len(x0_ports) == 0:
+                    x0, y0, z0 = self.field_pos_to_idx(np.min(pec.points, axis=0), "ey")
+                    x1, y1, z1 = self.field_pos_to_idx(np.max(pec.points, axis=0), "ey")
+                    # ey edge correction
+                    self.Ca["ey_x"][x0, y0: y1, z0] = 1
+                    self.Cb["ey_x"][x0, y0: y1, z0] = (self.dt / self.eps_ey[x0, y0: y1, z0])   
+                
+                if len(x1_ports) == 0:
+                    x0, y0, z0 = self.field_pos_to_idx(np.min(pec.points, axis=0), "ey")
+                    x1, y1, z1 = self.field_pos_to_idx(np.max(pec.points, axis=0), "ey")
+                    # ey edge correction
+                    self.Ca["ey_x"][x1, y0: y1, z0] = 1
+                    self.Cb["ey_x"][x1, y0: y1, z0] = (self.dt / self.eps_ey[x1, y0: y1, z0]) 
 
-                # ez correction:
-                # x0, y0, z0 = self.field_pos_to_idx(np.min(pec.points, axis=0), "ez")
-                # x1, y1, z1 = self.field_pos_to_idx(np.max(pec.points, axis=0), "ez")
-                # self.Cb["ez_y"][x0: x1+1, y0-1, z0] *= (dy_h[y0-2] / ( 0.2 * dy_h[y0-2]))
-                # self.Cb["ez_y"][x0: x1+1, y1+1, z0] *= (dy_h[y1] / ( 0.2 * dy_h[y1]))
+                if len(y0_ports) == 0:
+                    x0, y0, z0 = self.field_pos_to_idx(np.min(pec.points, axis=0), "ex")
+                    x1, y1, z1 = self.field_pos_to_idx(np.max(pec.points, axis=0), "ex")
+                    # ex edge correction
+                    self.Ca["ex_y"][x0: x1, y0, z0] = 1
+                    self.Cb["ex_y"][x0: x1, y0, z0] = (self.dt) / (self.eps_ex[x0: x1, y0, z0] )
 
-                # self.Cb["ez_y"][x0: x1+1, y0-1, z0-1] *= (dy_h[y0-2] / ( 0.2 * dy_h[y0-2]))
-                # self.Cb["ez_y"][x0: x1+1, y1+1, z0-1] *= (dy_h[y1] / ( 0.2 * dy_h[y1]))
-
-                # hz correction
-                # x0, y0, z0 = self.field_pos_to_idx(np.min(pec.points, axis=0), "hz")
-                # x1, y1, z1 = self.field_pos_to_idx(np.max(pec.points, axis=0), "hz")
-                # self.Db["hz_y"][x0: x1, y0-1, z0] *= dy[y0-2] / (0.2 * dy[y0-2])
-                # self.Db["hz_y"][x0: x1, y1, z0] *= dy[y1-1] / (0.2 * dy[y1-1])
-
-                # x0, y0, z0 = self.field_pos_to_idx(np.min(pec.points, axis=0), "hx")
-                # x1, y1, z1 = self.field_pos_to_idx(np.max(pec.points, axis=0), "hx")
-                # self.Db["hx_y"][x0: x1+1, y0: y1, z0-1] *= (dy[y0: y1] / ( 0.8 * dy[y0: y1]))
-                # self.Db["hx_y"][x0: x1+1, y0: y1, z0] *= (dy[y0: y1] / ( 0.8 * dy[y0: y1]))
-
-
-
-                # x0, y0, z0 = self.field_pos_to_idx(np.min(pec.points, axis=0), "ez")
-                # x1, y1, z1 = self.field_pos_to_idx(np.max(pec.points, axis=0), "ez")
-                # self.Cb["ey_z"][x0: x1+1, y0-1, z0] = 3 * self.dt / self.eps_ey[x0: x1+1, y0-1, z0]
-                # self.Cb["ey_z"][x0: x1+1, y1, z0] = 3 * self.dt / self.eps_ey[x0: x1+1, y0-1, z0]
-                # self.Cb["ey_x"][x0: x1+1, y0-1, z0] = 0.1 * self.dt / self.eps_ey[x0: x1+1, y0-1, z0]
-                # self.Cb["ey_x"][x0: x1+1, y1, z0] = 0.1 * self.dt / self.eps_ey[x0: x1+1, y0-1, z0]
-
-
-                # self.Db["hz_y"][x0_c: x1_c, y0, z0] = 0
-                # self.Db["hz_y"][x0_c: x1_c, y1-1, z0] = 0
-
-                # edge singularity
-                # d_edge = conv.m_in(0.00001)
-                # # print(conv.in_m((dy[y0-1] - d_edge)))
-                # self.Db["hz_y"][x0_c: x1_c, y0, z0] *= dy[y0] / (dy[y0] - d_edge)
-                # self.Db["hz_y"][x0_c: x1_c, y1-1, z0] *= dy[y1-1] / (dy[y1-1] - d_edge)
-
-                # self.Db["hz_y"][x0_c: x1_c, y0-1, z0] *= 
-                # self.Db["hz_y"][x0_c: x1_c, y1, z0] *= 1e3
-
-                # self.Cb["ex_y"][x0_c: x1_c, y0, z0] = 0#*= dy[y0-1] / (dy[y0-1] - d_edge)
-                # self.Cb["ex_y"][x0_c: x1_c, y1, z0] =0 #*= dy[y1-1] / (dy[y1-1] - d_edge)
-
-                # edges along y
-                # dy0 = dy[y0]
-                # dz0 = dz[z0]
-                # d = conv.m_in(0.000001)
-                # sig = (d / dz0) * 1e6
-                # dt = self.dt
-
-                # Ca_s = (2 * e0 - (sig * dt)) / (2 * e0 + (sig * dt))
-                # Cb_s = (2 * dt) / ((2 * e0 + (sig * dt)))
-
-                # self.Cb["ex_y"][x0_c: x1_c, y0, z0] *= dy[y0-1] / (dy[y0-1] - d_edge)
-                # self.Ca["ex_y"][x0_c: x1_c, y0, z0] = -1
-                # # self.Cb["ex_z"][x0_c: x1_c, y0, z0] *= dy[y0-1] / (dy[y0-1] - d_edge)
-                # self.Ca["ex_z"][x0_c: x1_c, y0, z0] = -1
-
-                # self.Cb["ex_y"][x0_c: x1_c, y1, z0] *= dy[y1-1] / (dy[y1-1] - d_edge)
-                # self.Ca["ex_y"][x0_c: x1_c, y1, z0] = -1
-                # # self.Cb["ex_z"][x0_c: x1_c, y1, z0] *= dy[y1-1] / (dy[y1-1] - d_edge)
-                # self.Ca["ex_z"][x0_c: x1_c, y1, z0] = -1
-                # self.Cb["ex_z"][x0_c: x1_c, y1: y1, z0] = 0
-                # self.Ca["ex_z"][x0_c: x1_c, y1: y1, z0] = -1
-
+                if len(y1_ports) == 0:
+                    x0, y0, z0 = self.field_pos_to_idx(np.min(pec.points, axis=0), "ex")
+                    x1, y1, z1 = self.field_pos_to_idx(np.max(pec.points, axis=0), "ex")
+                    # ex edge correction
+                    self.Ca["ex_y"][x0: x1, y1, z0] = 1
+                    self.Cb["ex_y"][x0: x1, y1, z0] = (self.dt) / (self.eps_ex[x0: x1, y1, z0] )
 
             else:
-                raise ValueError(f"PEC {name} is not 2D")
+                raise NotImplementedError(f"PEC face not supported yet in the given axis.")
             
     def init_ports(self, r0=50):
         """
