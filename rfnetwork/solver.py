@@ -306,16 +306,24 @@ class Solver_PCB():
         # average epsilon cells adjacent to z edges
         eps_z = (eps[..., :-1] * (dz0/2) + eps[..., 1:] * (dz1/2)) / (dz0/2 + dz1/2)
 
+        # average epsilon cells along y and z
+        eps_yz = ((eps_y[..., :-1] * (dz0/2) + eps_y[..., 1:] * (dz1/2)) / (dz0/2 + dz1/2))
+        # average epsilon cells along x and z
+        eps_xz = ((eps_x[..., :-1] * (dz0/2) + eps_x[..., 1:] * (dz1/2)) / (dz0/2 + dz1/2))
+        # average epsilon cells along x and y
+        eps_xy = ((eps_x[:, :-1] * (dy0/2) + eps_x[:, 1:] * (dy1/2)) / (dy0/2 + dy1/2))
+
+
         self.eps_ex = np.ones(self.fshape["ex"], dtype=dtype_) * e0
         self.eps_ey = np.ones(self.fshape["ey"], dtype=dtype_) * e0
         self.eps_ez = np.ones(self.fshape["ez"], dtype=dtype_) * e0
 
         # ex component is on the y and z edge of the cell
-        self.eps_ex[:, 1:-1, 1:-1] = ((eps_y[..., :-1] * (dz0/2) + eps_y[..., 1:] * (dz1/2)) / (dz0/2 + dz1/2))
+        self.eps_ex[:, 1:-1, 1:-1] = eps_yz
         # ey component is on the x and z edge of the cell
-        self.eps_ey[1:-1, :, 1:-1] = ((eps_x[..., :-1] * (dz0/2) + eps_x[..., 1:] * (dz1/2)) / (dz0/2 + dz1/2))
+        self.eps_ey[1:-1, :, 1:-1] = eps_xz
         # ez component is on the x and y edge of the cell, average eps from adjacent cells on both axis
-        self.eps_ez[1:-1, 1:-1] = ((eps_x[:, :-1] * (dy0/2) + eps_x[:, 1:] * (dy1/2)) / (dy0/2 + dy1/2))
+        self.eps_ez[1:-1, 1:-1] = eps_xy
 
         # eps at h components
         self.eps_hx = np.ones(self.fshape["hx"], dtype=dtype_) * e0
@@ -375,7 +383,7 @@ class Solver_PCB():
             hz_y = np.ones((Nx, Ny, Nz+1), dtype=dtype_) * Db_0,
         )
 
-    def init_pec(self):
+    def init_pec(self, edge_correction=True):
         # initialize the PEC faces
         # this should be called after setting the PML layers
 
@@ -453,34 +461,41 @@ class Solver_PCB():
                             elif py.start == y1:
                                 y1_ports += [port]
 
-                # apply correction if no ports attach to the x0 edge
-                if len(x0_ports) == 0:
-                    x0, y0, z0 = self.field_pos_to_idx(np.min(pec.points, axis=0), "ey")
-                    x1, y1, z1 = self.field_pos_to_idx(np.max(pec.points, axis=0), "ey")
-                    # ey edge correction
-                    self.Ca["ey_x"][x0, y0: y1, z0] = 1
-                    self.Cb["ey_x"][x0, y0: y1, z0] = (self.dt / self.eps_ey[x0, y0: y1, z0])   
-                
-                if len(x1_ports) == 0:
-                    x0, y0, z0 = self.field_pos_to_idx(np.min(pec.points, axis=0), "ey")
-                    x1, y1, z1 = self.field_pos_to_idx(np.max(pec.points, axis=0), "ey")
-                    # ey edge correction
-                    self.Ca["ey_x"][x1, y0: y1, z0] = 1
-                    self.Cb["ey_x"][x1, y0: y1, z0] = (self.dt / self.eps_ey[x1, y0: y1, z0]) 
+                # TODO: having an odd number of cells (3) across the PEC trace causes the edge correction to fail,
+                # spurious fields appear.
+                if edge_correction:
+                    # apply correction if no ports attach to the x0 edge
+                    if len(x0_ports) == 0:
+                        x0, y0, z0 = self.field_pos_to_idx(np.min(pec.points, axis=0), "ey")
+                        x1, y1, z1 = self.field_pos_to_idx(np.max(pec.points, axis=0), "ey")
+                        # ey edge correction
+                        self.Ca["ey_x"][x0, y0: y1, z0] = 1
+                        self.Cb["ey_x"][x0, y0: y1, z0] = (self.dt / self.eps_ey[x0, y0: y1, z0])   
+                    
+                    if len(x1_ports) == 0:
+                        x0, y0, z0 = self.field_pos_to_idx(np.min(pec.points, axis=0), "ey")
+                        x1, y1, z1 = self.field_pos_to_idx(np.max(pec.points, axis=0), "ey")
+                        # ey edge correction
+                        self.Ca["ey_x"][x1, y0: y1, z0] = 1
+                        self.Cb["ey_x"][x1, y0: y1, z0] = (self.dt / self.eps_ey[x1, y0: y1, z0]) 
 
-                if len(y0_ports) == 0:
-                    x0, y0, z0 = self.field_pos_to_idx(np.min(pec.points, axis=0), "ex")
-                    x1, y1, z1 = self.field_pos_to_idx(np.max(pec.points, axis=0), "ex")
-                    # ex edge correction
-                    self.Ca["ex_y"][x0: x1, y0, z0] = 1
-                    self.Cb["ex_y"][x0: x1, y0, z0] = (self.dt) / (self.eps_ex[x0: x1, y0, z0] )
+                    if len(y0_ports) == 0:
+                        x0, y0, z0 = self.field_pos_to_idx(np.min(pec.points, axis=0), "ex")
+                        x1, y1, z1 = self.field_pos_to_idx(np.max(pec.points, axis=0), "ex")
+                        # ex edge correction
+                        eps = self.eps_ex[x0: x1, y0, z0] 
+                        sig = 0
+                        self.Ca["ex_y"][x0: x1, y0, z0] = (2 * eps - (sig * self.dt)) / (2 * eps + (sig * self.dt))
+                        self.Cb["ex_y"][x0: x1, y0, z0] = (2 * self.dt) / ((2 * eps + (sig * self.dt)))
 
-                if len(y1_ports) == 0:
-                    x0, y0, z0 = self.field_pos_to_idx(np.min(pec.points, axis=0), "ex")
-                    x1, y1, z1 = self.field_pos_to_idx(np.max(pec.points, axis=0), "ex")
-                    # ex edge correction
-                    self.Ca["ex_y"][x0: x1, y1, z0] = 1
-                    self.Cb["ex_y"][x0: x1, y1, z0] = (self.dt) / (self.eps_ex[x0: x1, y1, z0] )
+                    if len(y1_ports) == 0:
+                        x0, y0, z0 = self.field_pos_to_idx(np.min(pec.points, axis=0), "ex")
+                        x1, y1, z1 = self.field_pos_to_idx(np.max(pec.points, axis=0), "ex")
+                        # ex edge correction
+                        eps = self.eps_ex[x0: x1, y1, z0] 
+                        sig = 0
+                        self.Ca["ex_y"][x0: x1, y1, z0] = (2 * eps - (sig * self.dt)) / (2 * eps + (sig * self.dt))
+                        self.Cb["ex_y"][x0: x1, y1, z0] = (2 * self.dt) / ((2 * eps + (sig * self.dt)))
 
             else:
                 raise NotImplementedError(f"PEC face not supported yet in the given axis.")
