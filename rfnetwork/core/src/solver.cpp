@@ -64,6 +64,7 @@ std::condition_variable cv_th;
 
 // shared variables protected by mutex
 std::mutex mutex;
+std::atomic<int> th_init{0};
 std::atomic<int> e_updates{0};
 std::atomic<int> h_updates{0};
 bool e_updates_done = false;
@@ -461,6 +462,13 @@ int solver_init_probes(PyObject * py_probes, int Nt)
 int solver_run(int Nt, int n_th)
 {
     n_threads = n_th;
+    th_init = 0;
+    e_updates = 0;
+    h_updates = 0;
+    h_updates_done = false;
+    e_updates_done = false;
+    th_init_done = false;
+
     // error check number of threads
     if (n_threads < 0 || n_threads > MAX_THREADS)
     {
@@ -474,6 +482,12 @@ int solver_run(int Nt, int n_th)
 
     int x_start_th = 0;
     int x_stop_th = 0;
+
+    // allocate dummy data for endpoints of thread grids. 
+    thread_data[0].ez = mbuffer_allocate(Ez.Ny * Ez.Nz);
+    thread_data[0].ey = mbuffer_allocate(Ey.Ny * Ey.Nz);
+    thread_data[n_threads+1].hy = mbuffer_allocate(Hy.Ny * Hy.Nz);
+    thread_data[n_threads+1].hz = mbuffer_allocate(Hz.Ny * Hz.Nz);
 
     // start controller thread
     std::thread control_th = std::thread(solver_controller, Nt, n_threads);
@@ -501,12 +515,6 @@ int solver_run(int Nt, int n_th)
         threads[t] = std::thread(solver_thread, x_start_th, x_stop_th, Nt, t+1);
     }
 
-    // allocate dummy data for endpoints of thread grids. 
-    thread_data[0].ez = mbuffer_allocate(Ez.Ny * Ez.Nz);
-    thread_data[0].ey = mbuffer_allocate(Ey.Ny * Ey.Nz);
-    thread_data[n_threads+1].hy = mbuffer_allocate(Hy.Ny * Hy.Nz);
-    thread_data[n_threads+1].hz = mbuffer_allocate(Hz.Ny * Hz.Nz);
-
     // wait for all threads to complete
     for (int t = 0; t < n_threads; t++)
     {
@@ -522,7 +530,7 @@ int solver_run(int Nt, int n_th)
 // thread responsible for synchronizing field update threads
 void solver_controller(int Nt, int n_threads)
 {
-    // std::stringstream msg;
+    std::stringstream msg;
     // msg.str("");
     // msg.clear();
     // msg << "Controller Start... \n";
@@ -532,14 +540,17 @@ void solver_controller(int Nt, int n_threads)
     {
         // get lock on mutex while shared variables are modified
         std::unique_lock<std::mutex> lock(mutex);
-        e_updates = 0;
 
         // wait until all threads are done with memory allocation
-        cv.wait(lock, [n_threads] { return e_updates.load() == n_threads; });
-        e_updates = 0;
+        cv.wait(lock, [n_threads] { return th_init.load() == n_threads; });
         th_init_done = true;
         cv_th.notify_all();
     }
+
+    // msg.str("");
+    // msg.clear();
+    // msg << "Start Time Stepping... \n";
+    // std::cout << msg.str();
 
     for (int n = 0; n < Nt; n++)
     {
@@ -589,7 +600,7 @@ void solver_thread(int x_start, int x_stop, int Nt, int thread_idx)
     // ey, ez, hx components on the RIGHT side of the cell. The first cell does not update the ey, ez, hx compoennts
     // on the left
 
-    // std::stringstream msg;
+    std::stringstream msg;
     // msg << "Starting Thread " << thread_idx << " " << x_start << " " << x_stop << "\n";
     // std::cout << msg.str();
 
@@ -676,11 +687,16 @@ void solver_thread(int x_start, int x_stop, int Nt, int thread_idx)
         }
     }
 
+    // msg.str("");
+    // msg.clear();
+    // msg << "Start Thread " << thread_idx << "... \n";
+    // std::cout << msg.str();
+
     {
         // lock the mutex while updating shared variable, also ensures that only one thread sends a notification
         // to the controller at a time, preventing missed notifications.
         std::unique_lock<std::mutex> lock(mutex);
-        ++e_updates;
+        ++th_init;
 
         cv.notify_all(); 
         // wait for all threads to reach this point before moving on to h-field updates.

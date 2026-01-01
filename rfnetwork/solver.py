@@ -616,7 +616,7 @@ class Solver_PCB():
                 fx0, fy0, fz0 = np.min(face.points, axis=0)
                 fx1, fy1, fz1 = np.max(face.points, axis=0)
 
-                iface_z = (fz1 - fz0) / 2
+                iface_z = (fz1 + fz0) / 2
                 current_face = pv.Rectangle([
                     [fx0 - 0.001, fy0 - 0.001, iface_z],
                     [fx1 + 0.001, fy0 - 0.001, iface_z],
