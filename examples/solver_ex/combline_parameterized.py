@@ -3,14 +3,23 @@ import matplotlib.pyplot as plt
 from rfnetwork import const, conv, utils
 import pyvista as pv
 import time
+from scipy.special import ellipk
+from matplotlib.ticker import ScalarFormatter
 
 import rfnetwork as rfn
 import mpl_markers as mplm
 import sys
 
+from scipy.optimize import least_squares
 
 pv.set_jupyter_backend("trame")
 np.set_printoptions(suppress=True)
+
+plt.style.use('ggplot')
+# Set the font family to serif, with "Times New Roman" as the preferred serif font
+plt.rcParams["font.family"] = "serif"
+plt.rcParams["font.serif"] = ["Times New Roman"] + plt.rcParams["font.serif"]
+
 
 sys.argv = sys.argv[0:1]
 
@@ -20,19 +29,26 @@ e0 = const.e0
 c0 = const.c0
 eta0 = const.eta0
 
-f0 = 1.5e9
-w = 0.7
+er = 1
+
+f1 = 1e9
+f2 = 2e9
+
+f0 = (f1 + f2) / 2
+w = (f2 - f1) / f0
+
 wp = 1
 
-f1 = f0 - (f0 * w)/2
-f2 = f0 + (f0 * w)/2
+lam0 = rfn.const.c0_in / f0
 
 n = 8
 theta_1 = (np.pi / 2) * (1 - (w / 2))
 Y_a = (1 / 50)
 
+# page 627 example
 g = [1, 1.1897, 1.4346, 2.1199, 1.6010, 2.1699, 1.5640, 1.9444, 0.8778, 1.3554]
 
+# Table 10.07-1, pg 628
 Jk2_Y = [g[2] / ( g[0] * np.sqrt(g[k] * g[k+1]) ) for k in range(2, n-2)]
 Jn_Y = (1 / g[0]) * np.sqrt((g[2] * g[0]) / (g[n-2] * g[n+1]))
 Jk_Y = [0, 0] + Jk2_Y + [Jn_Y]
@@ -47,7 +63,6 @@ Yn_Ya = ((wp * ( 2 * g[0] * g[n-1] - g[2] * g[n+1]) * np.tan(theta_1)) / (2 * g[
 Yk_Ya = [0, 0] + [Y2_Ya] + Yk3_Ya + [Yn_Ya]
 
 h = 0.18
-er = 1
 
 # self capacitance, normalized by epsilon
 C1 = (eta0 / np.sqrt(er)) * Y_a * (1 - np.sqrt(h)) / (Zn_Za[0])
@@ -58,21 +73,134 @@ Ck3 = [(eta0 / np.sqrt(er)) * (Y_a * h) * (Yk_Ya[k]) for k in range(3, n-1)]
 CN = (eta0 / np.sqrt(er)) * Y_a * (1 - np.sqrt(h)) / (Zn_Za[-1])
 CN_1 = (eta0 / np.sqrt(er)) * (Y_a * h) * (Yk_Ya[n-1]) - np.sqrt(h) * (CN)
 
-Ck = [C1] + [C2] + Ck3 + [CN_1] + [CN]
+Ck = np.array([C1] + [C2] + Ck3 + [CN_1] + [CN])
 
 # mutual capacitance, normalized by epsilon
 Cm12 = (eta0 / np.sqrt(er)) * Y_a * (np.sqrt(h) / (Zn_Za[0]))
 Cmk2 = [(eta0 / np.sqrt(er)) * (Y_a * h) * (Jk_Y[k]) for k in range(2, n-1)]
 CmN = (eta0 / np.sqrt(er)) * Y_a * (np.sqrt(h) / (Zn_Za[-1]))
 
-Cmk = [Cm12] + Cmk2 + [CmN]
+Cmk = np.array([Cm12] + Cmk2 + [CmN])
+
+def coupled_sline_impedance(w, sp, b, er):
+    # reference odd, even mode impedances.
+    # page 174 in Matthaei, even and odd mode impedances of coupled strip line
+    k_e = np.tanh((np.pi / 2) * (w / b)) * np.tanh((np.pi / 2) * (w + sp) / b)
+    kp_e = np.sqrt(1 - (k_e **2))
+
+    k_o = np.tanh((np.pi / 2) * (w / b)) * (1 / np.tanh((np.pi / 2) * (w + sp) / b))
+    kp_o = np.sqrt(1 - (k_o **2))
+
+    Z0_e = ((30 * np.pi) / (np.sqrt(er))) * (ellipk(kp_e) / ellipk(k_e))
+    Z0_o = ((30 * np.pi) / (np.sqrt(er))) * (ellipk(kp_o) / ellipk(k_o))
+
+    # compute mutual capacitance
+    # Z0_e = 1 / vp*Ce
+    # Z0_o = 1 / vp*Co
+    # Co = Ca + 2 Cab
+
+    return Z0_o, Z0_e
+
+
+def coupled_sline_fringing_cap(w, s, b, er):
+    """
+    Odd and even mode fringing capacitance for edge coupled stripline.
+    See equations 5.05-24 and 5.05-25 (page 201) and Figure 5.05-13.
+
+    Assumes that thickness is zero.
+    """
+    Z0_o, Z0_e = coupled_sline_impedance(w, s, b, er)
+
+    # even ad odd mode capacitances, normalized by e0
+    # Z0_e = 1 / vp*Ce, Table 5.05-1 (2) if Ca=Cb
+    # Z0_o = 1 / vp*Co
+    # Co = Ca + 2 Cab
+    # Ce = Ca = Cb
+    vp = rfn.const.c0 / np.sqrt(er)
+    Ce = 1 / (Z0_e * vp * e0)
+    Co = 1 / (Z0_o * vp * e0)
+
+    # parallel plate capacitance, normalized by e0
+    Cp = 2 * w / (b)
+    # fringing capacitance on the outer edges (not between the two lines), figure 5.05-10b, for t=0
+    Cf = 0.44
+    # solve for even and odd fringing capacitances, equation 5.05-24 and 5.05-25
+    Cf_e = (Ce / 2) - Cp - Cf
+    Cf_o = (Co / 2) - Cp - Cf
+
+    return Cf_o, Cf_e
+
+def fringing_capacitance_figure(b, w, er):
+    """
+    Zero thickness curve in Figure 5.05-9. 
+    Results should be nearly independent of b and w as long as w is large enough to be lower than 200 ohms or so.
+    """
+
+    sp_sweep = np.arange(0.01, 1.5, 0.001) * b
+    Cf_o, Cf_e = np.zeros((2, len(sp_sweep)))
+
+    for i, s in enumerate(sp_sweep):
+        Cf_o_s, Cf_e_s = coupled_sline_fringing_cap(w, s, b, er)
+        Cf_o[i] = Cf_o_s
+        Cf_e[i] = Cf_e_s
+
+    # Cab or C_del is the difference between the odd and fringing capacitance
+    Cab = Cf_o - Cf_e
+
+    fig, ax = plt.subplots(figsize=(8, 6))
+    ax.plot(sp_sweep / b, Cf_o, linewidth=2)
+    ax.plot(sp_sweep / b, Cf_e, linewidth=2)
+    ax.plot(sp_sweep / b, Cab, linewidth=2)
+    ax.set_yscale('log')
+    ax.set_ylim([0.01, 10])
+    ax.set_xlim([0, 1.5])
+    ax.set_xticks(np.arange(0, 1.6, 0.1))
+    ax.set_xlabel("s/b")
+    ax.set_ylabel(r"C/$\varepsilon$")
+    ax.yaxis.set_major_formatter(ScalarFormatter())
+    ax.set_yticks([0.01, 0.02, 0.04, 0.06, 0.08, 0.1, 0.2, 0.4, 0.6, 0.8, 1, 2, 4, 6, 8, 10])
+    ax.grid(True)
+    ax.legend(["$C_{f,o}$", "$C_{f,e}$", "$\Delta C_{f}$"], edgecolor='k', shadow=True, fontsize=12)
+    ax.set_title("Normalized Fringing Capacitance for Edge-Coupled Stripline", fontsize=11)
+
+    return fig, ax
+
+
+
+b = 0.625
+
+def find_Cab_spacing(sp, target_Cab):
+   w = b * 0.5
+   Cf_o, Cf_e = coupled_sline_fringing_cap(w, sp, b, er)
+   Cab = Cf_o - Cf_e
+
+   return Cab - target_Cab
+
+# determine spacings using the capacitance between lines Cmk
+sk = np.zeros_like(Cmk)
+for i, cmk in enumerate(Cmk):
+    sk[i] = least_squares(find_Cab_spacing, x0=b*0.2, args=(cmk,), bounds=(0.005, b)).x[0]
+
+# even mode fringing capacitance for each space between lines, width is arbitrary here
+Cf_e = [coupled_sline_fringing_cap(0.5*b, s, b, er)[1] for s in sk]
+# fringing capacitance on the outer edges (not between the two lines), figure 5.05-10b, for t=0
+Cf = 0.44
+# Ck is the even mode capacitance Ce. Use equation 5.05-25 to determine the per unit length parallel plate capacitance 
+# for each line
+Cf_e_left = np.array([Cf] + Cf_e)
+Cf_e_right = np.array(Cf_e + [Cf])
+Cp_e = (Ck / 2) - Cf_e_left - Cf_e_right
+# determine width using parallel plate capacitance Cp_e = 2w / b
+wk = (Cp_e / 2) * b
+
+# fringing_capacitance_figure(b=b, w=0.3, er=er)
+
 
 # design taken from table 10.07-2 in Matthaei
 K = 8
 #k       0      1      2      3      4      5      6      7
-w_k =   [0.126, 0.121, 0.126, 0.127, 0.127, 0.126, 0.121, 0.126]
-s_k =   [0.092, 0.136, 0.143, 0.146, 0.143, 0.136, 0.087]
-
+# w_k =   [0.126, 0.121, 0.126, 0.127, 0.127, 0.126, 0.121, 0.126]
+# s_k =   [0.092, 0.136, 0.143, 0.146, 0.143, 0.136, 0.087]
 
 # y coordinates of the bottom and top edge of each line
 ymax = 1.968
@@ -86,17 +214,14 @@ y1_k =  [y1,    ymax,   y1,   ymax,   y1,   ymax,   y1,    ymax - 0.1  ]
 x0_k = np.zeros(K)
 x1_k = np.zeros(K)
 x0_k[0] = 0.750
-x1_k[0] = x0_k[0] + w_k[0]
+x1_k[0] = x0_k[0] + wk[0]
 
 
 y1 = np.zeros(K)
 
 for i in range(1, K):
-    x0_k[i] = x1_k[i-1] + s_k[i-1]
-    x1_k[i] = x0_k[i] + w_k[i]
-
-f0 = 1.5e9
-lam0 = rfn.const.c0_in / 1.5e9
+    x0_k[i] = x1_k[i-1] + sk[i-1]
+    x1_k[i] = x0_k[i] + wk[i]
 
 sbox_w = x1_k[-1] + 0.750
 sbox_len = ymax
