@@ -2,6 +2,8 @@ import re
 from pathlib import Path
 import numpy as np
 from scipy.optimize import fsolve
+from scipy.special import ellipk
+from .core.units import const
 
 def dtft(xn: np.ndarray, f: np.ndarray, fs: float):
     """
@@ -68,6 +70,65 @@ def ms_z_to_width(z: float, er: float, d: float) -> float:
         return wd2 * d
     else:
         return wd12 * d
+
+def coupled_sline_impedance(w: float, s: float, b: float, er: float):
+    """
+    Odd and even mode impedance for coupled stripline. Units of w, s and b are arbitrary.
+
+    Assumes that thickness is zero.
+    """
+    # reference odd, even mode impedances.
+    # page 174 in Matthaei, even and odd mode impedances of coupled strip line
+    k_e = np.tanh((np.pi / 2) * (w / b)) * np.tanh((np.pi / 2) * (w + s) / b)
+    kp_e = np.sqrt(1 - (k_e **2))
+
+    k_o = np.tanh((np.pi / 2) * (w / b)) * (1 / np.tanh((np.pi / 2) * (w + s) / b))
+    kp_o = np.sqrt(1 - (k_o **2))
+
+    Z0_e = ((30 * np.pi) / (np.sqrt(er))) * (ellipk(kp_e) / ellipk(k_e))
+    Z0_o = ((30 * np.pi) / (np.sqrt(er))) * (ellipk(kp_o) / ellipk(k_o))
+
+    # mutual capacitance
+    # Z0_e = 1 / vp*Ce
+    # Z0_o = 1 / vp*Co
+    # Co = Ca + 2 Cab
+
+    return Z0_o, Z0_e
+
+
+
+def coupled_sline_fringing_cap(w: float, s: float, b: float, er: float):
+    """
+    Odd and even mode fringing capacitance for edge coupled stripline, per unit length [m].
+    See equations 5.05-24 and 5.05-25 (page 201) and Figure 5.05-13. Units of w, s, and b are arbitrary.
+
+    Fringing capacitance is a weak function of the trace width. Assumes that both traces are the same width,
+    but very little difference is seen in asymmetrical lines.
+
+    Assumes that thickness is zero.
+    """
+    Z0_o, Z0_e = coupled_sline_impedance(w, s, b, er)
+
+    # even ad odd mode capacitances, normalized by epsilon
+    # Z0_e = 1 / vp*Ce, Table 5.05-1 (2) if Ca=Cb
+    # Z0_o = 1 / vp*Co
+    # Co = Ca + 2 Cab
+    # Ce = Ca = Cb
+    vp = const.c0 / np.sqrt(er)
+    Ce = 1 / (Z0_e * vp * const.e0 * er)
+    Co = 1 / (Z0_o * vp * const.e0 * er)
+
+    # parallel plate capacitance, normalized by epsilon
+    Cp = 2 * w / (b)
+    # fringing capacitance on the outer edges (not between the two lines), figure 5.05-10b, for t=0
+    Cf = 0.44
+    # solve for even and odd fringing capacitances, equation 5.05-24 and 5.05-25
+    Cf_e = (Ce / 2) - Cp - Cf
+    Cf_o = (Co / 2) - Cp - Cf
+
+    # return unnormalized capacitance in farads
+    eps = er * const.e0
+    return Cf_o * eps, Cf_e * eps
 
 def lp_filter_prototype(n: int, ripple: float = 0.5):
     """

@@ -82,54 +82,6 @@ CmN = (eta0 / np.sqrt(er)) * Y_a * (np.sqrt(h) / (Zn_Za[-1]))
 
 Cmk = np.array([Cm12] + Cmk2 + [CmN])
 
-def coupled_sline_impedance(w, sp, b, er):
-    # reference odd, even mode impedances.
-    # page 174 in Matthaei, even and odd mode impedances of coupled strip line
-    k_e = np.tanh((np.pi / 2) * (w / b)) * np.tanh((np.pi / 2) * (w + sp) / b)
-    kp_e = np.sqrt(1 - (k_e **2))
-
-    k_o = np.tanh((np.pi / 2) * (w / b)) * (1 / np.tanh((np.pi / 2) * (w + sp) / b))
-    kp_o = np.sqrt(1 - (k_o **2))
-
-    Z0_e = ((30 * np.pi) / (np.sqrt(er))) * (ellipk(kp_e) / ellipk(k_e))
-    Z0_o = ((30 * np.pi) / (np.sqrt(er))) * (ellipk(kp_o) / ellipk(k_o))
-
-    # compute mutual capacitance
-    # Z0_e = 1 / vp*Ce
-    # Z0_o = 1 / vp*Co
-    # Co = Ca + 2 Cab
-
-    return Z0_o, Z0_e
-
-
-def coupled_sline_fringing_cap(w, s, b, er):
-    """
-    Odd and even mode fringing capacitance for edge coupled stripline.
-    See equations 5.05-24 and 5.05-25 (page 201) and Figure 5.05-13.
-
-    Assumes that thickness is zero.
-    """
-    Z0_o, Z0_e = coupled_sline_impedance(w, s, b, er)
-
-    # even ad odd mode capacitances, normalized by e0
-    # Z0_e = 1 / vp*Ce, Table 5.05-1 (2) if Ca=Cb
-    # Z0_o = 1 / vp*Co
-    # Co = Ca + 2 Cab
-    # Ce = Ca = Cb
-    vp = rfn.const.c0 / np.sqrt(er)
-    Ce = 1 / (Z0_e * vp * e0)
-    Co = 1 / (Z0_o * vp * e0)
-
-    # parallel plate capacitance, normalized by e0
-    Cp = 2 * w / (b)
-    # fringing capacitance on the outer edges (not between the two lines), figure 5.05-10b, for t=0
-    Cf = 0.44
-    # solve for even and odd fringing capacitances, equation 5.05-24 and 5.05-25
-    Cf_e = (Ce / 2) - Cp - Cf
-    Cf_o = (Co / 2) - Cp - Cf
-
-    return Cf_o, Cf_e
-
 def fringing_capacitance_figure(b, w, er):
     """
     Zero thickness curve in Figure 5.05-9. 
@@ -140,11 +92,12 @@ def fringing_capacitance_figure(b, w, er):
     Cf_o, Cf_e = np.zeros((2, len(sp_sweep)))
 
     for i, s in enumerate(sp_sweep):
-        Cf_o_s, Cf_e_s = coupled_sline_fringing_cap(w, s, b, er)
-        Cf_o[i] = Cf_o_s
-        Cf_e[i] = Cf_e_s
+        Cf_o_s, Cf_e_s = utils.coupled_sline_fringing_cap(w, s, b, er)
+        # normalize by epsilon, and convert to per unit inch from meters
+        Cf_o[i] = Cf_o_s / (e0 * er)
+        Cf_e[i] = Cf_e_s / (e0 * er)
 
-    # Cab or C_del is the difference between the odd and fringing capacitance
+    # Cab or del_C is the difference between the odd and fringing capacitance
     Cab = Cf_o - Cf_e
 
     fig, ax = plt.subplots(figsize=(8, 6))
@@ -168,28 +121,31 @@ def fringing_capacitance_figure(b, w, er):
 
 
 b = 0.625
+# w = b * 0.5
+# er = 1
 
 def find_Cab_spacing(sp, target_Cab):
    w = b * 0.5
-   Cf_o, Cf_e = coupled_sline_fringing_cap(w, sp, b, er)
-   Cab = Cf_o - Cf_e
+   Cf_o, Cf_e = utils.coupled_sline_fringing_cap(w, sp, b, er)
+   # normalized Cab
+   Cab = (Cf_o - Cf_e) / (e0 * er)
 
    return Cab - target_Cab
 
 # determine spacings using the capacitance between lines Cmk
 sk = np.zeros_like(Cmk)
 for i, cmk in enumerate(Cmk):
-    sk[i] = least_squares(find_Cab_spacing, x0=b*0.2, args=(cmk,), bounds=(0.005, b)).x[0]
+    sk[i] = least_squares(find_Cab_spacing, x0=b*0.2, args=(cmk,), bounds=(0.001, b)).x[0]
 
 # even mode fringing capacitance for each space between lines, width is arbitrary here
-Cf_e = [coupled_sline_fringing_cap(0.5*b, s, b, er)[1] for s in sk]
+Cf_e = np.array([utils.coupled_sline_fringing_cap(0.5*b, s, b, er)[1] for s in sk]) / (e0 * er)
 # fringing capacitance on the outer edges (not between the two lines), figure 5.05-10b, for t=0
 Cf = 0.44
 # Ck is the even mode capacitance Ce. Use equation 5.05-25 to determine the per unit length parallel plate capacitance 
-# for each line
-Cf_e_left = np.array([Cf] + Cf_e)
-Cf_e_right = np.array(Cf_e + [Cf])
-Cp_e = (Ck / 2) - Cf_e_left - Cf_e_right
+# for each line. Normalized by eps
+Cf_eps_left = np.concatenate([[Cf], Cf_e])
+Cf_eps_right = np.concatenate([Cf_e, [Cf]])
+Cp_e = (Ck / 2) - Cf_eps_left - Cf_eps_right
 # determine width using parallel plate capacitance Cp_e = 2w / b
 wk = (Cp_e / 2) * b
 
