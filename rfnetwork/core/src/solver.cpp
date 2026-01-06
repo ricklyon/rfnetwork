@@ -296,15 +296,18 @@ int solver_init_fields(PyObject * py_mem, PyObject * coefficients, int Nx, int N
     Hx.Nz = Nz;
     Hx.NyNz = Hx.Ny * Hx.Nz;
 
-    Dx.Db_hx_y = get_solver_array(coefficients, "Db_hx_y", Nx, Hx.Ny, Hx.Nz);
-    Dx.Db_hx_z = get_solver_array(coefficients, "Db_hx_z", Nx, Hx.Ny, Hx.Nz);
+    Dx.Db_hx_y1 = get_solver_array(coefficients, "Db_hx_y1", Nx, Hx.Ny, Hx.Nz);
+    Dx.Db_hx_y2 = get_solver_array(coefficients, "Db_hx_y2", Nx, Hx.Ny, Hx.Nz);
+    Dx.Db_hx_z1 = get_solver_array(coefficients, "Db_hx_z1", Nx, Hx.Ny, Hx.Nz);
+    Dx.Db_hx_z2 = get_solver_array(coefficients, "Db_hx_z2", Nx, Hx.Ny, Hx.Nz);
+    
     Dx.Da_hx_y = get_solver_array(coefficients, "Da_hx_y", Nx, Hx.Ny, Hx.Nz);
     Dx.Da_hx_z = get_solver_array(coefficients, "Da_hx_z", Nx, Hx.Ny, Hx.Nz);
     // ensure coefficients at the end of the x-axis are zero to create a PEC boundary
-    memset(Dx.Db_hx_y + ((Nx - 1) * Hx.Ny * Hx.Nz), 0, Hx.Ny * Hx.Nz * sizeof(float));
-    memset(Dx.Db_hx_z + ((Nx - 1) * Hx.Ny * Hx.Nz), 0, Hx.Ny * Hx.Nz * sizeof(float));
-    memset(Dx.Da_hx_y + ((Nx - 1) * Hx.Ny * Hx.Nz), 0, Hx.Ny * Hx.Nz * sizeof(float));
-    memset(Dx.Da_hx_z + ((Nx - 1) * Hx.Ny * Hx.Nz), 0, Hx.Ny * Hx.Nz * sizeof(float));
+    // memset(Dx.Db_hx_y + ((Nx - 1) * Hx.Ny * Hx.Nz), 0, Hx.Ny * Hx.Nz * sizeof(float));
+    // memset(Dx.Db_hx_z + ((Nx - 1) * Hx.Ny * Hx.Nz), 0, Hx.Ny * Hx.Nz * sizeof(float));
+    // memset(Dx.Da_hx_y + ((Nx - 1) * Hx.Ny * Hx.Nz), 0, Hx.Ny * Hx.Nz * sizeof(float));
+    // memset(Dx.Da_hx_z + ((Nx - 1) * Hx.Ny * Hx.Nz), 0, Hx.Ny * Hx.Nz * sizeof(float));
 
     // initialize hy pointers
     Hy.Nx = Nx;
@@ -312,8 +315,11 @@ int solver_init_fields(PyObject * py_mem, PyObject * coefficients, int Nx, int N
     Hy.Nz = Nz;
     Hy.NyNz = Hy.Ny * Hy.Nz;
 
-    Dy.Db_hy_z = get_solver_array(coefficients, "Db_hy_z", Nx, Hy.Ny, Hy.Nz);
-    Dy.Db_hy_x = get_solver_array(coefficients, "Db_hy_x", Nx, Hy.Ny, Hy.Nz);
+    Dy.Db_hy_z1 = get_solver_array(coefficients, "Db_hy_z1", Nx, Hy.Ny, Hy.Nz);
+    Dy.Db_hy_z2 = get_solver_array(coefficients, "Db_hy_z2", Nx, Hy.Ny, Hy.Nz);
+    Dy.Db_hy_x1 = get_solver_array(coefficients, "Db_hy_x1", Nx, Hy.Ny, Hy.Nz);
+    Dy.Db_hy_x2 = get_solver_array(coefficients, "Db_hy_x2", Nx, Hy.Ny, Hy.Nz);
+
     Dy.Da_hy_z = get_solver_array(coefficients, "Da_hy_z", Nx, Hy.Ny, Hy.Nz);
     Dy.Da_hy_x = get_solver_array(coefficients, "Da_hy_x", Nx, Hy.Ny, Hy.Nz);
 
@@ -323,8 +329,11 @@ int solver_init_fields(PyObject * py_mem, PyObject * coefficients, int Nx, int N
     Hz.Nz = Nz + 1;
     Hz.NyNz = Hz.Ny * Hz.Nz;
 
-    Dz.Db_hz_x = get_solver_array(coefficients, "Db_hz_x", Nx, Hz.Ny, Hz.Nz);
-    Dz.Db_hz_y = get_solver_array(coefficients, "Db_hz_y", Nx, Hz.Ny, Hz.Nz);
+    Dz.Db_hz_x1 = get_solver_array(coefficients, "Db_hz_x1", Nx, Hz.Ny, Hz.Nz);
+    Dz.Db_hz_x2 = get_solver_array(coefficients, "Db_hz_x2", Nx, Hz.Ny, Hz.Nz);
+    Dz.Db_hz_y1 = get_solver_array(coefficients, "Db_hz_y1", Nx, Hz.Ny, Hz.Nz);
+    Dz.Db_hz_y2 = get_solver_array(coefficients, "Db_hz_y2", Nx, Hz.Ny, Hz.Nz);
+
     Dz.Da_hz_x = get_solver_array(coefficients, "Da_hz_x", Nx, Hz.Ny, Hz.Nz);
     Dz.Da_hz_y = get_solver_array(coefficients, "Da_hz_y", Nx, Hz.Ny, Hz.Nz);
 
@@ -885,24 +894,30 @@ void solver_thread(int x_start, int x_stop, int Nt, int thread_idx)
 
             // hx coefficients
             x_offset = (x_start + x) * Hx.NyNz;
-            MatrixFloatType Db_hx_y (Dx.Db_hx_y + x_offset, Hx.Ny, Hx.Nz);
-            MatrixFloatType Db_hx_z (Dx.Db_hx_z + x_offset, Hx.Ny, Hx.Nz);
+            MatrixFloatType Db_hx_y1 (Dx.Db_hx_y1 + x_offset, Hx.Ny, Hx.Nz);
+            MatrixFloatType Db_hx_y2 (Dx.Db_hx_y2 + x_offset, Hx.Ny, Hx.Nz);
+            MatrixFloatType Db_hx_z1 (Dx.Db_hx_z1 + x_offset, Hx.Ny, Hx.Nz);
+            MatrixFloatType Db_hx_z2 (Dx.Db_hx_z2 + x_offset, Hx.Ny, Hx.Nz);
 
             MatrixFloatType Da_hx_y (Dx.Da_hx_y + x_offset, Hx.Ny, Hx.Nz);
             MatrixFloatType Da_hx_z (Dx.Da_hx_z + x_offset, Hx.Ny, Hx.Nz);
 
             // hy coefficients
             x_offset = (x_start + x) * Hy.NyNz;
-            MatrixFloatType Db_hy_z (Dy.Db_hy_z + x_offset, Hy.Ny, Hy.Nz);
-            MatrixFloatType Db_hy_x (Dy.Db_hy_x + x_offset, Hy.Ny, Hy.Nz);
+            MatrixFloatType Db_hy_z1 (Dy.Db_hy_z1 + x_offset, Hy.Ny, Hy.Nz);
+            MatrixFloatType Db_hy_z2 (Dy.Db_hy_z2 + x_offset, Hy.Ny, Hy.Nz);
+            MatrixFloatType Db_hy_x1 (Dy.Db_hy_x1 + x_offset, Hy.Ny, Hy.Nz);
+            MatrixFloatType Db_hy_x2 (Dy.Db_hy_x2 + x_offset, Hy.Ny, Hy.Nz);
 
             MatrixFloatType Da_hy_z (Dy.Da_hy_z + x_offset, Hy.Ny, Hy.Nz);
             MatrixFloatType Da_hy_x (Dy.Da_hy_x + x_offset, Hy.Ny, Hy.Nz);
 
             // hz coefficients
             x_offset = (x_start + x) * Hz.NyNz;
-            MatrixFloatType Db_hz_x (Dz.Db_hz_x + x_offset, Hz.Ny, Hz.Nz);
-            MatrixFloatType Db_hz_y (Dz.Db_hz_y + x_offset, Hz.Ny, Hz.Nz);
+            MatrixFloatType Db_hz_x1 (Dz.Db_hz_x1 + x_offset, Hz.Ny, Hz.Nz);
+            MatrixFloatType Db_hz_x2 (Dz.Db_hz_x2 + x_offset, Hz.Ny, Hz.Nz);
+            MatrixFloatType Db_hz_y1 (Dz.Db_hz_y1 + x_offset, Hz.Ny, Hz.Nz);
+            MatrixFloatType Db_hz_y2 (Dz.Db_hz_y2 + x_offset, Hz.Ny, Hz.Nz);
 
             MatrixFloatType Da_hz_x (Dz.Da_hz_x + x_offset, Hz.Ny, Hz.Nz);
             MatrixFloatType Da_hz_y (Dz.Da_hz_y + x_offset, Hz.Ny, Hz.Nz);
@@ -921,14 +936,14 @@ void solver_thread(int x_start, int x_stop, int Nt, int thread_idx)
             // hx_yd = Db_hx_y * np.diff(ez, axis=1)
             // hx_y = Da_hx_y * hx_y + hx_yd
             hx_y = Da_hx_y.cwiseProduct(hx_y) + (
-                Db_hx_y.cwiseProduct(ez.bottomRows(Ny) - ez.topRows(Ny))
+                Db_hx_y2.cwiseProduct(ez.bottomRows(Ny)) - Db_hx_y1.cwiseProduct(ez.topRows(Ny))
             );
 
             // hx_z update
             // hx_zd = Db_hx_z * np.diff(ey, axis=2)
             // hx_z = Da_hx_z * hx_z + hx_zd
             hx_z = Da_hx_z.cwiseProduct(hx_z) + (
-                Db_hx_z.cwiseProduct(ey.rightCols(Nz) - ey.leftCols(Nz))
+                Db_hx_z2.cwiseProduct(ey.rightCols(Nz)) - Db_hx_z1.cwiseProduct(ey.leftCols(Nz))
             );
             
             // ----------------- update hy -------------------------- //
@@ -938,14 +953,14 @@ void solver_thread(int x_start, int x_stop, int Nt, int thread_idx)
             // hy_zd = Db_hy_z * np.diff(ex, axis=2)
             // hy_z = Da_hy_z * hy_z + hy_zd
             hy_z = Da_hy_z.cwiseProduct(hy_z) + (
-                Db_hy_z.cwiseProduct(ex.rightCols(Nz) - ex.leftCols(Nz))
+                Db_hy_z2.cwiseProduct(ex.rightCols(Nz)) - Db_hy_z1.cwiseProduct(ex.leftCols(Nz))
             );
 
             // update hy_x
             // hy_xd = Db_hy_x * np.diff(ez, axis=0)
             // hy_x = Da_hy_x * hy_x + hy_xd
             hy_x = Da_hy_x.cwiseProduct(hy_x) + (
-                Db_hy_x.cwiseProduct(ez - ez_0)
+                Db_hy_x2.cwiseProduct(ez) - Db_hy_x1.cwiseProduct(ez_0)
             );
 
             // ----------------- update hz -------------------------- //
@@ -955,14 +970,14 @@ void solver_thread(int x_start, int x_stop, int Nt, int thread_idx)
             // hz_xd = Db_hz_x * np.diff(ey, axis=0) 
             // hz_x = Da_hz_x * hz_x + hz_xd
             hz_x = Da_hz_x.cwiseProduct(hz_x) + (
-                Db_hz_x.cwiseProduct(ey - ey_0)
+                Db_hz_x2.cwiseProduct(ey) - Db_hz_x1.cwiseProduct(ey_0)
             );
 
             // update hz_y
             // hz_yd = Db_hz_y * np.diff(ex, axis=1)
             // hz_y = Da_hz_y * hz_y + hz_yd
             hz_y = Da_hz_y.cwiseProduct(hz_y) + (
-                Db_hz_y.cwiseProduct(ex.bottomRows(Ny) - ex.topRows(Ny))
+                Db_hz_y2.cwiseProduct(ex.bottomRows(Ny)) - Db_hz_y1.cwiseProduct(ex.topRows(Ny))
             );
 
             // combine split components

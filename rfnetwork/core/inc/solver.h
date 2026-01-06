@@ -91,22 +91,34 @@ struct Coeff_Ez {
 struct Coeff_Hx {
     float * Da_hx_y;
     float * Da_hx_z;
-    float * Db_hx_y;
-    float * Db_hx_z;
+
+    float * Db_hx_y1;
+    float * Db_hx_y2;
+    
+    float * Db_hx_z1;
+    float * Db_hx_z2;
 };
 
 struct Coeff_Hy {
     float * Da_hy_z;
     float * Da_hy_x;
-    float * Db_hy_z;
-    float * Db_hy_x;
+
+    float * Db_hy_z1;
+    float * Db_hy_z2;
+
+    float * Db_hy_x1;
+    float * Db_hy_x2;
 };
 
 struct Coeff_Hz {
     float * Da_hz_x;
     float * Da_hz_y;
-    float * Db_hz_x;
-    float * Db_hz_y;
+
+    float * Db_hz_x1;
+    float * Db_hz_x2;
+
+    float * Db_hz_y1;
+    float * Db_hz_y2;
 };
 
 struct Monitor {

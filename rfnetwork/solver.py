@@ -379,12 +379,18 @@ class Solver_PCB():
         )
         
         self.Db = dict(
-            hx_y = np.ones((Nx+1, Ny, Nz), dtype=dtype_) * Db_0,
-            hx_z = np.ones((Nx+1, Ny, Nz), dtype=dtype_) * Db_0,
-            hy_z = np.ones((Nx, Ny+1, Nz), dtype=dtype_) * Db_0,
-            hy_x = np.ones((Nx, Ny+1, Nz), dtype=dtype_) * Db_0,
-            hz_x = np.ones((Nx, Ny, Nz+1), dtype=dtype_) * Db_0,
-            hz_y = np.ones((Nx, Ny, Nz+1), dtype=dtype_) * Db_0,
+            hx_y1 = np.ones((Nx+1, Ny, Nz), dtype=dtype_) * Db_0,
+            hx_y2 = np.ones((Nx+1, Ny, Nz), dtype=dtype_) * Db_0,
+            hx_z1 = np.ones((Nx+1, Ny, Nz), dtype=dtype_) * Db_0,
+            hx_z2 = np.ones((Nx+1, Ny, Nz), dtype=dtype_) * Db_0,
+            hy_z1 = np.ones((Nx, Ny+1, Nz), dtype=dtype_) * Db_0,
+            hy_z2 = np.ones((Nx, Ny+1, Nz), dtype=dtype_) * Db_0,
+            hy_x1 = np.ones((Nx, Ny+1, Nz), dtype=dtype_) * Db_0,
+            hy_x2 = np.ones((Nx, Ny+1, Nz), dtype=dtype_) * Db_0,
+            hz_x1 = np.ones((Nx, Ny, Nz+1), dtype=dtype_) * Db_0,
+            hz_x2 = np.ones((Nx, Ny, Nz+1), dtype=dtype_) * Db_0,
+            hz_y1 = np.ones((Nx, Ny, Nz+1), dtype=dtype_) * Db_0,
+            hz_y2 = np.ones((Nx, Ny, Nz+1), dtype=dtype_) * Db_0,
         )
 
     def init_pec(self, edge_correction=True):
@@ -683,7 +689,8 @@ class Solver_PCB():
         sigma_m_hy = simga_e_hy * u0 / eps_hy
 
         self.Da["hy_x"][h_idx] = (2 * u0 - (sigma_m_hy * dt)) / (2 * u0 + (sigma_m_hy * dt))
-        self.Db["hy_x"][h_idx] = (2 * dt) / ((2 * u0 + (sigma_m_hy * dt))) 
+        self.Db["hy_x1"][h_idx] = (2 * dt) / ((2 * u0 + (sigma_m_hy * dt))) 
+        self.Db["hy_x2"][h_idx] = (2 * dt) / ((2 * u0 + (sigma_m_hy * dt))) 
 
         eps_hz = self.eps_hz[h_idx]
         sigma_e_hz = np.broadcast_to(sigma_e_np5, (d_pml,) + self.Da["hz_x"].shape[1:]).copy()
@@ -691,7 +698,8 @@ class Solver_PCB():
         sigma_m_hz = sigma_e_hz * u0 / eps_hz
 
         self.Da["hz_x"][h_idx] = (2 * u0 - (sigma_m_hz * dt)) / (2 * u0 + (sigma_m_hz * dt))
-        self.Db["hz_x"][h_idx] = (2 * dt) / ((2 * u0 + (sigma_m_hz * dt)))
+        self.Db["hz_x1"][h_idx] = (2 * dt) / ((2 * u0 + (sigma_m_hz * dt)))
+        self.Db["hz_x2"][h_idx] = (2 * dt) / ((2 * u0 + (sigma_m_hz * dt)))
 
 
     def run(self, ports, v_waveforms, n_threads=4):
@@ -746,22 +754,28 @@ class Solver_PCB():
             Da_hx_y = self.Da["hx_y"][1:],
             Da_hx_z = self.Da["hx_z"][1:],
             
-            Db_hx_y = -self.Db["hx_y"][1:] * dy_inv,
-            Db_hx_z = self.Db["hx_z"][1:] * dz_inv,
+            Db_hx_y1 = -self.Db["hx_y1"][1:] * dy_inv,
+            Db_hx_y2 = -self.Db["hx_y2"][1:] * dy_inv,
+            Db_hx_z1 = self.Db["hx_z1"][1:] * dz_inv,
+            Db_hx_z2 = self.Db["hx_z2"][1:] * dz_inv,
 
             # hy coefficients
             Da_hy_z = self.Da["hy_z"],
             Da_hy_x = self.Da["hy_x"],
             
-            Db_hy_z = -self.Db["hy_z"] * dz_inv,
-            Db_hy_x = self.Db["hy_x"] * dx_inv,
+            Db_hy_z1 = -self.Db["hy_z1"] * dz_inv,
+            Db_hy_z2 = -self.Db["hy_z2"] * dz_inv,
+            Db_hy_x1 = self.Db["hy_x1"] * dx_inv,
+            Db_hy_x2 = self.Db["hy_x2"] * dx_inv,
 
             # hz coefficients
             Da_hz_x = self.Da["hz_x"],
             Da_hz_y = self.Da["hz_y"],
             
-            Db_hz_x = -self.Db["hz_x"] * dx_inv,
-            Db_hz_y = self.Db["hz_y"] * dy_inv,
+            Db_hz_x1 = -self.Db["hz_x1"] * dx_inv,
+            Db_hz_x2 = -self.Db["hz_x2"] * dx_inv,
+            Db_hz_y1 = self.Db["hz_y1"] * dy_inv,
+            Db_hz_y2 = self.Db["hz_y2"] * dy_inv,
         )
 
         temp_mem_size = 0
