@@ -498,11 +498,31 @@ class Solver_PCB():
                     if len(y0_ports) == 0:
                         x0, y0, z0 = self.field_pos_to_idx(np.min(pec.points, axis=0), "ex")
                         x1, y1, z1 = self.field_pos_to_idx(np.max(pec.points, axis=0), "ex")
+
+                        x1 = np.clip(x1, 0, self.fshape["ex"][0])
                         # ex edge correction
-                        eps = self.eps_ex[x0: x1, y0, z0]
-                        sig = 0
+                        eps = self.eps_ex[x0: x1, y0, z0] * 1.0
+                        mu = u0 * 1.0
                         self.Ca["ex_y"][x0: x1, y0, z0] = 1
                         self.Cb["ex_y"][x0: x1, y0, z0] = (self.dt / (eps)) 
+                        # self.Ca["ex_z"][x0: x1, y0, z0] = 1
+                        # self.Cb["ex_z"][x0: x1, y0, z0] = (self.dt / (eps)) 
+
+                        # self.Db["hz_x1"][x0: x1, y0-1, z0] = self.dt / (3 * u0)
+                        # self.Db["hz_x2"][x0: x1, y0-1, z0] = self.dt / (3 * u0)
+
+                        # dt = self.dt
+                        # sig_m = 1e12
+
+                        # self.Da["hz_x"][: x1, y0, z0] = (2 * u0 - (sig_m * dt)) / (2 * u0 + (sig_m * dt))
+                        # self.Db["hz_x1"][: x1, y0, z0] = (2 * dt) / ((2 * u0 + (sig_m * dt))) 
+                        # self.Db["hz_x2"][: x1, y0, z0] = (2 * dt) / ((2 * u0 + (sig_m * dt))) 
+
+                        # self.Db["hz_y1"][x0: x1, y0, z0] = 0 #self.dt / (mu)
+                        # self.Db["hz_y2"][x0: x1, y0-1, z0] = 0 #self.dt / (mu * 10)
+
+                        # self.Db["hy_z2"][x0: x1, y0, z0-1] = 0
+                        # self.Db["hy_z1"][x0: x1, y0, z0] = 0
 
                         # self.Ca["ex_z"][x0: x1, y0, z0] = 1
                         # self.Cb["ex_z"][x0: x1, y0, z0] = (self.dt / (eps)) 
@@ -523,11 +543,39 @@ class Solver_PCB():
                     if len(y1_ports) == 0:
                         x0, y0, z0 = self.field_pos_to_idx(np.min(pec.points, axis=0), "ex")
                         x1, y1, z1 = self.field_pos_to_idx(np.max(pec.points, axis=0), "ex")
+
+                        # x1 = np.clip(x1, 0, self.fshape["ex"][0])
+                        # x1 = np.clip(x1, 0, self.fshape["ex"][0])
                         # ex edge correction
-                        eps = self.eps_ex[x0: x1, y1, z0]
-                        sig = 0
+                        eps = self.eps_ex[x0: x1, y1, z0] * 1.0
+                        mu = u0 * 1.0
                         self.Ca["ex_y"][x0: x1, y1, z0] = 1
                         self.Cb["ex_y"][x0: x1, y1, z0] = (self.dt / eps) 
+                        # self.Ca["ex_z"][x0: x1, y1, z0] = 1
+                        # self.Cb["ex_z"][x0: x1, y1, z0] = (self.dt / eps) 
+
+                        # self.Db["hz_x1"][x0: x1, y1, z0] = self.dt / (3 * u0)
+                        # self.Db["hz_x2"][x0: x1, y1, z0] = self.dt / (3 * u0)
+
+                        dt = self.dt
+                        sig_m = 1e12
+
+                        # # Da = (2 * u0 - (sigm_0 * dt)) / (2 * u0 + (sigm_0 * dt))
+                        # print(x0, y1, z0)
+                        # self.Da["hz_x"][: x1, y1-1, z0] = (2 * u0 - (sig_m * dt)) / (2 * u0 + (sig_m * dt))
+                        # self.Db["hz_x1"][: x1, y1-1, z0] = (2 * dt) / ((2 * u0 + (sig_m * dt))) 
+                        # self.Db["hz_x2"][: x1, y1-1, z0] = (2 * dt) / ((2 * u0 + (sig_m * dt))) 
+
+                        # self.Da["hz_x"][x0: x1, y1, z0] = (2 * u0 - (sig_m * dt)) / (2 * u0 + (sig_m * dt))
+                        # self.Db["hz_x1"][x0: x1, y1, z0] = (2 * dt) / ((2 * u0 + (sig_m * dt))) 
+                        # self.Db["hz_x2"][x0: x1, y1, z0] = (2 * dt) / ((2 * u0 + (sig_m * dt))) 
+
+                        # self.Db["hz_y2"][h_idx] = (2 * dt) / ((2 * u0 + (sigma_m_hy * dt))) 
+
+                        # self.Db["hz_y1"][x0: x1, y1, z0] = 0 #self.dt / (mu)
+                        # self.Db["hz_y2"][x0: x1, y1-1, z0] = 0 # self.dt / (mu)
+                        # self.Db["hy_z2"][x0: x1, y1, z0-1] = 0
+                        # self.Db["hy_z1"][x0: x1, y1, z0] = 0
 
                         # self.Ca["ex_z"][x0: x1, y1, z0] = 1
                         # self.Cb["ex_z"][x0: x1, y1, z0] = (self.dt / eps) 
@@ -701,13 +749,39 @@ class Solver_PCB():
         self.Db["hz_x1"][h_idx] = (2 * dt) / ((2 * u0 + (sigma_m_hz * dt)))
         self.Db["hz_x2"][h_idx] = (2 * dt) / ((2 * u0 + (sigma_m_hz * dt)))
 
+    def gaussian_source(self, width: float, t_len: float):
+        """
+        Generate a gaussian source waveform with the given width in seconds. t_len is the total time of the 
+        simulated source.
+        """
+        # pulse length
+        pulse_len = width * 1.5
+        # center of the pulse in time
+        t0 = pulse_len / 2
+        # number of time steps in pulse
+        n_len = int(pulse_len / self.dt)
+
+        t = np.linspace(0, self.dt * n_len, n_len)
+        vsrc = np.exp(-((t - t0) / (width / 4)) ** 2) # np.sin(2* np.pi * f0 * t) * 
+
+        # append the length of the full simulation time
+        t_diff = t_len - (len(vsrc) * self.dt)
+
+        if t_diff < 0:
+            vsrc = vsrc[int(t_len / self.dt)]
+        else:
+            vpad = np.zeros(int(t_diff / self.dt))
+            vsrc = np.concatenate([vsrc, vpad])
+
+        # normalize so amplitude is 1
+        return vsrc / np.max(np.abs(vsrc))
 
     def run(self, ports, v_waveforms, n_threads=4):
 
         if isinstance(ports, int):
             ports = [ports]
 
-        v_waveforms = np.atleast_2d(v_waveforms)
+        v_waveforms = np.atleast_2d(v_waveforms).astype(np.float32)
             
         Nt = len(v_waveforms[0])
 
@@ -840,7 +914,7 @@ class Solver_PCB():
                 )
             )
 
-        print(f"Running solver with {self.Nx * self.Ny * self.Nz / 1e3:.1f}k cells")
+        print(f"Running solver with {self.Nx * self.Ny * self.Nz / 1e3:.1f}k cells, and {Nt} time steps.")
         stime = time.time()
         core.core_func.solver_run(coefficients, probes, monitors, mem, Nx, Ny, Nz, Nt, n_threads)
         print(f"Done in {time.time() - stime:.3f}s")
@@ -1307,9 +1381,9 @@ class Solver_PCB():
         self.slider_value = Nt // 2
         self.slider = plotter.add_slider_widget(
             callback,
-            [0, Nt-1],
+            [0, Nt-2],
             value=Nt // 2,
-            title="Time Step",
+            title="Time [ps]",
             interaction_event="always",
             style="modern",
             fmt="%0.0f"
