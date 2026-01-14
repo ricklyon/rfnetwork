@@ -21,6 +21,7 @@ u0 = const.u0
 e0 = const.e0
 c0 = const.c0
 
+# 0.03
 ms_w = 0.03
 ms1_y = 0
 
@@ -53,14 +54,14 @@ port1_face = pv.Rectangle([
 
 
 current_face = pv.Rectangle([
-    (-0.25, ms1_y - ms_w/2 - 0.001, sub_h + 0.001),
-    (-0.25, ms1_y + ms_w/2 + 0.001, sub_h + 0.001),
-    (-0.25, ms1_y + ms_w/2 + 0.001, sub_h - 0.001),
+    (0, ms1_y - ms_w/2 - 0.001, sub_h + 0.001),
+    (0, ms1_y + ms_w/2 + 0.001, sub_h + 0.001),
+    (0, ms1_y + ms_w/2 + 0.001, sub_h - 0.001),
 ])
 
 
 voltage_line1 = pv.Line(
-    [-0.25, ms1_y, 0], [-0.25, ms1_y, sub_h]
+    [0, ms1_y, 0], [0, ms1_y, sub_h]
 )
 
 voltage_line2 = pv.Line(
@@ -81,12 +82,20 @@ self = s
 # n_min_sub=4
 # n0 = 2
 
-s.init_mesh(d0 = 0.01, n0 = 3, d_pec = 0.01, n_min_pec=3, d_sub=0.005, n_min_sub=8, blend_pec=False)
+run_ref = False
+
+if run_ref:
+    d_pec = 0.0025 # 0.01 # 0.0025 
+else:
+    d_pec = 0.01
+
+s.init_mesh(d0 = 0.01, n0 = 3, d_pec = d_pec, n_min_pec=3, d_sub=0.005, n_min_sub=8, blend_pec=False)
 s.init_coefficients()
 
 s.init_ports()
 s.add_xPML(side="upper")
-s.init_pec(edge_correction=False)
+
+s.init_pec(hy_CF=3, hx_CF=3, hz_CF=1/3)
 
 s.add_field_monitor("hz", "hz", "z", sub_h, 1)
 s.add_field_monitor("ey", "ey", "z", sub_h, 1)
@@ -97,9 +106,9 @@ s.add_voltage_probe("v1", voltage_line1)
 s.add_voltage_probe("v2", voltage_line2)
 
 
-# plotter = s.render(show_probes=True)
-# plotter.camera_position = "yz"
-# plotter.show()
+plotter = s.render(show_probes=True)
+plotter.camera_position = "yz"
+plotter.show()
 
 
 Db_0 = s.dt / u0
@@ -107,15 +116,15 @@ Cb_0 = s.dt / e0
 # p = s.plot_cooeficients("ex_z", "b", "z", sub_h, point_size=15, cmap="brg", normalization=Cb_0)
 # p.camera_position = "xy"
 # p.show()
-# p = s.plot_cooeficients("hz_x1", "b", "z", sub_h, point_size=15, cmap="brg", normalization=Db_0)
-# p.camera_position = "xy"
-# p.show()
+p = s.plot_cooeficients("hy_x1", "b", "x", 0, point_size=15, cmap="brg", normalization=Db_0)
+p.camera_position = "yz"
+p.show()
 
 
 
 vsrc = 1e-2 * self.gaussian_source(width=50e-12, t_len=130e-12)
 t = np.linspace(0, self.dt * len(vsrc), len(vsrc))
-plt.plot(t / 1e-12, vsrc)
+# plt.plot(t / 1e-12, vsrc)
 
 frequency: np.ndarray = np.arange(5e9, 15e9, 10e6)
 
@@ -131,13 +140,33 @@ p.show(title="EM Solver")
 # p = s.plot_monitor(["mon3"], el=0, zoom=1.1, az=0, view="xy", opacity=[0.8, 1], linear=False, cmap="jet", style="points")
 # p.show(title="EM Solver")
 
+t_sample = 72e-12
+
 # compute line impedance
 line_i = self.vi_probe_values("c1")
 line_v1 = self.vi_probe_values("v1")
 line_v2 = self.vi_probe_values("v2")
 
-# plt.plot(line_v1)
-# plt.plot(line_v2)
+if run_ref:
+    np.save("line_v1_ref", line_v1)
+    np.save("line_i1_ref", line_i)
+    np.save("ref_time", t)
+
+line_i_ref = np.load(dir_ / "line_i1_ref.npy")
+line_v1_ref = np.load(dir_ / "line_v1_ref.npy")
+t_ref = np.load(dir_ / "ref_time.npy")
+
+plt.figure()
+plt.plot(t_ref, line_v1_ref)
+plt.plot(t, line_v1)
+mplm.line_marker(x=t_sample)
+
+plt.figure()
+plt.plot(t_ref, line_i_ref)
+plt.plot(t, line_i)
+mplm.line_marker(x=t_sample)
+
+
 
 def get_vp(v1, v2, d):
     """
@@ -152,11 +181,11 @@ def get_vp(v1, v2, d):
 
     return np.abs(d) / delta_t
 
-vp_e = get_vp(line_v1, line_v2, conv.m_in(0.5))
+vp_e = get_vp(line_v1, line_v2, conv.m_in(0.25))
 
 print("vp / c", vp_e / rfn.const.c0)
 
-self.dt
+
 
 def mon_yslice(monitor, t_sample):
     n_sample = int(t_sample / self.dt)
@@ -181,16 +210,17 @@ mplm.line_marker(x = 10, axes=ax)
 
 S11_z = conv.gamma_z(ZP)
 
+# hz and ey components along y
 
-hz_yloc, hz_values = mon_yslice("hz", t_sample = 72e-12)
-ey_yloc, ey_values = mon_yslice("ey", t_sample = 72e-12)
-
+hz_yloc, hz_values = mon_yslice("hz", t_sample = t_sample)
+ey_yloc, ey_values = mon_yslice("ey", t_sample = t_sample)
 
 # d_pec = 0.0025
-# np.save("hz_fine_grid", hz_values)
-# np.save("hz_loc_fine_grid", hz_yloc)
-# np.save("ey_fine_grid", ey_values)
-# np.save("ey_loc_fine_grid", ey_yloc)
+if run_ref:
+    np.save("hz_fine_grid", hz_values)
+    np.save("hz_loc_fine_grid", hz_yloc)
+    np.save("ey_fine_grid", ey_values)
+    np.save("ey_loc_fine_grid", ey_yloc)
 
 hz_ref = np.load(dir_ / "hz_fine_grid.npy")
 hz_ref_loc = np.load(dir_ / "hz_loc_fine_grid.npy")
@@ -198,21 +228,73 @@ ey_ref = np.load(dir_ / "ey_fine_grid.npy")
 ey_ref_loc = np.load(dir_ / "ey_loc_fine_grid.npy")
 
 
-# d_pec = 0.01
+# ez components along z below the trace
+n_sample = int(t_sample / self.dt)
+name = "v1"
+ez_values = np.array([p["values"][n_sample] for k, p in self.probes.items() if k[:len(name)] == name])
+ez_zloc = np.array([self.floc["ez"][2][p["index"][2]] for k, p in self.probes.items() if k[:len(name)] == name])
+
+if run_ref:
+    np.save("ez_fine_grid", ez_values)
+    np.save("ez_loc_fine_grid", ez_zloc)
+
+ez_ref = np.load(dir_ / "ez_fine_grid.npy")
+ez_ref_loc = np.load(dir_ / "ez_loc_fine_grid.npy")
+
+# hy components above the trace
+self.probes["c1_2"]
+name = "c1"
+hy_values = np.array([p["values"][n_sample] for k, p in self.probes.items() if k[:len(name)] == name])[2:]
+hy_ylocs = np.array([self.floc["hy"][1][p["index"][1]] for k, p in self.probes.items() if k[:len(name)] == name])[2:]
+
+if run_ref:
+    np.save("hy_fine_grid", hy_values)
+    np.save("hy_loc_fine_grid", hy_ylocs)
+
+hy_ref = np.load(dir_ / "hy_fine_grid.npy")
+hy_ref_loc = np.load(dir_ / "hy_loc_fine_grid.npy")
+
+# plt.figure()
+# plt.plot(hy_ref_loc[::2], hy_ref[::2] * conv.m_in(0.0025))
+# plt.plot(hy_ylocs[::2], hy_values[::2] * conv.m_in(0.01))
+
 plt.figure()
-
-plt.plot(hz_ref_loc, hz_ref, marker=".")
-plt.plot(hz_yloc, hz_values, marker=".")
+plt.plot(hy_ref_loc[::2], hy_ref[::2], marker=".")
+plt.plot(hy_ylocs[::2], hy_values[::2], marker=".")
 plt.xlabel("y [in]")
-plt.ylabel("Hz")
-
+plt.ylabel("Hy")
+plt.title("Hy Below Trace")
 
 plt.figure()
-
-plt.plot(ey_ref_loc, ey_ref, marker=".")
-plt.plot(ey_yloc, ey_values, marker=".")
+plt.plot(hy_ref_loc[1::2], hy_ref[1::2], marker=".")
+plt.plot(hy_ylocs[1::2], hy_values[1::2], marker=".")
 plt.xlabel("y [in]")
-plt.ylabel("Ey")
+plt.ylabel("Hy")
+plt.title("Hy Above Trace")
+
+
+ez_ref = np.load(dir_ / "ez_fine_grid.npy")
+ez_ref_loc = np.load(dir_ / "ez_loc_fine_grid.npy")
+
+plt.figure()
+plt.plot(ez_ref_loc, ez_ref, marker=".")
+plt.plot(ez_zloc, ez_values, marker=".")
+plt.xlabel("z [in]")
+plt.ylabel("Ez")
+
+# hz and ey in the plane of the trace along y
+# plt.figure()
+
+# plt.plot(hz_ref_loc, hz_ref, marker=".")
+# plt.plot(hz_yloc, hz_values, marker=".")
+# plt.xlabel("y [in]")
+# plt.ylabel("Hz")
+
+# plt.figure()
+# plt.plot(ey_ref_loc, ey_ref, marker=".")
+# plt.plot(ey_yloc, ey_values, marker=".")
+# plt.xlabel("y [in]")
+# plt.ylabel("Ey")
 
 
 # fig, ax = plt.subplots()

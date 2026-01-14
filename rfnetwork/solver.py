@@ -393,13 +393,15 @@ class Solver_PCB():
             hz_y2 = np.ones((Nx, Ny, Nz+1), dtype=dtype_) * Db_0,
         )
 
-    def init_pec(self, edge_correction=True):
+    def init_pec(self, hx_CF=1, hy_CF=1, hz_CF=1):
         # initialize the PEC faces
         # this should be called after setting the PML layers
 
         dx, dy, dz = [conv.m_in(d) for d in self.d_cells]
 
         dx_h, dy_h, dz_h = [conv.m_in(d) for d in self.dh_cells]
+
+        edge_correction=True
 
         # PEC pattern
         for name, pec in self.pec_face.items():
@@ -495,6 +497,7 @@ class Solver_PCB():
                         self.Ca["ey_x"][x1, y0: y1, z0] = 1
                         self.Cb["ey_x"][x1, y0: y1, z0] = (self.dt / eps) 
 
+
                     if len(y0_ports) == 0:
                         x0, y0, z0 = self.field_pos_to_idx(np.min(pec.points, axis=0), "ex")
                         x1, y1, z1 = self.field_pos_to_idx(np.max(pec.points, axis=0), "ex")
@@ -503,13 +506,38 @@ class Solver_PCB():
                         # ex edge correction
                         eps = self.eps_ex[x0: x1, y0, z0] * 1.0
                         mu = u0 * 1.0
-                        self.Ca["ex_y"][x0: x1, y0, z0] = 1
-                        self.Cb["ex_y"][x0: x1, y0, z0] = (self.dt / (eps)) 
+                        # self.Ca["ex_y"][x0: x1, y0, z0] = 1
+                        # self.Cb["ex_y"][x0: x1, y0, z0] = (self.dt / (eps)) 
                         # self.Ca["ex_z"][x0: x1, y0, z0] = 1
                         # self.Cb["ex_z"][x0: x1, y0, z0] = (self.dt / (eps)) 
 
-                        # self.Db["hz_x1"][x0: x1, y0-1, z0] = self.dt / (3 * u0)
-                        # self.Db["hz_x2"][x0: x1, y0-1, z0] = self.dt / (3 * u0)
+                        # self.Db["hy_z2"][x0: x1, y0, z0-1] = 0
+                        # self.Db["hy_z1"][x0: x1, y0, z0] = 0
+
+                        a = 1e-20
+                        # self.Db["hz_y1"][x0: x1, y0-1, z0] *= hy_CF
+                        # self.Db["hz_y2"][x0: x1, y0-1, z0] *= hy_CF
+
+                        # hy in the same plane as the trace
+                        self.Db["hz_x2"][x0: x1, y0-1, z0] *= hz_CF
+                        self.Db["hz_x1"][x0: x1, y0-1, z0] *= hz_CF
+
+                        # hy directly above and below trace edge
+                        self.Db["hy_x1"][x0: x1, y0, z0-1] *= hy_CF
+                        self.Db["hy_x2"][x0: x1, y0, z0-1] *= hy_CF
+                        self.Db["hy_x1"][x0: x1, y0, z0] *= hy_CF
+                        self.Db["hy_x2"][x0: x1, y0, z0] *= hy_CF
+
+                        # hy below the trace, correct ez component on the edge
+                        self.Db["hx_y2"][x0+1: x1-1, y0-1, z0-1] *= hx_CF
+                        self.Db["hx_y1"][x0+1: x1-1, y0, z0-1] *= hx_CF
+                        # hy above the trace, correct the ez component on the edge
+                        self.Db["hx_y2"][x0+1: x1-1, y0-1, z0] *= hx_CF
+                        self.Db["hx_y1"][x0+1: x1-1, y0, z0] *= hx_CF
+
+                        
+                        # self.Db["hy_z2"][x0: x1, y0, z0-1] = 0 #self.dt / (mu * 100000)
+                        # self.Db["hy_z1"][x0: x1, y0, z0] = 0 #self.dt / (mu * 100000)
 
                         # dt = self.dt
                         # sig_m = 1e12
@@ -521,8 +549,7 @@ class Solver_PCB():
                         # self.Db["hz_y1"][x0: x1, y0, z0] = 0 #self.dt / (mu)
                         # self.Db["hz_y2"][x0: x1, y0-1, z0] = 0 #self.dt / (mu * 10)
 
-                        # self.Db["hy_z2"][x0: x1, y0, z0-1] = 0
-                        # self.Db["hy_z1"][x0: x1, y0, z0] = 0
+
 
                         # self.Ca["ex_z"][x0: x1, y0, z0] = 1
                         # self.Cb["ex_z"][x0: x1, y0, z0] = (self.dt / (eps)) 
@@ -549,16 +576,44 @@ class Solver_PCB():
                         # ex edge correction
                         eps = self.eps_ex[x0: x1, y1, z0] * 1.0
                         mu = u0 * 1.0
-                        self.Ca["ex_y"][x0: x1, y1, z0] = 1
-                        self.Cb["ex_y"][x0: x1, y1, z0] = (self.dt / eps) 
+
+                        # a = 1e-20
+                        # self.Db["hz_y1"][x0: x1, y1, z0] *= hy_CF
+                        # self.Db["hz_y2"][x0: x1, y1, z0] *= hy_CF
+
+                        # hy in the same plane as the trace
+                        self.Db["hz_x1"][x0: x1, y1, z0] *= hz_CF
+                        self.Db["hz_x2"][x0: x1, y1, z0] *= hz_CF
+
+                        # hy directly above and below trace edge
+                        self.Db["hy_x1"][x0: x1, y1, z0-1] *= hy_CF
+                        self.Db["hy_x2"][x0: x1, y1, z0-1] *= hy_CF
+                        self.Db["hy_x1"][x0: x1, y1, z0] *= hy_CF
+                        self.Db["hy_x2"][x0: x1, y1, z0] *= hy_CF
+
+                        # hy below the trace, correct ez component on the edge
+                        self.Db["hx_y2"][x0+1: x1-1, y1-1, z0-1] *= hx_CF
+                        self.Db["hx_y1"][x0+1: x1-1, y1, z0-1] *= hx_CF
+                        # hy above the trace, correct the ez component on the edge
+                        self.Db["hx_y2"][x0+1: x1-1, y1-1, z0] *= hx_CF
+                        self.Db["hx_y1"][x0+1: x1-1, y1, z0] *= hx_CF
+
+                        # self.Ca["ex_y"][x0: x1, y1, z0] = 1
+                        # self.Cb["ex_y"][x0: x1, y1, z0] = (self.dt / eps) 
                         # self.Ca["ex_z"][x0: x1, y1, z0] = 1
                         # self.Cb["ex_z"][x0: x1, y1, z0] = (self.dt / eps) 
+
+                        # self.Db["hz_y1"][x0: x1, y1, z0] = 0
+                        # self.Db["hz_y2"][x0: x1, y1-1, z0] = 0
+
+                        # self.Db["hy_z2"][x0: x1, y1, z0-1] =  0# self.dt / (mu * 100000)
+                        # self.Db["hy_z1"][x0: x1, y1, z0] = 0 #self.dt / (mu * 100000)
 
                         # self.Db["hz_x1"][x0: x1, y1, z0] = self.dt / (3 * u0)
                         # self.Db["hz_x2"][x0: x1, y1, z0] = self.dt / (3 * u0)
 
-                        dt = self.dt
-                        sig_m = 1e12
+                        # dt = self.dt
+                        # sig_m = 1e12
 
                         # # Da = (2 * u0 - (sigm_0 * dt)) / (2 * u0 + (sigm_0 * dt))
                         # print(x0, y1, z0)

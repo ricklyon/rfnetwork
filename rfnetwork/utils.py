@@ -120,7 +120,8 @@ def coupled_sline_fringing_cap(w: float, s: float, b: float, er: float):
 
     # parallel plate capacitance, normalized by epsilon
     Cp = 2 * w / (b)
-    # fringing capacitance on the outer edges (not between the two lines), figure 5.05-10b, for t=0
+    # fringing capacitance on the outer edges (not between the two lines), figure 5.05-10b, for t=0.
+    # or Balanis Fields and wave equation 8-201
     Cf = 0.44
     # solve for even and odd fringing capacitances, equation 5.05-24 and 5.05-25
     Cf_e = (Ce / 2) - Cp - Cf
