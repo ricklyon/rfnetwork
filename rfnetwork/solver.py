@@ -70,9 +70,9 @@ class Solver_PCB():
         idx = []
         for i, g in enumerate(floc):
             diff = (g - position[i])
-            # if no cell is above the point, return the length of the axis, otherwise return the first cell that is 
-            # larger than the point.
-            idx += [np.argmax(diff >= -self._tol) if diff[-1] > -self._tol else len(g)]
+            # if no cell is above the point, return the last axis index, otherwise return the first cell that is 
+            # equal to or larger than the point.
+            idx += [np.argmax(diff >= -self._tol) if diff[-1] > -self._tol else len(g) - 1]
         
         return tuple(idx)
     
@@ -268,6 +268,21 @@ class Solver_PCB():
             hx=(Nx+1, Ny, Nz),
             hy=(Nx, Ny+1, Nz),
             hz=(Nx, Ny, Nz+1)
+        )
+
+        # pad the combined cell widths
+        # so edge components are assigned zero width
+        dx_hp = np.pad(dx_h, (1, 1))
+        dy_hp = np.pad(dy_h, (1, 1))
+        dz_hp = np.pad(dz_h, (1, 1))
+        # cell widths along the direction of the component
+        self.fcell_w = dict(
+            ex=(dx, dy_hp, dz_hp),
+            ey=(dx_hp, dy, dz_hp),
+            ez=(dx_hp, dy_hp, dz),
+            hx=(dx_hp, dy, dz),
+            hy=(dx, dy_hp, dz),
+            hz=(dx, dy, dz_hp)
         )
         
 
@@ -1138,35 +1153,37 @@ class Solver_PCB():
         else:
             raise NotImplementedError("Current face not supported in the given direction yet")
         
-    def add_voltage_probe(self, name: str, line: pv.PolyData):
+        
+    def add_line_probe(self, name: str, field: str, line: pv.PolyData):
         """
         
         """
-        dx, dy, dz = [conv.m_in(d) for d in self.d_cells]
-
-        if len(line.faces) > 1:
-            raise ValueError("Only line voltage probes are supported.")
-                
         # get axis that face is constant over (the normal axis)
         axis = np.argmax(np.any(np.diff(line.points, axis=0), axis=0))
+        # start and end position of the line, end in inclusive
+        line_start, line_end = np.min(line.points, axis=0), np.max(line.points, axis=0)
+        # field indices of the line end points
+        ijk_start = self.field_pos_to_idx(line_start, field)
+        ijk_end = self.field_pos_to_idx(line_end, field)
+        # number of probes along line
+        n_probes = ijk_end[axis] - ijk_start[axis] + 1
 
-        # minimum and maximum extents of current face
-        pmin, pmax = np.min(line.points, axis=0), np.max(line.points, axis=0)
+        # break out into indices for each probe, indices are constant if not on the line axis
+        ijk_probes = np.broadcast_to(ijk_start, (n_probes, 3)).copy()
+        ijk_probes[:, axis] = np.arange(ijk_start[axis], ijk_end[axis] + 1)
 
-        if axis == 2: # voltage is along z-axis
-            # all components have the same x-index and y-index
-            xyz_min = self.field_pos_to_idx(pmin, "ez")
-            xyz_max = self.field_pos_to_idx(pmax, "ez")
+        # cell widths at field components
+        fcell_w = self.fcell_w[field]
 
-            # add probes along the axis between both endpoints
-            i = 0
-            for z in np.arange(xyz_min[2], xyz_max[2]):
-                self.probes[f"{name}_{i}"] = dict(field="ez", index=(xyz_min[0], xyz_min[1], z), d=-dz[z])
-                i += 1
+        # direction of line, +1 if oriented along positive axis direction, -1 if along negative direction
+        direction = 1 if line_end[axis] > line_start[axis] else -1
 
-        else:
-            raise NotImplementedError("Voltage probe not supported in the given direction yet")
-      
+        for i, idx in enumerate(ijk_probes):
+            # get cell width along the given axis
+            cw = [fcell_w[axis][i] for axis, i in enumerate(idx)][axis]
+            self.probes[f"{name}_{i}"] = dict(field=field, index=(idx), d=direction * conv.m_in(cw))
+        
+        
     def render(self, show_probes=False, point_size=15) -> pv.Plotter:
         """
         Plot the model geometry
@@ -1270,6 +1287,10 @@ class Solver_PCB():
         )
         
         return plotter
+    
+    def line_probe_values(self, name: str):
+
+        return np.array([p["values"] for k, p in self.probes.items() if k[:len(name)] == name])
 
     def vi_probe_values(self, name: str):
         """
