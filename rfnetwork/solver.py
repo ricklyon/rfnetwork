@@ -76,7 +76,7 @@ class Solver_PCB():
         
         return tuple(idx)
     
-    def init_mesh(self, d0, n0, d_pec, n_min_pec, d_sub, n_min_sub, blend_pec = False):
+    def init_mesh(self, d0, d_edge, n0=2):
         """
         Initialize the spatial grid.
         """
@@ -121,35 +121,50 @@ class Solver_PCB():
 
             dmax_axis = []  # maximum sub-cell size within each cell
             nmin_axis = []  # minimum number of sub-cells within each cell
-            is_pec_axis = []
+            # is_pec_axis = []
 
             for i, cell_w in enumerate(d_axis_const):
                 # edges of this cell
-                cell_min, cell_max = edges[axis][i:i+2]
+                # cell_min, cell_max = edges[axis][i:i+2]
                 # if the cell is inside a PEC object, use PEC mesh settings
-                is_pec = False
-                if np.any((cell_min + self._tol >= pec_bounds[axis][:, 0]) & (cell_max - self._tol <= pec_bounds[axis][:, 1])):
-                    # divide cell into sub-cells that are no larger than d_pec, and at least n_min_pec cells
-                    n_min = n_min_pec
-                    d_max = d_pec
-                    is_pec = True
-                # if on the z-axis and cell is inside a substrate, use substrate mesh settings
-                elif axis == 2 and (cell_max - self._tol) <= sub_z_max:
-                    n_min = n_min_sub
-                    d_max = d_sub
-                # otherwise use global settings
-                else:
-                    n_min = n0
-                    d_max = d0 
+                # is_pec = False
+                # if np.any((cell_min + self._tol >= pec_bounds[axis][:, 0]) & (cell_max - self._tol <= pec_bounds[axis][:, 1])):
+                #     # divide cell into sub-cells that are no larger than d_pec, and at least n_min_pec cells
+                #     n_min = n_min_pec
+                #     d_max = d_pec
+                #     is_pec = True
+                # # if on the z-axis and cell is inside a substrate, use substrate mesh settings
+                # elif axis == 2 and (cell_max - self._tol) <= sub_z_max:
+                #     n_min = n_min_sub
+                #     d_max = d_sub
+                # # otherwise use global settings
+                # else:
+                n_min = n0
+                d_max = d0 
+
+                # if in PEC, add a small edge sub-cell on either side of the PEC edge
+                if (i > 0):
+                    # make the last cell shorter to compensate for adding a new d_edge cell
+                    d_axis[-1] -= d_edge
+                    # make the current shorter 
+                    cell_w -= d_edge
+                    # add new sub-cells around the edge
+                    dmax_axis += [d_edge, d_edge]
+                    nmin_axis += [1, 1]
+                    d_axis += [d_edge, d_edge]
+                    # is_pec_axis += [is_pec_axis[-1], is_pec]
 
                 # split cells larger than d0*5 into two cells, this prevents large cells bounded by 
                 # equal sized small ones from being broken up into small cells, and instead ensures
                 # the span is graded from small widths to large, and then back down to small widths.
-                n_split = 1
                 split_threshold = d0 * 5
-                if cell_w > split_threshold:
+                if int(cell_w / split_threshold) > 2:
                     n_split = int(cell_w / split_threshold)
                     # split cell width into equal parts
+                    cell_w = cell_w / n_split
+                # split cells into two sub-cells
+                else:
+                    n_split = 2
                     cell_w = cell_w / n_split
                     
                 # estimate the minimum number of sub-cells this cell must be broken into so no sub-cell is larger
@@ -161,7 +176,7 @@ class Solver_PCB():
                 nmin_axis += [n_min] * n_split
                 # update the cell width vector
                 d_axis += [cell_w] * n_split
-                is_pec_axis += [is_pec] * n_split
+                # is_pec_axis += [is_pec] * n_split
 
             # cells indices arranged from largest width to smallest
             # blend large cells first so they transition gradually into smaller ones.
@@ -171,15 +186,15 @@ class Solver_PCB():
             # Leave PEC cells for last so they don't blend up to the (typically) larger d0 cells
             d_order = np.flip(np.argsort(d_axis))
 
-            if not blend_pec:
-                # don't blend in PEC cells, put these first in the blending order so non-PEC surrounding cells 
-                # are forced to match to the minimum PEC cell width instead of the maximum
-                n_pec = np.count_nonzero(is_pec_axis)
-                pec_ordered = np.flip(np.argsort(is_pec_axis))[:n_pec]
-                # remove pec indices to get list of non-pec indices in d_axis, put pec first in d_order
-                indices_to_remove = [i for i, d in enumerate(d_order) if is_pec_axis[d]]
-                non_pec_ordered = np.delete(d_order, indices_to_remove)
-                d_order = np.concatenate([pec_ordered, non_pec_ordered])
+            # if not blend_pec:
+            #     # don't blend in PEC cells, put these first in the blending order so non-PEC surrounding cells 
+            #     # are forced to match to the minimum PEC cell width instead of the maximum
+            #     n_pec = np.count_nonzero(is_pec_axis)
+            #     pec_ordered = np.flip(np.argsort(is_pec_axis))[:n_pec]
+            #     # remove pec indices to get list of non-pec indices in d_axis, put pec first in d_order
+            #     indices_to_remove = [i for i, d in enumerate(d_order) if is_pec_axis[d]]
+            #     non_pec_ordered = np.delete(d_order, indices_to_remove)
+            #     d_order = np.concatenate([pec_ordered, non_pec_ordered])
 
             d_sides = [(d, d) for d in dmax_axis] # sub-cell widths on left and right edge of the cells
             
@@ -189,25 +204,25 @@ class Solver_PCB():
                 dprev = d_sides[i - 1][1] if i > 0 else dmax_axis[i]
                 dnext = d_sides[i + 1][0] if i < len(d_axis) - 1 else dmax_axis[i]
 
-                # if PEC cell, use constant cell widths matched to the smallest adjacent cell if not using blend pec
-                if is_pec_axis[i] and not blend_pec:
-                    min_neighbor_w = min(dprev, dnext)
-                    # minimum number of sub-cells this cell must be broken up into
-                    n = int(np.clip(d_axis[i] / dmax_axis[i], nmin_axis[i], None))
+                # # if PEC cell, use constant cell widths matched to the smallest adjacent cell if not using blend pec
+                # if is_pec_axis[i] and not blend_pec:
+                #     min_neighbor_w = min(dprev, dnext)
+                #     # minimum number of sub-cells this cell must be broken up into
+                #     n = int(np.clip(d_axis[i] / dmax_axis[i], nmin_axis[i], None))
 
-                    # match cell size to the smallest neighboring cell if it meets the min number of sub-cells needed
-                    # for this cell
-                    if min_neighbor_w < (d_axis[i] / n):
-                        rmd = (d_axis[i] % min_neighbor_w)
-                        n_subcell = int(d_axis[i] // min_neighbor_w)
-                        sub_cell_w = np.array([min_neighbor_w + (rmd / n_subcell)] * n_subcell, dtype=dtype_)
-                    # otherwise, break up into the number of required cells
-                    else:
-                        sub_cell_w = np.array([d_axis[i] / n] * n)
-                else:
-                    sub_cell_w = list(
-                        utils.blend_cell_widths(dprev, dnext, d_axis[i], n_min = nmin_axis[i], tol=self._tol)
-                    )
+                #     # match cell size to the smallest neighboring cell if it meets the min number of sub-cells needed
+                #     # for this cell
+                #     if min_neighbor_w < (d_axis[i] / n):
+                #         rmd = (d_axis[i] % min_neighbor_w)
+                #         n_subcell = int(d_axis[i] // min_neighbor_w)
+                #         sub_cell_w = np.array([min_neighbor_w + (rmd / n_subcell)] * n_subcell, dtype=dtype_)
+                #     # otherwise, break up into the number of required cells
+                #     else:
+                #         sub_cell_w = np.array([d_axis[i] / n] * n)
+                # else:
+                sub_cell_w = list(
+                    utils.blend_cell_widths(dprev, dnext, d_axis[i], n_min = nmin_axis[i], tol=self._tol)
+                )
 
                 d_subcells[i] = sub_cell_w
                 d_sides[i] = (sub_cell_w[0], sub_cell_w[-1])
