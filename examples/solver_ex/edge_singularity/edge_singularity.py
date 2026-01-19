@@ -11,6 +11,8 @@ from pathlib import Path
 
 dir_ = Path(__file__).parent
 
+DATA_DIR = dir_ / "data"
+
 
 pv.set_jupyter_backend("trame")
 np.set_printoptions(suppress=True)
@@ -83,33 +85,33 @@ self = s
 # n_min_sub=4
 # n0 = 2
 
-run_ref = False
+# run_ref = False
 
-if run_ref:
-    d_pec = 0.0025 # 0.01 # 0.0025 
-else:
-    d_pec = 0.01
+# if run_ref:
+#     d_pec = 0.0025 # 0.01 # 0.0025 
+# else:
+#     d_pec = 0.01
 
-s.init_mesh(d0 = 0.01, n0 = 3, d_pec = d_pec, n_min_pec=3, d_sub=0.005, n_min_sub=8, blend_pec=False)
+s.init_mesh(d0 = 0.02, d_edge=0.005)
 s.init_coefficients()
 
 s.init_ports()
 s.add_xPML(side="upper")
 
-s.init_pec(hy_CF=3, hx_CF=3, hz_CF=1/3)
+s.init_pec(edge_correction=False)
 
 s.add_field_monitor("hz", "hz", "z", sub_h, 1)
 s.add_field_monitor("ey", "ey", "z", sub_h, 1)
 s.add_field_monitor("ex", "ex", "z", sub_h, 1)
 
 s.add_current_probe("c1", current_face)
-s.add_voltage_probe("v1", voltage_line1)
-s.add_voltage_probe("v2", voltage_line2)
+s.add_line_probe("v1", "ez", voltage_line1)
+s.add_line_probe("v2", "ez", voltage_line2)
 
 
-plotter = s.render(show_probes=True)
-plotter.camera_position = "yz"
-plotter.show()
+# plotter = s.render(show_probes=True)
+# plotter.camera_position = "yz"
+# plotter.show()
 
 
 Db_0 = s.dt / u0
@@ -117,9 +119,9 @@ Cb_0 = s.dt / e0
 # p = s.plot_cooeficients("ex_z", "b", "z", sub_h, point_size=15, cmap="brg", normalization=Cb_0)
 # p.camera_position = "xy"
 # p.show()
-p = s.plot_cooeficients("hy_x1", "b", "x", 0, point_size=15, cmap="brg", normalization=Db_0)
-p.camera_position = "yz"
-p.show()
+# p = s.plot_cooeficients("hy_x1", "b", "x", 0, point_size=15, cmap="brg", normalization=Db_0)
+# p.camera_position = "yz"
+# p.show()
 
 
 
@@ -147,25 +149,6 @@ t_sample = 72e-12
 line_i = self.vi_probe_values("c1")
 line_v1 = self.vi_probe_values("v1")
 line_v2 = self.vi_probe_values("v2")
-
-if run_ref:
-    np.save("line_v1_ref", line_v1)
-    np.save("line_i1_ref", line_i)
-    np.save("ref_time", t)
-
-line_i_ref = np.load(dir_ / "line_i1_ref.npy")
-line_v1_ref = np.load(dir_ / "line_v1_ref.npy")
-t_ref = np.load(dir_ / "ref_time.npy")
-
-plt.figure()
-plt.plot(t_ref, line_v1_ref)
-plt.plot(t, line_v1)
-mplm.line_marker(x=t_sample)
-
-plt.figure()
-plt.plot(t_ref, line_i_ref)
-plt.plot(t, line_i)
-mplm.line_marker(x=t_sample)
 
 
 
@@ -197,7 +180,7 @@ def mon_yslice(monitor, t_sample):
 
 
 IP = utils.dtft(self.vi_probe_values("c1"), frequency, 1 / s.dt)
-VP = utils.dtft(self.vi_probe_values("v1"), frequency, 1 / s.dt) * np.exp(1j * 2 * np.pi * frequency * (-s.dt / 2))
+VP = utils.dtft(-self.vi_probe_values("v1"), frequency, 1 / s.dt) * np.exp(1j * 2 * np.pi * frequency * (-s.dt / 2))
 ZP = VP / IP
 
 fig, ax = plt.subplots()
@@ -208,101 +191,129 @@ plt.axhline(y=z_ref, linestyle=":", color="k")
 ax.set_xlabel("Frequency [GHz]")
 ax.set_ylabel("Impedance [Ohm]")
 mplm.line_marker(x = 10, axes=ax)
-
-S11_z = conv.gamma_z(ZP)
-
-# hz and ey components along y
-
-hz_yloc, hz_values = mon_yslice("hz", t_sample = t_sample)
-ey_yloc, ey_values = mon_yslice("ey", t_sample = t_sample)
-
-# d_pec = 0.0025
-if run_ref:
-    np.save("hz_fine_grid", hz_values)
-    np.save("hz_loc_fine_grid", hz_yloc)
-    np.save("ey_fine_grid", ey_values)
-    np.save("ey_loc_fine_grid", ey_yloc)
-
-hz_ref = np.load(dir_ / "hz_fine_grid.npy")
-hz_ref_loc = np.load(dir_ / "hz_loc_fine_grid.npy")
-ey_ref = np.load(dir_ / "ey_fine_grid.npy")
-ey_ref_loc = np.load(dir_ / "ey_loc_fine_grid.npy")
+ax.legend(["probe", "port"])
 
 
-# ez components along z below the trace
-n_sample = int(t_sample / self.dt)
-name = "v1"
-ez_values = np.array([p["values"][n_sample] for k, p in self.probes.items() if k[:len(name)] == name])
-ez_zloc = np.array([self.floc["ez"][2][p["index"][2]] for k, p in self.probes.items() if k[:len(name)] == name])
 
-if run_ref:
-    np.save("ez_fine_grid", ez_values)
-    np.save("ez_loc_fine_grid", ez_zloc)
+def debug(run_ref = False):
 
-ez_ref = np.load(dir_ / "ez_fine_grid.npy")
-ez_ref_loc = np.load(dir_ / "ez_loc_fine_grid.npy")
-
-# hy components above the trace
-self.probes["c1_2"]
-name = "c1"
-hy_values = np.array([p["values"][n_sample] for k, p in self.probes.items() if k[:len(name)] == name])[2:]
-hy_ylocs = np.array([self.floc["hy"][1][p["index"][1]] for k, p in self.probes.items() if k[:len(name)] == name])[2:]
-
-if run_ref:
-    np.save("hy_fine_grid", hy_values)
-    np.save("hy_loc_fine_grid", hy_ylocs)
-
-hy_ref = np.load(dir_ / "hy_fine_grid.npy")
-hy_ref_loc = np.load(dir_ / "hy_loc_fine_grid.npy")
-
-# plt.figure()
-# plt.plot(hy_ref_loc[::2], hy_ref[::2] * conv.m_in(0.0025))
-# plt.plot(hy_ylocs[::2], hy_values[::2] * conv.m_in(0.01))
-
-plt.figure()
-plt.plot(hy_ref_loc[::2], hy_ref[::2], marker=".")
-plt.plot(hy_ylocs[::2], hy_values[::2], marker=".")
-plt.xlabel("y [in]")
-plt.ylabel("Hy")
-plt.title("Hy Below Trace")
-
-plt.figure()
-plt.plot(hy_ref_loc[1::2], hy_ref[1::2], marker=".")
-plt.plot(hy_ylocs[1::2], hy_values[1::2], marker=".")
-plt.xlabel("y [in]")
-plt.ylabel("Hy")
-plt.title("Hy Above Trace")
+    if run_ref:
+        np.save("line_v1_ref", line_v1)
+        np.save("line_i1_ref", line_i)
+        np.save("ref_time", t)
 
 
-ez_ref = np.load(dir_ / "ez_fine_grid.npy")
-ez_ref_loc = np.load(dir_ / "ez_loc_fine_grid.npy")
+    line_i_ref = np.load(DATA_DIR / "line_i1_ref.npy")
+    line_v1_ref = np.load(DATA_DIR / "line_v1_ref.npy")
+    t_ref = np.load(DATA_DIR / "ref_time.npy")
 
-plt.figure()
-plt.plot(ez_ref_loc, ez_ref, marker=".")
-plt.plot(ez_zloc, ez_values, marker=".")
-plt.xlabel("z [in]")
-plt.ylabel("Ez")
+    plt.figure()
+    plt.plot(t_ref, line_v1_ref)
+    plt.plot(t, line_v1)
+    mplm.line_marker(x=t_sample)
 
-# hz and ey in the plane of the trace along y
-# plt.figure()
-
-# plt.plot(hz_ref_loc, hz_ref, marker=".")
-# plt.plot(hz_yloc, hz_values, marker=".")
-# plt.xlabel("y [in]")
-# plt.ylabel("Hz")
-
-# plt.figure()
-# plt.plot(ey_ref_loc, ey_ref, marker=".")
-# plt.plot(ey_yloc, ey_values, marker=".")
-# plt.xlabel("y [in]")
-# plt.ylabel("Ey")
+    plt.figure()
+    plt.plot(t_ref, line_i_ref)
+    plt.plot(t, line_i)
+    mplm.line_marker(x=t_sample)
 
 
-# fig, ax = plt.subplots()
-# rfn.plots.draw_smithchart(ax)
-# plt.plot(S11.real, S11.imag)
-# plt.plot(S11_z.real, S11_z.imag)
+    S11_z = conv.gamma_z(ZP)
 
-# fig, ax = plt.subplots()
-# plt.plot(frequency, conv.db20_lin(S11))
-plt.show()
+    # hz and ey components along y
+
+    hz_yloc, hz_values = mon_yslice("hz", t_sample = t_sample)
+    ey_yloc, ey_values = mon_yslice("ey", t_sample = t_sample)
+
+    # d_pec = 0.0025
+    if run_ref:
+        np.save(DATA_DIR / "hz_fine_grid", hz_values)
+        np.save(DATA_DIR / "hz_loc_fine_grid", hz_yloc)
+        np.save(DATA_DIR / "ey_fine_grid", ey_values)
+        np.save(DATA_DIR / "ey_loc_fine_grid", ey_yloc)
+
+    hz_ref = np.load(DATA_DIR / "hz_fine_grid.npy")
+    hz_ref_loc = np.load(DATA_DIR / "hz_loc_fine_grid.npy")
+    ey_ref = np.load(DATA_DIR / "ey_fine_grid.npy")
+    ey_ref_loc = np.load(DATA_DIR / "ey_loc_fine_grid.npy")
+
+
+    # ez components along z below the trace
+    n_sample = int(t_sample / self.dt)
+    name = "v1"
+    ez_values = np.array([p["values"][n_sample] for k, p in self.probes.items() if k[:len(name)] == name])
+    ez_zloc = np.array([self.floc["ez"][2][p["index"][2]] for k, p in self.probes.items() if k[:len(name)] == name])
+
+    if run_ref:
+        np.save(DATA_DIR / "ez_fine_grid", ez_values)
+        np.save(DATA_DIR / "ez_loc_fine_grid", ez_zloc)
+
+    ez_ref = np.load(DATA_DIR / "ez_fine_grid.npy")
+    ez_ref_loc = np.load(DATA_DIR / "ez_loc_fine_grid.npy")
+
+    # hy components above the trace
+    self.probes["c1_2"]
+    name = "c1"
+    hy_values = np.array([p["values"][n_sample] for k, p in self.probes.items() if k[:len(name)] == name])[2:]
+    hy_ylocs = np.array([self.floc["hy"][1][p["index"][1]] for k, p in self.probes.items() if k[:len(name)] == name])[2:]
+
+    if run_ref:
+        np.save(DATA_DIR / "hy_fine_grid", hy_values)
+        np.save(DATA_DIR / "hy_loc_fine_grid", hy_ylocs)
+
+    hy_ref = np.load(DATA_DIR / "hy_fine_grid.npy")
+    hy_ref_loc = np.load(DATA_DIR / "hy_loc_fine_grid.npy")
+
+    # plt.figure()
+    # plt.plot(hy_ref_loc[::2], hy_ref[::2] * conv.m_in(0.0025))
+    # plt.plot(hy_ylocs[::2], hy_values[::2] * conv.m_in(0.01))
+
+    plt.figure()
+    plt.plot(hy_ref_loc[::2], hy_ref[::2], marker=".")
+    plt.plot(hy_ylocs[::2], hy_values[::2], marker=".")
+    plt.xlabel("y [in]")
+    plt.ylabel("Hy")
+    plt.title("Hy Below Trace")
+
+    plt.figure()
+    plt.plot(hy_ref_loc[1::2], hy_ref[1::2], marker=".")
+    plt.plot(hy_ylocs[1::2], hy_values[1::2], marker=".")
+    plt.xlabel("y [in]")
+    plt.ylabel("Hy")
+    plt.title("Hy Above Trace")
+
+
+    ez_ref = np.load(DATA_DIR / "ez_fine_grid.npy")
+    ez_ref_loc = np.load(DATA_DIR / "ez_loc_fine_grid.npy")
+
+    plt.figure()
+    plt.plot(ez_ref_loc, ez_ref, marker=".")
+    plt.plot(ez_zloc, ez_values, marker=".")
+    plt.xlabel("z [in]")
+    plt.ylabel("Ez")
+
+    # hz and ey in the plane of the trace along y
+    plt.figure()
+
+    plt.plot(hz_ref_loc, hz_ref, marker=".")
+    plt.plot(hz_yloc, hz_values, marker=".")
+    plt.xlabel("y [in]")
+    plt.ylabel("Hz")
+
+    plt.figure()
+    plt.plot(ey_ref_loc, ey_ref, marker=".")
+    plt.plot(ey_yloc, ey_values, marker=".")
+    plt.xlabel("y [in]")
+    plt.ylabel("Ey")
+
+
+    fig, ax = plt.subplots()
+    rfn.plots.draw_smithchart(ax)
+    plt.plot(S11.real, S11.imag)
+    plt.plot(S11_z.real, S11_z.imag)
+
+    fig, ax = plt.subplots()
+    plt.plot(frequency, conv.db20_lin(S11))
+    plt.show()
+
+debug()

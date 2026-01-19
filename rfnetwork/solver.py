@@ -423,7 +423,7 @@ class Solver_PCB():
             hz_y2 = np.ones((Nx, Ny, Nz+1), dtype=dtype_) * Db_0,
         )
 
-    def init_pec(self, hx_CF=1, hy_CF=1, hz_CF=1):
+    def init_pec(self, edge_correction=False):
         # initialize the PEC faces
         # this should be called after setting the PML layers
 
@@ -431,7 +431,7 @@ class Solver_PCB():
 
         dx_h, dy_h, dz_h = [conv.m_in(d) for d in self.dh_cells]
 
-        edge_correction=True
+        
 
         # PEC pattern
         for name, pec in self.pec_face.items():
@@ -532,10 +532,6 @@ class Solver_PCB():
                         x0, y0, z0 = self.field_pos_to_idx(np.min(pec.points, axis=0), "ex")
                         x1, y1, z1 = self.field_pos_to_idx(np.max(pec.points, axis=0), "ex")
 
-                        x1 = np.clip(x1, 0, self.fshape["ex"][0])
-                        # ex edge correction
-                        eps = self.eps_ex[x0: x1, y0, z0] * 1.0
-                        mu = u0 * 1.0
                         # self.Ca["ex_y"][x0: x1, y0, z0] = 1
                         # self.Cb["ex_y"][x0: x1, y0, z0] = (self.dt / (eps)) 
                         # self.Ca["ex_z"][x0: x1, y0, z0] = 1
@@ -544,139 +540,50 @@ class Solver_PCB():
                         # self.Db["hy_z2"][x0: x1, y0, z0-1] = 0
                         # self.Db["hy_z1"][x0: x1, y0, z0] = 0
 
-                        a = 1e-20
                         # self.Db["hz_y1"][x0: x1, y0-1, z0] *= hy_CF
                         # self.Db["hz_y2"][x0: x1, y0-1, z0] *= hy_CF
-
-                        # hy in the same plane as the trace
-                        self.Db["hz_x2"][x0: x1, y0-1, z0] *= hz_CF
-                        self.Db["hz_x1"][x0: x1, y0-1, z0] *= hz_CF
+                        CF = 2 * np.sqrt(1/2)
+                        # hz in the same plane as the trace
+                        self.Db["hz_y2"][x0: x1, y0-1, z0] *= 1 / CF
+                        self.Db["hz_y1"][x0: x1, y0-1, z0] *= 1 / CF
 
                         # hy directly above and below trace edge
-                        self.Db["hy_x1"][x0: x1, y0, z0-1] *= hy_CF
-                        self.Db["hy_x2"][x0: x1, y0, z0-1] *= hy_CF
-                        self.Db["hy_x1"][x0: x1, y0, z0] *= hy_CF
-                        self.Db["hy_x2"][x0: x1, y0, z0] *= hy_CF
+                        self.Db["hy_z1"][x0: x1, y0, z0-1] *= 1 / CF
+                        self.Db["hy_z2"][x0: x1, y0, z0-1] *= 1 / CF
+                        self.Db["hy_z1"][x0: x1, y0, z0] *= 1 / CF
+                        self.Db["hy_z2"][x0: x1, y0, z0] *= 1 / CF
 
-                        # hy below the trace, correct ez component on the edge
-                        self.Db["hx_y2"][x0+1: x1-1, y0-1, z0-1] *= hx_CF
-                        self.Db["hx_y1"][x0+1: x1-1, y0, z0-1] *= hx_CF
+                        # hx below the trace, correct ez component on the edge
+                        self.Db["hx_y2"][x0+1: x1-1, y0-1, z0-1] *= CF
+                        self.Db["hx_y1"][x0+1: x1-1, y0, z0-1] *= CF
                         # hy above the trace, correct the ez component on the edge
-                        self.Db["hx_y2"][x0+1: x1-1, y0-1, z0] *= hx_CF
-                        self.Db["hx_y1"][x0+1: x1-1, y0, z0] *= hx_CF
+                        self.Db["hx_y2"][x0+1: x1-1, y0-1, z0] *= CF
+                        self.Db["hx_y1"][x0+1: x1-1, y0, z0] *= CF
 
-                        
-                        # self.Db["hy_z2"][x0: x1, y0, z0-1] = 0 #self.dt / (mu * 100000)
-                        # self.Db["hy_z1"][x0: x1, y0, z0] = 0 #self.dt / (mu * 100000)
-
-                        # dt = self.dt
-                        # sig_m = 1e12
-
-                        # self.Da["hz_x"][: x1, y0, z0] = (2 * u0 - (sig_m * dt)) / (2 * u0 + (sig_m * dt))
-                        # self.Db["hz_x1"][: x1, y0, z0] = (2 * dt) / ((2 * u0 + (sig_m * dt))) 
-                        # self.Db["hz_x2"][: x1, y0, z0] = (2 * dt) / ((2 * u0 + (sig_m * dt))) 
-
-                        # self.Db["hz_y1"][x0: x1, y0, z0] = 0 #self.dt / (mu)
-                        # self.Db["hz_y2"][x0: x1, y0-1, z0] = 0 #self.dt / (mu * 10)
-
-
-
-                        # self.Ca["ex_z"][x0: x1, y0, z0] = 1
-                        # self.Cb["ex_z"][x0: x1, y0, z0] = (self.dt / (eps)) 
-
-                        # self.Cb["ey_x"][x0: x1+1, y0-1, z1] *= (dx[x0: x1+1] / (dx[x0: x1+1] * 0.8))
-
-                        # self.Db["hy_x"][x0: x1, y0, z1-1] = self.dt / (2 * u0)
-                        # self.Db["hy_x"][x0: x1, y0, z1] = self.dt / (2 * u0)
-
-                        # self.Cb["ez_x"][x0: x1, y0, z1-1] *= (dx[x0: x1] / (dx[x0: x1] * 0.9))
-                        # self.Cb["ez_x"][x0: x1, y0, z1] *= (dx[x0: x1] / (dx[x0: x1] * 0.9))
-
-                        # self.Cb["ex_z"][x0: x1, y0, z0] = 2 * (self.dt / eps) 
-
-                        # self.Db["hz_x"][x0: x1, y0-1, z0] = self.dt / (20 * u0)
-                        # self.Db["hz_y"][x0: x1, y0-1, z0] = self.dt / (0.05 * u0)
+                    
 
                     if len(y1_ports) == 0:
                         x0, y0, z0 = self.field_pos_to_idx(np.min(pec.points, axis=0), "ex")
                         x1, y1, z1 = self.field_pos_to_idx(np.max(pec.points, axis=0), "ex")
 
-                        # x1 = np.clip(x1, 0, self.fshape["ex"][0])
-                        # x1 = np.clip(x1, 0, self.fshape["ex"][0])
-                        # ex edge correction
-                        eps = self.eps_ex[x0: x1, y1, z0] * 1.0
-                        mu = u0 * 1.0
+                        CF = 2 * np.sqrt(1/2)
 
-                        # a = 1e-20
-                        # self.Db["hz_y1"][x0: x1, y1, z0] *= hy_CF
-                        # self.Db["hz_y2"][x0: x1, y1, z0] *= hy_CF
-
-                        # hy in the same plane as the trace
-                        self.Db["hz_x1"][x0: x1, y1, z0] *= hz_CF
-                        self.Db["hz_x2"][x0: x1, y1, z0] *= hz_CF
+                        # hz in the same plane as the trace
+                        self.Db["hz_y1"][x0: x1, y1, z0] *= 1 / CF
+                        self.Db["hz_y2"][x0: x1, y1, z0] *= 1 / CF
 
                         # hy directly above and below trace edge
-                        self.Db["hy_x1"][x0: x1, y1, z0-1] *= hy_CF
-                        self.Db["hy_x2"][x0: x1, y1, z0-1] *= hy_CF
-                        self.Db["hy_x1"][x0: x1, y1, z0] *= hy_CF
-                        self.Db["hy_x2"][x0: x1, y1, z0] *= hy_CF
+                        self.Db["hy_z1"][x0: x1, y1, z0-1] *= 1 / CF
+                        self.Db["hy_z2"][x0: x1, y1, z0-1] *= 1 / CF
+                        self.Db["hy_z1"][x0: x1, y1, z0] *= 1 / CF
+                        self.Db["hy_z2"][x0: x1, y1, z0] *= 1 / CF
 
                         # hy below the trace, correct ez component on the edge
-                        self.Db["hx_y2"][x0+1: x1-1, y1-1, z0-1] *= hx_CF
-                        self.Db["hx_y1"][x0+1: x1-1, y1, z0-1] *= hx_CF
+                        self.Db["hx_y2"][x0+1: x1-1, y1-1, z0-1] *= CF
+                        self.Db["hx_y1"][x0+1: x1-1, y1, z0-1] *= CF
                         # hy above the trace, correct the ez component on the edge
-                        self.Db["hx_y2"][x0+1: x1-1, y1-1, z0] *= hx_CF
-                        self.Db["hx_y1"][x0+1: x1-1, y1, z0] *= hx_CF
-
-                        # self.Ca["ex_y"][x0: x1, y1, z0] = 1
-                        # self.Cb["ex_y"][x0: x1, y1, z0] = (self.dt / eps) 
-                        # self.Ca["ex_z"][x0: x1, y1, z0] = 1
-                        # self.Cb["ex_z"][x0: x1, y1, z0] = (self.dt / eps) 
-
-                        # self.Db["hz_y1"][x0: x1, y1, z0] = 0
-                        # self.Db["hz_y2"][x0: x1, y1-1, z0] = 0
-
-                        # self.Db["hy_z2"][x0: x1, y1, z0-1] =  0# self.dt / (mu * 100000)
-                        # self.Db["hy_z1"][x0: x1, y1, z0] = 0 #self.dt / (mu * 100000)
-
-                        # self.Db["hz_x1"][x0: x1, y1, z0] = self.dt / (3 * u0)
-                        # self.Db["hz_x2"][x0: x1, y1, z0] = self.dt / (3 * u0)
-
-                        # dt = self.dt
-                        # sig_m = 1e12
-
-                        # # Da = (2 * u0 - (sigm_0 * dt)) / (2 * u0 + (sigm_0 * dt))
-                        # print(x0, y1, z0)
-                        # self.Da["hz_x"][: x1, y1-1, z0] = (2 * u0 - (sig_m * dt)) / (2 * u0 + (sig_m * dt))
-                        # self.Db["hz_x1"][: x1, y1-1, z0] = (2 * dt) / ((2 * u0 + (sig_m * dt))) 
-                        # self.Db["hz_x2"][: x1, y1-1, z0] = (2 * dt) / ((2 * u0 + (sig_m * dt))) 
-
-                        # self.Da["hz_x"][x0: x1, y1, z0] = (2 * u0 - (sig_m * dt)) / (2 * u0 + (sig_m * dt))
-                        # self.Db["hz_x1"][x0: x1, y1, z0] = (2 * dt) / ((2 * u0 + (sig_m * dt))) 
-                        # self.Db["hz_x2"][x0: x1, y1, z0] = (2 * dt) / ((2 * u0 + (sig_m * dt))) 
-
-                        # self.Db["hz_y2"][h_idx] = (2 * dt) / ((2 * u0 + (sigma_m_hy * dt))) 
-
-                        # self.Db["hz_y1"][x0: x1, y1, z0] = 0 #self.dt / (mu)
-                        # self.Db["hz_y2"][x0: x1, y1-1, z0] = 0 # self.dt / (mu)
-                        # self.Db["hy_z2"][x0: x1, y1, z0-1] = 0
-                        # self.Db["hy_z1"][x0: x1, y1, z0] = 0
-
-                        # self.Ca["ex_z"][x0: x1, y1, z0] = 1
-                        # self.Cb["ex_z"][x0: x1, y1, z0] = (self.dt / eps) 
-
-                        # self.Cb["ey_x"][x0: x1+1, y1, z1] *= (dx[x0: x1+1] / (dx[x0: x1+1] * 0.8))
-
-                        # self.Db["hy_x"][x0: x1, y1, z1-1] = self.dt / (2 * u0)
-                        # self.Db["hy_x"][x0: x1, y1, z1] = self.dt / (2 * u0)
-
-                        # self.Cb["ez_x"][x0: x1, y1, z1-1] *= (dx[x0: x1] / (dx[x0: x1] * 0.9))
-                        # self.Cb["ez_x"][x0: x1, y0, z1] *= (dx[x0: x1] / (dx[x0: x1] * 0.9))
-
-                        # self.Cb["ex_z"][x0: x1, y1, z0] = 2 * (self.dt / eps) 
-
-                        # self.Db["hz_x"][x0: x1, y1, z0] = self.dt / (20 * u0)
-                        # self.Db["hz_y"][x0: x1, y1, z0] = self.dt / (0.05 * u0)
+                        self.Db["hx_y2"][x0+1: x1-1, y1-1, z0] *= CF
+                        self.Db["hx_y1"][x0+1: x1-1, y1, z0] *= CF
 
             else:
                 raise NotImplementedError(f"PEC face not supported yet in the given axis.")

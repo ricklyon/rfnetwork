@@ -76,6 +76,14 @@ ey_ms = pv.Line(
     [0, -ms_w, sub_h], [0, ms_w, sub_h]
 )
 
+hy_cross_ms = pv.Line(
+    [0, -ms_w, sub_h], [0, ms_w, sub_h]
+)
+
+hz_v_ms = pv.Line(
+    [0, -ms_w/2, 0], [0, -ms_w/2, sub_h]
+)
+
 
 
 s = rfn.Solver_PCB(sbox, nports=1)
@@ -86,8 +94,8 @@ s.add_lumped_port(1, port1_face)
 self = s
 
 d0 = 0.005
-d_pec = 0.001
-s.init_mesh(d0 = d0, n0 = 3, d_pec = d_pec, n_min_pec=3, d_sub=d_pec, n_min_sub=2, blend_pec=False)
+
+s.init_mesh(d0 = d0, d_edge=0.001)
 s.init_coefficients()
 
 s.init_ports()
@@ -105,6 +113,9 @@ s.add_line_probe("ez_ms_center", "ez", ez_ms_center)
 
 s.add_line_probe("hz_ms", "hz", hz_ms)
 s.add_line_probe("ey_ms", "ey", ey_ms)
+
+s.add_line_probe("hy_cross_ms", "hy", hy_cross_ms)
+s.add_line_probe("hz_v_ms", "hz", hz_v_ms)
 
 
 plotter = s.render(show_probes=True)
@@ -151,6 +162,14 @@ ey_loc1 = self.field_pos_to_idx((0, -ms_w, sub_h), "ey")[1]
 ey_loc2 = self.field_pos_to_idx((0, ms_w, sub_h), "ey")[1]
 ey_loc = s.floc["ey"][1][ey_loc1: ey_loc2+1]
 
+hy_cross_ms = self.line_probe_values("hy_cross_ms")
+hyc_loc1 = self.field_pos_to_idx((0, -ms_w, sub_h), "hy")[1]
+hyc_loc2 = self.field_pos_to_idx((0, ms_w, sub_h), "hy")[1]
+hyc_loc = s.floc["ey"][1][hyc_loc1: hyc_loc2+1]
+
+hz_v_ms = self.line_probe_values("hz_v_ms")
+hz_v_loc = s.floc["hz"][2][:len(hz_v_ms)]
+
 def analytical_edge(x, x0=0, y0=1, f0=1, v=1/2):
     r = (f0 / (x - x0) ** v) 
     return r - r[-1] + y0
@@ -165,8 +184,28 @@ plt.figure()
 plt.plot(ez_loc,  ez_ms_edge[:, n_sample], marker=".")
 plt.plot(ez_loc,  analytical_edge(ez_loc, x0=sub_h, f0=0.55, y0=ez_ms_edge[:, n_sample][-1]))
 
-# plt.plot(ez_loc,  ez_ms_center[:, n_sample], marker=".")
-plt.show()
+# numerical correction factor
+ez_idx = np.argmin(np.abs(ez_loc - sub_h)) + 1
+ez_zloc = ez_loc[ez_idx]
+ez_w = np.diff(ez_loc)
+cell_w = ez_w[ez_idx-1] / 2 + ez_w[ez_idx] / 2
+ez_v = ez_ms_edge[:, n_sample][ez_idx]
+
+f0 = ez_v * (cell_w / 2) ** (1/2)
+# f_r = (f0 / (ez_loc - sub_h) ** (1/2)) 
+
+r = np.linspace(0, sub_h * 2, 501)
+f_r = (f0 / (r) ** (1/2)) 
+
+plt.figure()
+plt.plot(ez_loc,  ez_ms_edge[:, n_sample], marker=".")
+plt.plot(r + sub_h,  f_r)
+
+# integrate along one cell width
+r_cell = np.linspace(1e-8, cell_w, 50001)
+f_r_cell = (f0 / (r_cell) ** (1/2)) 
+
+cf = np.trapezoid(f_r_cell, r_cell) / (ez_v * cell_w)
 
 plt.figure()
 plt.plot(hz_loc,  hz_ms[:, n_sample], marker=".")
@@ -177,4 +216,36 @@ plt.figure()
 plt.plot(ey_loc,  ey_ms[:, n_sample], marker=".")
 plt.plot(ey_loc, analytical_edge(ey_loc, x0=ms_w/2, f0=1, y0=ey_ms[:, n_sample][-1]))
 plt.show()
+
+# hy along y above and below the trace are singular just above and below the edge, but the Ex field that integrates
+# these fields is zero at the trace edge. The Ez field uses these as well at the trace edge which causes error.
+plt.figure()
+plt.plot(hyc_loc,  hy_cross_ms[:, n_sample], marker=".")
+plt.show()
+
+# the hz field is very small compared to other h fields around the trace and contributes less to the overall error.
+plt.figure()
+plt.plot(hz_v_loc,  hz_v_ms[:, n_sample], marker=".")
+plt.show()
+
+# fit curve using model without y offset
+y0 = ey_ms[:, n_sample][-7]
+x0 = ey_loc[-7]
+f0 = y0 * (x0 - ms_w/2) ** (1/2)
+fx = (f0 / (ey_loc - ms_w/2) ** (1/2)) 
+
+plt.figure()
+plt.plot(ey_loc,  ey_ms[:, n_sample], marker=".")
+plt.plot(ey_loc, fx)
+plt.show()
+
+y0 = ez_ms_edge[:, n_sample][-9]
+x0 = ez_loc[-9]
+f0 = y0 * (x0 - sub_h) ** (1/2)
+fx = (f0 / (ez_loc - sub_h) ** (1/2)) 
+
+plt.figure()
+plt.plot(ez_loc,  ez_ms_edge[:, n_sample], marker=".")
+plt.plot(ez_loc, fx)
+
 
