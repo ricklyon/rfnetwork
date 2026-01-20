@@ -120,8 +120,6 @@ class Solver_PCB():
             d_axis = []
 
             dmax_axis = []  # maximum sub-cell size within each cell
-            nmin_axis = []  # minimum number of sub-cells within each cell
-            # is_pec_axis = []
 
             for i, cell_w in enumerate(d_axis_const):
                 # edges of this cell
@@ -139,18 +137,16 @@ class Solver_PCB():
                 #     d_max = d_sub
                 # # otherwise use global settings
                 # else:
-                n_min = n0
-                d_max = d0 
 
                 # if in PEC, add a small edge sub-cell on either side of the PEC edge
                 if (i > 0):
                     # make the last cell shorter to compensate for adding a new d_edge cell
                     d_axis[-1] -= d_edge
+                    dmax_axis[-1] -= d_edge
                     # make the current shorter 
                     cell_w -= d_edge
                     # add new sub-cells around the edge
                     dmax_axis += [d_edge, d_edge]
-                    nmin_axis += [1, 1]
                     d_axis += [d_edge, d_edge]
                     # is_pec_axis += [is_pec_axis[-1], is_pec]
 
@@ -158,7 +154,7 @@ class Solver_PCB():
                 # equal sized small ones from being broken up into small cells, and instead ensures
                 # the span is graded from small widths to large, and then back down to small widths.
                 split_threshold = d0 * 5
-                if int(cell_w / split_threshold) > 2:
+                if int(cell_w / split_threshold) > 1:
                     n_split = int(cell_w / split_threshold)
                     # split cell width into equal parts
                     cell_w = cell_w / n_split
@@ -169,11 +165,9 @@ class Solver_PCB():
                     
                 # estimate the minimum number of sub-cells this cell must be broken into so no sub-cell is larger
                 # than d_max
-                cell_sub_n = np.clip(int(cell_w / d_max), n_min, None)
+                cell_sub_n = np.clip(int(cell_w / d0), 1, None)
                 # maximum distance of any sub-cell within this cell
                 dmax_axis += [cell_w / cell_sub_n] * n_split
-                # minimum number of sub-cells for this cell that is enforced by mesh settings
-                nmin_axis += [n_min] * n_split
                 # update the cell width vector
                 d_axis += [cell_w] * n_split
                 # is_pec_axis += [is_pec] * n_split
@@ -186,23 +180,14 @@ class Solver_PCB():
             # Leave PEC cells for last so they don't blend up to the (typically) larger d0 cells
             d_order = np.flip(np.argsort(d_axis))
 
-            # if not blend_pec:
-            #     # don't blend in PEC cells, put these first in the blending order so non-PEC surrounding cells 
-            #     # are forced to match to the minimum PEC cell width instead of the maximum
-            #     n_pec = np.count_nonzero(is_pec_axis)
-            #     pec_ordered = np.flip(np.argsort(is_pec_axis))[:n_pec]
-            #     # remove pec indices to get list of non-pec indices in d_axis, put pec first in d_order
-            #     indices_to_remove = [i for i, d in enumerate(d_order) if is_pec_axis[d]]
-            #     non_pec_ordered = np.delete(d_order, indices_to_remove)
-            #     d_order = np.concatenate([pec_ordered, non_pec_ordered])
-
             d_sides = [(d, d) for d in dmax_axis] # sub-cell widths on left and right edge of the cells
             
             d_subcells = [None] * len(d_axis)
             for i in d_order:
-                # previous and next cell width
-                dprev = d_sides[i - 1][1] if i > 0 else dmax_axis[i]
-                dnext = d_sides[i + 1][0] if i < len(d_axis) - 1 else dmax_axis[i]
+                # previous cell width. If on the edge of the grid, match to the next cell width
+                dprev = d_sides[i - 1][1] if i > 0 else d_sides[i+1][0]
+                # next cell width. If at the end of the grid, match to the previous cell
+                dnext = d_sides[i + 1][0] if i < len(d_axis) - 1 else d_sides[i-1][1]
 
                 # # if PEC cell, use constant cell widths matched to the smallest adjacent cell if not using blend pec
                 # if is_pec_axis[i] and not blend_pec:
@@ -221,7 +206,7 @@ class Solver_PCB():
                 #         sub_cell_w = np.array([d_axis[i] / n] * n)
                 # else:
                 sub_cell_w = list(
-                    utils.blend_cell_widths(dprev, dnext, d_axis[i], n_min = nmin_axis[i], tol=self._tol)
+                    utils.blend_cell_widths(dprev, dnext, d_axis[i], n_min = 1, tol=self._tol)
                 )
 
                 d_subcells[i] = sub_cell_w
@@ -1085,8 +1070,14 @@ class Solver_PCB():
         # start and end position of the line, end in inclusive
         line_start, line_end = np.min(line.points, axis=0), np.max(line.points, axis=0)
         # field indices of the line end points
-        ijk_start = self.field_pos_to_idx(line_start, field)
-        ijk_end = self.field_pos_to_idx(line_end, field)
+        ijk_start = list(self.field_pos_to_idx(line_start, field))
+        ijk_end = list(self.field_pos_to_idx(line_end, field))
+
+        # check if endpoint lands directly on a field component, if it doesn't, the last index shouldn't be
+        # included since field_pos_to_idx returns the index on or directly above the point.
+        if self.floc[field][axis][ijk_end[axis]] > (line_end[axis] + self._tol):
+            ijk_end[axis] -= 1
+
         # number of probes along line
         n_probes = ijk_end[axis] - ijk_start[axis] + 1
 

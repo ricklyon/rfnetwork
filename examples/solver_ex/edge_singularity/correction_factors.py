@@ -115,7 +115,10 @@ s.add_line_probe("hz_ms", "hz", hz_ms)
 s.add_line_probe("ey_ms", "ey", ey_ms)
 
 s.add_line_probe("hy_cross_ms", "hy", hy_cross_ms)
+s.add_line_probe("ez_cross_ms", "ez", hy_cross_ms)
+
 s.add_line_probe("hz_v_ms", "hz", hz_v_ms)
+
 
 
 plotter = s.render(show_probes=True)
@@ -155,17 +158,23 @@ ez_loc = s.floc["ez"][2][:len(ez_ms_edge)]
 hz_ms = self.line_probe_values("hz_ms")
 hz_loc1 = self.field_pos_to_idx((0, -ms_w, sub_h), "hz")[1]
 hz_loc2 = self.field_pos_to_idx((0, ms_w, sub_h), "hz")[1]
-hz_loc = s.floc["hz"][1][hz_loc1: hz_loc2+1]
+hz_loc = s.floc["hz"][1][hz_loc1: hz_loc2]
 
 ey_ms = self.line_probe_values("ey_ms")
 ey_loc1 = self.field_pos_to_idx((0, -ms_w, sub_h), "ey")[1]
 ey_loc2 = self.field_pos_to_idx((0, ms_w, sub_h), "ey")[1]
-ey_loc = s.floc["ey"][1][ey_loc1: ey_loc2+1]
+ey_loc = s.floc["ey"][1][ey_loc1: ey_loc2]
 
 hy_cross_ms = self.line_probe_values("hy_cross_ms")
 hyc_loc1 = self.field_pos_to_idx((0, -ms_w, sub_h), "hy")[1]
 hyc_loc2 = self.field_pos_to_idx((0, ms_w, sub_h), "hy")[1]
-hyc_loc = s.floc["ey"][1][hyc_loc1: hyc_loc2+1]
+hyc_loc = s.floc["hy"][1][hyc_loc1: hyc_loc2+1]
+
+ez_cross_ms = self.line_probe_values("ez_cross_ms")
+ezc_loc1 = self.field_pos_to_idx((0, -ms_w, sub_h), "ez")[1]
+ezc_loc2 = self.field_pos_to_idx((0, ms_w, sub_h), "ez")[1]
+ezc_loc = s.floc["ez"][1][ezc_loc1: ezc_loc2+1]
+
 
 hz_v_ms = self.line_probe_values("hz_v_ms")
 hz_v_loc = s.floc["hz"][2][:len(hz_v_ms)]
@@ -223,29 +232,44 @@ plt.figure()
 plt.plot(hyc_loc,  hy_cross_ms[:, n_sample], marker=".")
 plt.show()
 
+# ez along y above and below the trace
+plt.figure()
+plt.plot(ezc_loc,  ez_cross_ms[:, n_sample], marker=".")
+plt.show()
+
+# numerical correction factor
+ez_idx = np.argmin(np.abs(ezc_loc - ms_w/2))
+ez_zloc = ezc_loc[ez_idx]
+ez_w = np.diff(ezc_loc)
+cell_w = ez_w[ez_idx-1] / 2 + ez_w[ez_idx] / 2
+ezc_v = ez_cross_ms[:, n_sample][ez_idx]
+
+cf = np.trapezoid(ez_cross_ms[:, n_sample][ez_idx-1:ez_idx +2], ezc_loc[ez_idx-1:ez_idx +2]) / (ez_v * 2 *cell_w)
+
+
 # the hz field is very small compared to other h fields around the trace and contributes less to the overall error.
 plt.figure()
 plt.plot(hz_v_loc,  hz_v_ms[:, n_sample], marker=".")
 plt.show()
 
-# fit curve using model without y offset
-y0 = ey_ms[:, n_sample][-7]
-x0 = ey_loc[-7]
-f0 = y0 * (x0 - ms_w/2) ** (1/2)
-fx = (f0 / (ey_loc - ms_w/2) ** (1/2)) 
+# # fit curve using model without y offset
+# y0 = ey_ms[:, n_sample][-7]
+# x0 = ey_loc[-7]
+# f0 = y0 * (x0 - ms_w/2) ** (1/2)
+# fx = (f0 / (ey_loc - ms_w/2) ** (1/2)) 
 
-plt.figure()
-plt.plot(ey_loc,  ey_ms[:, n_sample], marker=".")
-plt.plot(ey_loc, fx)
-plt.show()
+# plt.figure()
+# plt.plot(ey_loc,  ey_ms[:, n_sample], marker=".")
+# plt.plot(ey_loc, fx)
+# plt.show()
 
-y0 = ez_ms_edge[:, n_sample][-9]
-x0 = ez_loc[-9]
-f0 = y0 * (x0 - sub_h) ** (1/2)
-fx = (f0 / (ez_loc - sub_h) ** (1/2)) 
+# y0 = ez_ms_edge[:, n_sample][-9]
+# x0 = ez_loc[-9]
+# f0 = y0 * (x0 - sub_h) ** (1/2)
+# fx = (f0 / (ez_loc - sub_h) ** (1/2)) 
 
-plt.figure()
-plt.plot(ez_loc,  ez_ms_edge[:, n_sample], marker=".")
-plt.plot(ez_loc, fx)
+# plt.figure()
+# plt.plot(ez_loc,  ez_ms_edge[:, n_sample], marker=".")
+# plt.plot(ez_loc, fx)
 
 

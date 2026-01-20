@@ -98,7 +98,7 @@ s.init_coefficients()
 s.init_ports()
 s.add_xPML(side="upper")
 
-s.init_pec(edge_correction=False)
+s.init_pec(edge_correction=True)
 
 s.add_field_monitor("hz", "hz", "z", sub_h, 1)
 s.add_field_monitor("ey", "ey", "z", sub_h, 1)
@@ -109,9 +109,9 @@ s.add_line_probe("v1", "ez", voltage_line1)
 s.add_line_probe("v2", "ez", voltage_line2)
 
 
-# plotter = s.render(show_probes=True)
-# plotter.camera_position = "yz"
-# plotter.show()
+plotter = s.render(show_probes=True)
+plotter.camera_position = "yz"
+plotter.show()
 
 
 Db_0 = s.dt / u0
@@ -137,7 +137,7 @@ sdata = s.get_sparameters(frequency)
 S11 = sdata[:, 0]
 
 
-p = s.plot_monitor(["ey"], el=0, zoom=1.1, az=0, view="xy", opacity=[0.8, 1], linear=False, cmap="jet", style="points")
+p = s.plot_monitor(["ey"], el=0, zoom=1.1, az=0, view="xy", opacity=[0.8, 1], linear=False, cmap="jet", style="surface")
 p.show(title="EM Solver")
 
 # p = s.plot_monitor(["mon3"], el=0, zoom=1.1, az=0, view="xy", opacity=[0.8, 1], linear=False, cmap="jet", style="points")
@@ -195,125 +195,125 @@ ax.legend(["probe", "port"])
 
 
 
-def debug(run_ref = False):
+run_ref = False
 
-    if run_ref:
-        np.save("line_v1_ref", line_v1)
-        np.save("line_i1_ref", line_i)
-        np.save("ref_time", t)
-
-
-    line_i_ref = np.load(DATA_DIR / "line_i1_ref.npy")
-    line_v1_ref = np.load(DATA_DIR / "line_v1_ref.npy")
-    t_ref = np.load(DATA_DIR / "ref_time.npy")
-
-    plt.figure()
-    plt.plot(t_ref, line_v1_ref)
-    plt.plot(t, line_v1)
-    mplm.line_marker(x=t_sample)
-
-    plt.figure()
-    plt.plot(t_ref, line_i_ref)
-    plt.plot(t, line_i)
-    mplm.line_marker(x=t_sample)
+if run_ref:
+    np.save("line_v1_ref", line_v1)
+    np.save("line_i1_ref", line_i)
+    np.save("ref_time", t)
 
 
-    S11_z = conv.gamma_z(ZP)
+line_i_ref = np.load(DATA_DIR / "line_i1_ref.npy")
+line_v1_ref = np.load(DATA_DIR / "line_v1_ref.npy")
+t_ref = np.load(DATA_DIR / "ref_time.npy")
 
-    # hz and ey components along y
+plt.figure()
+plt.plot(t_ref, line_v1_ref)
+plt.plot(t, line_v1)
+mplm.line_marker(x=t_sample)
 
-    hz_yloc, hz_values = mon_yslice("hz", t_sample = t_sample)
-    ey_yloc, ey_values = mon_yslice("ey", t_sample = t_sample)
-
-    # d_pec = 0.0025
-    if run_ref:
-        np.save(DATA_DIR / "hz_fine_grid", hz_values)
-        np.save(DATA_DIR / "hz_loc_fine_grid", hz_yloc)
-        np.save(DATA_DIR / "ey_fine_grid", ey_values)
-        np.save(DATA_DIR / "ey_loc_fine_grid", ey_yloc)
-
-    hz_ref = np.load(DATA_DIR / "hz_fine_grid.npy")
-    hz_ref_loc = np.load(DATA_DIR / "hz_loc_fine_grid.npy")
-    ey_ref = np.load(DATA_DIR / "ey_fine_grid.npy")
-    ey_ref_loc = np.load(DATA_DIR / "ey_loc_fine_grid.npy")
+plt.figure()
+plt.plot(t_ref, line_i_ref)
+plt.plot(t, line_i)
+mplm.line_marker(x=t_sample)
 
 
-    # ez components along z below the trace
-    n_sample = int(t_sample / self.dt)
-    name = "v1"
-    ez_values = np.array([p["values"][n_sample] for k, p in self.probes.items() if k[:len(name)] == name])
-    ez_zloc = np.array([self.floc["ez"][2][p["index"][2]] for k, p in self.probes.items() if k[:len(name)] == name])
+S11_z = conv.gamma_z(ZP)
 
-    if run_ref:
-        np.save(DATA_DIR / "ez_fine_grid", ez_values)
-        np.save(DATA_DIR / "ez_loc_fine_grid", ez_zloc)
+# hz and ey components along y
 
-    ez_ref = np.load(DATA_DIR / "ez_fine_grid.npy")
-    ez_ref_loc = np.load(DATA_DIR / "ez_loc_fine_grid.npy")
+hz_yloc, hz_values = mon_yslice("hz", t_sample = t_sample)
+ey_yloc, ey_values = mon_yslice("ey", t_sample = t_sample)
 
-    # hy components above the trace
-    self.probes["c1_2"]
-    name = "c1"
-    hy_values = np.array([p["values"][n_sample] for k, p in self.probes.items() if k[:len(name)] == name])[2:]
-    hy_ylocs = np.array([self.floc["hy"][1][p["index"][1]] for k, p in self.probes.items() if k[:len(name)] == name])[2:]
+# d_pec = 0.0025
+if run_ref:
+    np.save(DATA_DIR / "hz_fine_grid", hz_values)
+    np.save(DATA_DIR / "hz_loc_fine_grid", hz_yloc)
+    np.save(DATA_DIR / "ey_fine_grid", ey_values)
+    np.save(DATA_DIR / "ey_loc_fine_grid", ey_yloc)
 
-    if run_ref:
-        np.save(DATA_DIR / "hy_fine_grid", hy_values)
-        np.save(DATA_DIR / "hy_loc_fine_grid", hy_ylocs)
-
-    hy_ref = np.load(DATA_DIR / "hy_fine_grid.npy")
-    hy_ref_loc = np.load(DATA_DIR / "hy_loc_fine_grid.npy")
-
-    # plt.figure()
-    # plt.plot(hy_ref_loc[::2], hy_ref[::2] * conv.m_in(0.0025))
-    # plt.plot(hy_ylocs[::2], hy_values[::2] * conv.m_in(0.01))
-
-    plt.figure()
-    plt.plot(hy_ref_loc[::2], hy_ref[::2], marker=".")
-    plt.plot(hy_ylocs[::2], hy_values[::2], marker=".")
-    plt.xlabel("y [in]")
-    plt.ylabel("Hy")
-    plt.title("Hy Below Trace")
-
-    plt.figure()
-    plt.plot(hy_ref_loc[1::2], hy_ref[1::2], marker=".")
-    plt.plot(hy_ylocs[1::2], hy_values[1::2], marker=".")
-    plt.xlabel("y [in]")
-    plt.ylabel("Hy")
-    plt.title("Hy Above Trace")
+hz_ref = np.load(DATA_DIR / "hz_fine_grid.npy")
+hz_ref_loc = np.load(DATA_DIR / "hz_loc_fine_grid.npy")
+ey_ref = np.load(DATA_DIR / "ey_fine_grid.npy")
+ey_ref_loc = np.load(DATA_DIR / "ey_loc_fine_grid.npy")
 
 
-    ez_ref = np.load(DATA_DIR / "ez_fine_grid.npy")
-    ez_ref_loc = np.load(DATA_DIR / "ez_loc_fine_grid.npy")
+# ez components along z below the trace
+n_sample = int(t_sample / self.dt)
+name = "v1"
+ez_values = np.array([p["values"][n_sample] for k, p in self.probes.items() if k[:len(name)] == name])
+ez_zloc = np.array([self.floc["ez"][2][p["index"][2]] for k, p in self.probes.items() if k[:len(name)] == name])
 
-    plt.figure()
-    plt.plot(ez_ref_loc, ez_ref, marker=".")
-    plt.plot(ez_zloc, ez_values, marker=".")
-    plt.xlabel("z [in]")
-    plt.ylabel("Ez")
+if run_ref:
+    np.save(DATA_DIR / "ez_fine_grid", ez_values)
+    np.save(DATA_DIR / "ez_loc_fine_grid", ez_zloc)
 
-    # hz and ey in the plane of the trace along y
-    plt.figure()
+ez_ref = np.load(DATA_DIR / "ez_fine_grid.npy")
+ez_ref_loc = np.load(DATA_DIR / "ez_loc_fine_grid.npy")
 
-    plt.plot(hz_ref_loc, hz_ref, marker=".")
-    plt.plot(hz_yloc, hz_values, marker=".")
-    plt.xlabel("y [in]")
-    plt.ylabel("Hz")
+# hy components above the trace
+self.probes["c1_2"]
+name = "c1"
+hy_values = np.array([p["values"][n_sample] for k, p in self.probes.items() if k[:len(name)] == name])[2:]
+hy_ylocs = np.array([self.floc["hy"][1][p["index"][1]] for k, p in self.probes.items() if k[:len(name)] == name])[2:]
 
-    plt.figure()
-    plt.plot(ey_ref_loc, ey_ref, marker=".")
-    plt.plot(ey_yloc, ey_values, marker=".")
-    plt.xlabel("y [in]")
-    plt.ylabel("Ey")
+if run_ref:
+    np.save(DATA_DIR / "hy_fine_grid", hy_values)
+    np.save(DATA_DIR / "hy_loc_fine_grid", hy_ylocs)
+
+hy_ref = np.load(DATA_DIR / "hy_fine_grid.npy")
+hy_ref_loc = np.load(DATA_DIR / "hy_loc_fine_grid.npy")
+
+# plt.figure()
+# plt.plot(hy_ref_loc[::2], hy_ref[::2] * conv.m_in(0.0025))
+# plt.plot(hy_ylocs[::2], hy_values[::2] * conv.m_in(0.01))
+
+plt.figure()
+plt.plot(hy_ref_loc[::2], hy_ref[::2], marker=".")
+plt.plot(hy_ylocs[::2], hy_values[::2], marker=".")
+plt.xlabel("y [in]")
+plt.ylabel("Hy")
+plt.title("Hy Below Trace")
+
+plt.figure()
+plt.plot(hy_ref_loc[1::2], hy_ref[1::2], marker=".")
+plt.plot(hy_ylocs[1::2], hy_values[1::2], marker=".")
+plt.xlabel("y [in]")
+plt.ylabel("Hy")
+plt.title("Hy Above Trace")
 
 
-    fig, ax = plt.subplots()
-    rfn.plots.draw_smithchart(ax)
-    plt.plot(S11.real, S11.imag)
-    plt.plot(S11_z.real, S11_z.imag)
+ez_ref = np.load(DATA_DIR / "ez_fine_grid.npy")
+ez_ref_loc = np.load(DATA_DIR / "ez_loc_fine_grid.npy")
 
-    fig, ax = plt.subplots()
-    plt.plot(frequency, conv.db20_lin(S11))
-    plt.show()
+plt.figure()
+plt.plot(ez_ref_loc, ez_ref, marker=".")
+plt.plot(ez_zloc, ez_values, marker=".")
+plt.xlabel("z [in]")
+plt.ylabel("Ez")
 
-debug()
+# hz and ey in the plane of the trace along y
+plt.figure()
+
+plt.plot(hz_ref_loc, hz_ref, marker=".")
+plt.plot(hz_yloc, hz_values, marker=".")
+plt.xlabel("y [in]")
+plt.ylabel("Hz")
+
+plt.figure()
+plt.plot(ey_ref_loc, ey_ref, marker=".")
+plt.plot(ey_yloc, ey_values, marker=".")
+plt.xlabel("y [in]")
+plt.ylabel("Ey")
+
+
+# fig, ax = plt.subplots()
+# rfn.plots.draw_smithchart(ax)
+# plt.plot(S11.real, S11.imag)
+# plt.plot(S11_z.real, S11_z.imag)
+
+# fig, ax = plt.subplots()
+# plt.plot(frequency, conv.db20_lin(S11))
+# plt.show()
+
+# debug()
