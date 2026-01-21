@@ -233,9 +233,30 @@ plt.plot(hyc_loc,  hy_cross_ms[:, n_sample], marker=".")
 plt.show()
 
 # ez along y above and below the trace
+ez_v = ez_cross_ms[:, n_sample]
+ez_loc_i = self.field_pos_to_idx((0, -ms_w, sub_h), "ez")
+ez_z = self.floc["ez"][2][ez_loc_i[2]] - sub_h
+a = ezc_loc - (-ms_w/2)
+
+ez0 = ez_v[np.argmin(np.abs(a))] * ez_z
+
+f_a = ez0 * (ez_z / (a**2 + ez_z**2))
+
 plt.figure()
 plt.plot(ezc_loc,  ez_cross_ms[:, n_sample], marker=".")
+plt.plot(ezc_loc, f_a)
 plt.show()
+
+a = np.linspace(-0.01, 0, 1001)
+f_a = ez0 * (ez_z / (a**2 + ez_z**2))
+
+plt.figure()
+plt.plot(ezc_loc,  ez_cross_ms[:, n_sample], marker=".")
+plt.plot(a - ms_w/2, f_a)
+plt.xlabel("y [in]")
+plt.ylabel("Ez [V/m]")
+plt.show()
+
 
 # numerical correction factor
 ez_idx = np.argmin(np.abs(ezc_loc - ms_w/2))
