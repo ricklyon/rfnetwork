@@ -92,7 +92,7 @@ self = s
 # else:
 #     d_pec = 0.01
 
-s.init_mesh(d0 = 0.02, d_edge=0.005)
+s.init_mesh_edge_method(d0 = 0.02, d_edge=0.005)
 s.init_coefficients()
 
 s.init_ports()
@@ -116,14 +116,20 @@ plotter.show()
 
 Db_0 = s.dt / u0
 Cb_0 = s.dt / e0 
-# p = s.plot_cooeficients("ex_z", "b", "z", sub_h, point_size=15, cmap="brg", normalization=Cb_0)
-# p.camera_position = "xy"
-# p.show()
+p = s.plot_cooeficients("ez_y", "b", "z", sub_h, point_size=15, cmap="brg", normalization=Cb_0)
+p.camera_position = "xy"
+p.show()
 # p = s.plot_cooeficients("hy_x1", "b", "x", 0, point_size=15, cmap="brg", normalization=Db_0)
 # p.camera_position = "yz"
 # p.show()
 
 
+dz = 0.005
+
+hy_idx = self.field_pos_to_idx((0, ms_w/2, sub_h), "hy")[1]
+dy = self.dy_h[hy_idx-1]
+
+cf_an = (dz / dy) * np.arctan(dy/dz)
 
 vsrc = 1e-2 * self.gaussian_source(width=50e-12, t_len=130e-12)
 t = np.linspace(0, self.dt * len(vsrc), len(vsrc))
@@ -137,7 +143,7 @@ sdata = s.get_sparameters(frequency)
 S11 = sdata[:, 0]
 
 
-p = s.plot_monitor(["ey"], el=0, zoom=1.1, az=0, view="xy", opacity=[0.8, 1], linear=False, cmap="jet", style="surface")
+p = s.plot_monitor(["ey"], el=0, zoom=1.1, az=0, view="xy", opacity=[0.8, 1], linear=False, cmap="jet", style="surface", vmax=20)
 p.show(title="EM Solver")
 
 # p = s.plot_monitor(["mon3"], el=0, zoom=1.1, az=0, view="xy", opacity=[0.8, 1], linear=False, cmap="jet", style="points")
@@ -147,7 +153,7 @@ t_sample = 72e-12
 
 # compute line impedance
 line_i = self.vi_probe_values("c1")
-line_v1 = self.vi_probe_values("v1")
+line_v1 = -self.vi_probe_values("v1")
 line_v2 = self.vi_probe_values("v2")
 
 
@@ -185,7 +191,7 @@ ZP = VP / IP
 
 fig, ax = plt.subplots()
 plt.plot(frequency / 1e9, ZP.real)
-ax.plot(frequency / 1e9, conv.z_gamma(S11))
+# ax.plot(frequency / 1e9, conv.z_gamma(S11))
 plt.ylim([0, 120])
 plt.axhline(y=z_ref, linestyle=":", color="k")
 ax.set_xlabel("Frequency [GHz]")

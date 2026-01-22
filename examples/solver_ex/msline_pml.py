@@ -28,7 +28,7 @@ sbox_len = 1
 sub_h = 0.02
 ms_x = (-sbox_len/2 + 0.1, sbox_len/2)
 
-line = rfn.elements.MSLine(h=sub_h, er=1.001, w=ms_w)
+line = rfn.elements.MSLine(h=sub_h, er=3.66, w=ms_w)
 z_ref = line.get_properties(10e9).sel(value="z0").item()
 
 
@@ -65,7 +65,7 @@ voltage_line2 = pv.Line(
 )
 
 s = rfn.Solver_PCB(sbox, nports=1)
-s.add_substrate("sub", substrate, er=1, opacity=0.0)
+s.add_substrate("sub", substrate, er=3.66, opacity=0.0)
 s.add_pec_face("ms1", ms1_trace, color="gold")
 s.add_lumped_port(1, port1_face)
 
@@ -101,7 +101,7 @@ s.add_voltage_probe("v2", voltage_line2)
 
 Db_0 = s.dt / u0
 Cb_0 = s.dt / e0 
-p = s.plot_cooeficients("hz_y", "b", "z", sub_h, point_size=15, cmap="brg", normalization=Db_0)
+p = s.plot_cooeficients("hz_y2", "b", "z", sub_h, point_size=15, cmap="brg", normalization=Db_0)
 p.camera_position = "xy"
 p.show()
 
@@ -155,9 +155,9 @@ VP = utils.dtft(self.vi_probe_values("v1"), frequency, 1 / s.dt) * np.exp(1j * 2
 ZP = VP / IP
 
 fig, ax = plt.subplots()
-# plt.plot(frequency / 1e9, ZP.real)
-ax.plot(frequency / 1e9, conv.z_gamma(S11))
-plt.ylim([0, 200])
+plt.plot(frequency / 1e9, ZP.real)
+# ax.plot(frequency / 1e9, conv.z_gamma(S11))
+plt.ylim([0, 120])
 plt.axhline(y=z_ref, linestyle=":", color="k")
 ax.set_xlabel("Frequency [GHz]")
 ax.set_ylabel("Impedance [Ohm]")

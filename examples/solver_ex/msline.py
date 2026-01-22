@@ -83,7 +83,8 @@ n_min_sub=4
 n0 = 2
 
 # having three cells in the PEC instead of 4 causes the edge correction to fail
-s.init_mesh(d0 = 0.02, n0 = 3, d_pec = 0.01, n_min_pec=4, d_sub=0.01, n_min_sub=4, blend_pec=False)
+# s.init_mesh(d0 = 0.02, n0 = 3, d_pec = 0.01, n_min_pec=4, d_sub=0.01, n_min_sub=4, blend_pec=False)
+s.init_mesh_edge_method(d0 = 0.05, d_edge=0.005)
 s.init_coefficients()
 
 s.init_ports()
@@ -143,6 +144,17 @@ ZP = VP / IP
 S11_zp = rfn.conv.gamma_z(ZP)
 
 sdata_ref = line_ref.evaluate(frequency)["s"] 
+
+fig, ax = plt.subplots()
+plt.plot(frequency / 1e9, ZP.real)
+ax.plot(frequency / 1e9, conv.z_gamma(S11))
+plt.ylim([0, 120])
+plt.axhline(y=z_ref, linestyle=":", color="k")
+ax.set_xlabel("Frequency [GHz]")
+ax.set_ylabel("Impedance [Ohm]")
+mplm.line_marker(x = 10, axes=ax)
+ax.legend(["probe", "port"])
+
 
 fig, axes = plt.subplots(2, 2, figsize=(9, 9))
 

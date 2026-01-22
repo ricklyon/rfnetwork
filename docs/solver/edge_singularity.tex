@@ -95,5 +95,38 @@ If the field has a \(r^{-v}\) dependence instead of the \(v={1/2}\) used above,
 
 \[ CF = \Big({1\over 2}\Big)^{v} \; {  1  \over (1-v) }\]
 
+\section{\(E_z\) Correction}
+
+The \(E_z\) component above and below the edge of the trace varies along y as,
+
+\[E_z(a) = E_{z,0} \Big( {\Delta z /2 \over a^2 + (\Delta z / 2)^2) }\Big)\]
+
+where \(a=0\) is directly under the edge.
+
+\( E_{z,0}\) can be found by setting \(a=0\), which corresponds to the \(E_z(i,j,k)\) component in the Yee grid.
+
+\[E_{z,0} = E_z(a=0)  {\Delta z \over 2} = E_z(i,j,k) {\Delta z \over 2}\]
+
+The correction factor is then,
+
+\[ CF = {\displaystyle \int_{a=-\Delta y /2}^{a=\Delta y / 2}  {E_{z,0} \Big( {\Delta z /2\over a^2 + (\Delta z/2)^2 }\Big)}  da \over  E_z(i,j,k) \Delta y}\]
+
+\[ CF =  {\Delta z \over 2 \Delta y} \int_{a=-\Delta y /2}^{a=\Delta y / 2}  { {\Delta z /2 \over a^2 + (\Delta z /2)^2 }}  da \]
+
+\[ CF = \Big({\Delta z \over 2 }\Big)^2 {1 \over \Delta y}\int_{a=-\Delta y /2}^{a=\Delta y / 2}  { {1\over a^2 + (\Delta z /2)^2 }}  da \]
+
+\[ CF = \Big({\Delta z \over 2 }\Big)^2 {1 \over \Delta y} \Bigg[ {\tan^{-1} \Big({a \over \Delta z /2}\Big) \over \Delta z /2 } \Bigg]_{a=-\Delta y /2}^{a=\Delta y / 2}  \]
+
+\[ CF = \Big({\Delta z \over 2 }\Big) {1 \over \Delta y} \Bigg[ {\tan^{-1} \Big({a \over \Delta z /2}\Big) } \Bigg]_{a=-\Delta y /2}^{a=\Delta y / 2}  \]
+
+\[ CF = \Big({\Delta z \over 2 }\Big) {1 \over \Delta y} \Bigg[ {\tan^{-1} \Big({\Delta y / 2 \over \Delta z /2}\Big) - \tan^{-1} \Big({-\Delta y / 2 \over \Delta z /2}\Big)} \Bigg]\]
+
+\[ CF = \Big({\Delta z \over 2 }\Big) {1 \over \Delta y} \Bigg[ 2{\tan^{-1} \Big({\Delta y / 2 \over \Delta z /2}\Big) } \Bigg]\]
+
+\[ CF = {\Delta z \over \Delta y }{\tan^{-1} \Big({\Delta y \over \Delta z}\Big) } \]
+
+\(H_y\) has the same correction factor along y under and above the trace edge.
+
+
 
 \end{document}

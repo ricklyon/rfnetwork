@@ -95,7 +95,7 @@ self = s
 
 d0 = 0.005
 
-s.init_mesh(d0 = d0, d_edge=0.001)
+s.init_mesh_edge_method(d0 = d0, d_edge=0.001)
 s.init_coefficients()
 
 s.init_ports()
@@ -235,20 +235,32 @@ plt.show()
 # ez along y above and below the trace
 ez_v = ez_cross_ms[:, n_sample]
 ez_loc_i = self.field_pos_to_idx((0, -ms_w, sub_h), "ez")
-ez_z = self.floc["ez"][2][ez_loc_i[2]] - sub_h
+dz = 2 * (self.floc["ez"][2][ez_loc_i[2]] - sub_h)
 a = ezc_loc - (-ms_w/2)
+# cell width along y
+dy_all = np.diff(ezc_loc)
+dy = dy_all[np.argmin(np.abs(a))-1] / 2 + dy_all[np.argmin(np.abs(a))] / 2
 
-ez0 = ez_v[np.argmin(np.abs(a))] * ez_z
+ez0 = ez_v[np.argmin(np.abs(a))] * (dz /2)
+f_a = ez0 * ((dz /2) / (a**2 + (dz /2)**2))
 
-f_a = ez0 * (ez_z / (a**2 + ez_z**2))
+# integrate along one cell
+a_cell = np.linspace(-dy / 2, dy/2, 1001)
+f_a_cell = ez0 * ((dz /2) / (a_cell**2 + (dz /2)**2))
+
+cf = np.trapezoid(f_a_cell, a_cell) / (ez_v[np.argmin(np.abs(a))] * dy)
+
+cf_an = (dz / dy) * np.arctan(dy/dz)
+(dy / dz) * np.arctan(dz/dy)
 
 plt.figure()
 plt.plot(ezc_loc,  ez_cross_ms[:, n_sample], marker=".")
 plt.plot(ezc_loc, f_a)
+plt.plot(a_cell -ms_w/2, f_a_cell)
 plt.show()
 
-a = np.linspace(-0.01, 0, 1001)
-f_a = ez0 * (ez_z / (a**2 + ez_z**2))
+# a = np.linspace(-0.01, 0, 1001)
+# f_a = ez0 * (ez_z / (a**2 + ez_z**2))
 
 plt.figure()
 plt.plot(ezc_loc,  ez_cross_ms[:, n_sample], marker=".")
@@ -259,13 +271,14 @@ plt.show()
 
 
 # numerical correction factor
-ez_idx = np.argmin(np.abs(ezc_loc - ms_w/2))
-ez_zloc = ezc_loc[ez_idx]
-ez_w = np.diff(ezc_loc)
-cell_w = ez_w[ez_idx-1] / 2 + ez_w[ez_idx] / 2
-ezc_v = ez_cross_ms[:, n_sample][ez_idx]
+# ez_idx = np.argmin(np.abs(ezc_loc - ms_w/2))
+# ez_zloc = ezc_loc[ez_idx]
+# dy_all = np.diff(ezc_loc)
+# dy = dy_all[ez_idx-1] / 2 + dy_all[ez_idx] / 2
+# ezc_v = ez_cross_ms[:, n_sample][ez_idx]
+# dz = np.abs(ez_zloc - sub_h)
 
-cf = np.trapezoid(ez_cross_ms[:, n_sample][ez_idx-1:ez_idx +2], ezc_loc[ez_idx-1:ez_idx +2]) / (ez_v * 2 *cell_w)
+# cf = np.trapezoid(ez_cross_ms[:, n_sample][ez_idx-1:ez_idx +2], ezc_loc[ez_idx-1:ez_idx +2]) / (ez_v * 2 *cell_w)
 
 
 # the hz field is very small compared to other h fields around the trace and contributes less to the overall error.

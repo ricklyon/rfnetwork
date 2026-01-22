@@ -212,48 +212,43 @@ def blend_cell_widths(
     # number of cells can be no larger than d/a (with all cells are of width a)
     n_max = int(d / a) + 1
 
-    for n in range(n_min, n_max+1):
+    # growth rates for each case where the cell is divided into n cells
+    n_test = np.arange(n_min, n_max + 1)
+    m_result = np.zeros((len(n_test), 2))
+
+    cells_m = [None] * len(n_test)
+
+    for i, n in enumerate(n_test):
         # growth rate of cells must make the last cell at least 2/3 of b
         # a * m^n > (2/3) b
         m_min = ((1 / r_max) * (b/a))**(1/n)
-
-        # if the minimum growth rate is higher than 1.5, the mesh cannot be resolved with this number of cells,
-        # move to the next n
-        if m_min > r_max:
-            continue
         
         # last cell can be no larger than b, and growth rate can be no larger than r_max
         # a * m^n < b
         m_max = np.clip((b / a)**(1/n), None, r_max)
-
-        cells_m_min = a * np.array([m_min**r for r in range(1, n+1)])
-        cells_m_max = a * np.array([m_max**r for r in range(1, n+1)])
-        
-        # growth rate must satisfy a(m + m^2 + m^3 + ... m^n) = d
-        # find the min and max widths that can be created by dividing this section into n cells
-        d_min = np.sum(cells_m_min)
-        d_max = np.sum(cells_m_max)
-
-        # print(n, d, d_min, d_max)
-
-        # skip this n if the min/max width it can generate fall outside the target width d
-        if d_min > d or d_max < d:
-            continue
 
         # at this point, we know that n can generate the target width d. Find the growth rate that does this.
         def compute_d(m):
             return a * np.sum([m**r for r in range(1, n+1)]) - d
 
         m0 = np.sqrt(m_min * m_max) # initial guess for growth rate m
-        m = fsolve(compute_d, x0=m0, args=())
+        m = fsolve(compute_d, x0=m0, args=())[0]
         
-        cells_m = a * np.array([m**r for r in range(1, n+1)], dtype=np.float32).flatten()
+        cells_m[i] = a * np.array([m**r for r in range(1, n+1)], dtype=np.float32).flatten()
 
-        if np.abs(np.sum(cells_m) - d) < tol:
-            return np.flip(cells_m).astype(dtype_) if flip_a_b else cells_m
-        else:
-            raise RuntimeError("Mesh did not converge.")
-        
-    # if no n is able to produce a cell with total width d using a growth rate less than r_max,
-    # split the cell equally as a last resort
-    return np.array([d / n_min] * n_min)
+        m_result[i] = m, b / cells_m[i][-1]
+
+    # growth rates will decrease as n increases, so maximizing the growth rate will produce the smallest number of cells.
+    # Find the growth rate the yields the fewest number of cells, while keeping the growth rate (for both internal 
+    # sub-cells and between the last sub-cell and the next cell b) as near to 1.5 as possible. 
+    m_err = np.abs(m_result - 1.5) # np.argsort(np.abs(m_result[:, 0] - 1.5), axis=0)
+
+    # get the m with the lowest combined difference from the desired growth rate of 1.5
+    n_best_idx = np.argsort(np.sum(m_err, axis=1))[0]
+    cells_best = np.array(cells_m[n_best_idx])
+
+    # check that sub-cell widths add up the desired total width
+    if np.abs(np.sum(cells_best) - d) < tol:
+        return np.flip(cells_best).astype(dtype_) if flip_a_b else cells_best
+    else:
+        raise RuntimeError("Mesh did not converge.")

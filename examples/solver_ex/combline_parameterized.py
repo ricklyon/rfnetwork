@@ -233,14 +233,19 @@ s.add_lumped_port(4, port4_face)
 s.init_mesh(d0 = lam0/20, n0 = 2, d_pec = lam0/20, n_min_pec=4, d_sub=lam0/20, n_min_sub=4, blend_pec=True)
 s.init_coefficients()
 
+# s.init_mesh_edge_method(d0 = 0.1, d_edge=0.01)
+# s.init_coefficients()
+
+
 
 plotter = s.render()
 plotter.camera_position = "xy"
 plotter.show()
+print(s.Nx * s.Ny * s.Nz / 1e3, "kcells")
 
 
 s.init_ports(r0=100)
-s.init_pec(edge_correction=False)
+s.init_pec()
 
 s.add_field_monitor("mon1", "ez", "z", 0, 5)
 # s.add_field_monitor("mon1", "ey", "z", sub_h, 5)
