@@ -361,28 +361,48 @@ int solver_init_monitors(PyObject * py_monitors, int Nt)
         
         int axis = PyLong_AsLong(PyDict_GetItemString(py_mon, "axis"));
         int field = PyLong_AsLong(PyDict_GetItemString(py_mon, "field"));
-        
+
+        monitors[m].field_type = field;
+        monitors[m].position = PyLong_AsLong(PyDict_GetItemString(py_mon, "position"));
+        monitors[m].n_step = n_step;
+        monitors[m].axis = axis;
+        monitors[m].x_offset = 0;
+
         if (axis == 0)
         {
             n1 = Ny[field];
             n2 = Nz[field];
+            // the thread grid for Ez, Hx, and Ey is offset by one compared to the global grid because the first thread
+            // grid cell captures these components on the end of the cell along x, instead of the beginning.
+            if ((field == 1) || (field == 2) || (field == 3))
+            {
+                monitors[m].position -= 1;
+            }
         }
         else if (axis == 1)
         {
             n1 = Nx[field];
             n2 = Nz[field];
+            // the thread grid for Ez, Hx, and Ey is offset by one compared to the global grid because the first thread
+            // grid cell captures these components on the end of the cell along x, instead of the beginning.
+            if ((field == 1) || (field == 2) || (field == 3))
+            {
+                monitors[m].x_offset += 1;
+            }
         }
         else
         {
             n1 = Nx[field];
             n2 = Ny[field];
+            // the thread grid for Ez, Hx, and Ey is offset by one compared to the global grid because the first thread
+            // grid cell captures these components on the end of the cell along x, instead of the beginning.
+            if ((field == 1) || (field == 2) || (field == 3))
+            {
+                monitors[m].x_offset += 1;
+            }
         }
 
         monitors[m].values = get_solver_array(py_mon, "values", Nm, n1, n2);
-        monitors[m].field_type = field;
-        monitors[m].position = PyLong_AsLong(PyDict_GetItemString(py_mon, "position"));
-        monitors[m].n_step = n_step;
-        monitors[m].axis = axis;
         monitors[m].N1 = n1;
         monitors[m].N2 = n2;
         monitors[m].Nx = Nx[field];
@@ -433,7 +453,8 @@ int solver_init_probes(PyObject * py_probes, int Nt)
         probes[s].field_type = field_type;
 
         // if component's first index is at x=0 instead of x=0.5, the first usable component
-        // is at index=1
+        // is at index=1. The first thread does not capture the Ey, Ez, and Hx components at x=0. Each cell
+        // contains the components in the middle and end of each yee grid cell along x.
         if ((field_type == 1) || (field_type == 2) || (field_type == 3))
         {
             probes[s].x_cell -= 1;
@@ -1017,9 +1038,9 @@ void solver_thread(int x_start, int x_stop, int Nt, int thread_idx)
             if (mon.axis == 0)
             {
                 // only update x slice monitor if it is within bounds of the thread.
-                // position is subtracted by one because the monitor contains all field values along x, 
-                // and the thread grid skips the first component along x, the first cell is at x=1 in the global grid
-                if (((mon.position -1) < x_start) || ((mon.position -1) >= x_stop))
+                // position has already been corrected in init_monitors to account for the fact that first
+                // grid cell in the thread grid starts at x=1 in the global grid for the Ez, Hx, and Ey components.
+                if (((mon.position) < x_start) || ((mon.position) >= x_stop))
                 {
                     continue;
                 }
@@ -1029,14 +1050,13 @@ void solver_thread(int x_start, int x_stop, int Nt, int thread_idx)
 
             else if (mon.axis == 1)
             {
-                // components on the edge of the grid that have +1 components from the grid will not be captured here,
-                // but they are not updated and will be zero. 
-                // as long as the monitor values were initialized in python to zero, this is a non-issue.
+                // components on the edge of the grid that have an extra component will not be updated at x=0 by 
+                // the solver and will be left at 0 by the monitors. The x_offset accounts for the offset between
+                // the global grid and the thread grid which skips x=0.
                 for (int i = x_start; i < x_stop; i++)
                 {
                     MatrixFloatType m_field (mon_field + ((i - x_start) * (mon.NyNz)), mon.Ny, mon.Nz);
-                    // monitor grid contains the components at the x=0 edge, add one to the x position.
-                    m_values.row(i+1) = m_field.row(mon.position);
+                    m_values.row(i + mon.x_offset) = m_field.row(mon.position);
                 }
             }
 
@@ -1045,7 +1065,7 @@ void solver_thread(int x_start, int x_stop, int Nt, int thread_idx)
                 for (int i = x_start; i < x_stop; i++)
                 {
                     MatrixFloatType m_field (mon_field + ((i - x_start) * (mon.NyNz)), mon.Ny, mon.Nz);
-                    m_values.row(i+1) = m_field.col(mon.position);
+                    m_values.row(i + mon.x_offset) = m_field.col(mon.position);
                 }
             }
             

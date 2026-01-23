@@ -115,6 +115,7 @@ struct Monitor {
     int axis;
     int position;
     int n_step;
+    int x_offset;
     int N1;
     int N2;
     int Nx;

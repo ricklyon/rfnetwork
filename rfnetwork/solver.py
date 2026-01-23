@@ -71,7 +71,7 @@ class Solver_PCB():
         for i, g in enumerate(floc):
             diff = (g - position[i])
             # if no cell is above the point, return the length of the axis, otherwise return the first cell that is 
-            # larger than the point.
+            # equal to or larger than the point.
             idx += [np.argmax(diff >= -self._tol) if diff[-1] > -self._tol else len(g)]
         
         return tuple(idx)
@@ -270,6 +270,209 @@ class Solver_PCB():
             hz=(Nx, Ny, Nz+1)
         )
         
+    def init_mesh_edge_method(self, d0, d_edge, n0=2):
+        """
+        Initialize the spatial grid.
+        """
+        edges = [np.array([], dtype=np.float32) for i in range(3)]
+
+        objects = [self.bounding_box] + list(self.pec_face.values()) + [sub[0] for sub in self.substrate.values()]
+        dtype_ = np.float32
+
+        # build list of edge coordinates along each axis
+        for obj in objects:
+            # round points to minimum precision supported by the mesh
+            p_edges = np.around(obj.points.T, decimals=self._places).astype(np.float32)
+
+            for i in range(3):
+                edges_i = np.unique(np.concatenate([edges[i], p_edges[i]]))
+                edges[i] = edges_i
+
+        # maximum z coordinate of any substrate
+        sub_z_max = 0
+        # maximum er of any substrate
+        sub_er_max = 1
+        for sub, sub_er in self.substrate.values():
+            sub_z_max = np.max([sub_z_max, np.max(sub.points[:, 2])])
+            sub_er_max = np.max([sub_er_max, sub_er])
+
+        # build a list of cell widths along each axis
+        cell_d = [[], [], []]
+        for axis in range(3):
+
+            # list of distances between each edge
+            d_axis_const = np.diff(edges[axis])
+            d_axis = []
+
+            dmax_axis = []  # maximum sub-cell size within each cell
+
+            for i, cell_w in enumerate(d_axis_const):
+                # edges of this cell
+                # cell_min, cell_max = edges[axis][i:i+2]
+                # if the cell is inside a PEC object, use PEC mesh settings
+                # is_pec = False
+                # if np.any((cell_min + self._tol >= pec_bounds[axis][:, 0]) & (cell_max - self._tol <= pec_bounds[axis][:, 1])):
+                #     # divide cell into sub-cells that are no larger than d_pec, and at least n_min_pec cells
+                #     n_min = n_min_pec
+                #     d_max = d_pec
+                #     is_pec = True
+                # # if on the z-axis and cell is inside a substrate, use substrate mesh settings
+                # elif axis == 2 and (cell_max - self._tol) <= sub_z_max:
+                #     n_min = n_min_sub
+                #     d_max = d_sub
+                # # otherwise use global settings
+                # else:
+
+                # if in PEC, add a small edge sub-cell on either side of the PEC edge
+                if (i > 0):
+                    # make the last cell shorter to compensate for adding a new d_edge cell
+                    d_axis[-1] -= d_edge
+                    dmax_axis[-1] -= d_edge
+                    # make the current shorter 
+                    cell_w -= d_edge
+                    # add new sub-cells around the edge
+                    dmax_axis += [d_edge, d_edge]
+                    d_axis += [d_edge, d_edge]
+                    # is_pec_axis += [is_pec_axis[-1], is_pec]
+
+                # split cells larger than d0*5 into two cells, this prevents large cells bounded by 
+                # equal sized small ones from being broken up into small cells, and instead ensures
+                # the span is graded from small widths to large, and then back down to small widths.
+                split_threshold = d0 * 5
+                if int(cell_w / split_threshold) > 1:
+                    n_split = int(cell_w / split_threshold)
+                    # split cell width into equal parts
+                    cell_w = cell_w / n_split
+                # split cells into two sub-cells
+                else:
+                    n_split = 2
+                    cell_w = cell_w / n_split
+
+                # estimate the minimum number of sub-cells this cell must be broken into so no sub-cell is larger
+                # than d_max
+                cell_sub_n = np.clip(int(cell_w / d0), 1, None)
+                # maximum distance of any sub-cell within this cell
+                dmax_axis += [cell_w / cell_sub_n] * n_split
+                # update the cell width vector
+                d_axis += [cell_w] * n_split
+                # is_pec_axis += [is_pec] * n_split
+
+            # cells indices arranged from largest width to smallest
+            # blend large cells first so they transition gradually into smaller ones.
+            # The larger cells have more room to work in and
+            # it's easier to blend. The smaller cells have less work to do because the
+            # larger cells have already stepped down to meet their widths.
+            # Leave PEC cells for last so they don't blend up to the (typically) larger d0 cells
+            d_order = np.flip(np.argsort(d_axis))
+
+            d_sides = [(d, d) for d in dmax_axis] # sub-cell widths on left and right edge of the cells
+
+            d_subcells = [None] * len(d_axis)
+            for i in d_order:
+                # previous cell width. If on the edge of the grid, match to the next cell width
+                dprev = d_sides[i - 1][1] if i > 0 else d_sides[i+1][0]
+                # next cell width. If at the end of the grid, match to the previous cell
+                dnext = d_sides[i + 1][0] if i < len(d_axis) - 1 else d_sides[i-1][1]
+
+                # # if PEC cell, use constant cell widths matched to the smallest adjacent cell if not using blend pec
+                # if is_pec_axis[i] and not blend_pec:
+                #     min_neighbor_w = min(dprev, dnext)
+                #     # minimum number of sub-cells this cell must be broken up into
+                #     n = int(np.clip(d_axis[i] / dmax_axis[i], nmin_axis[i], None))
+
+                #     # match cell size to the smallest neighboring cell if it meets the min number of sub-cells needed
+                #     # for this cell
+                #     if min_neighbor_w < (d_axis[i] / n):
+                #         rmd = (d_axis[i] % min_neighbor_w)
+                #         n_subcell = int(d_axis[i] // min_neighbor_w)
+                #         sub_cell_w = np.array([min_neighbor_w + (rmd / n_subcell)] * n_subcell, dtype=dtype_)
+                #     # otherwise, break up into the number of required cells
+                #     else:
+                #         sub_cell_w = np.array([d_axis[i] / n] * n)
+                # else:
+                # n_min = 2 if d_axis[i] > d0 else 1
+                a = dprev
+                b = dnext
+                d = d_axis[1]
+                sub_cell_w = list(
+                    utils.blend_cell_widths(dprev, dnext, d_axis[i], n_min = 1, tol=self._tol)
+                )
+
+                d_subcells[i] = sub_cell_w
+                d_sides[i] = (sub_cell_w[0], sub_cell_w[-1])
+
+            # flatten list of lists of subcell widths
+            cell_d[axis] = list(itertools.chain(*d_subcells))
+
+
+        gx, gy, gz = [np.around(np.concatenate([[self.sbox_min[i]], self.sbox_min[i] + np.cumsum(cell_d[i])]), decimals=self._places) for i in range(3)]
+        dx, dy, dz = np.diff(gx).astype(dtype_), np.diff(gy).astype(dtype_), np.diff(gz).astype(dtype_)
+
+        self.n_cells = len(dx), len(dy), len(dz)  
+        self.grid_mesh = pv.RectilinearGrid(gx.astype(dtype_), gy.astype(dtype_), gz.astype(dtype_))
+
+        self.Nx, self.Ny, self.Nz = self.n_cells
+        self.dx, self.dy, self.dz = dx, dy, dz
+
+        # locations of cell center
+        gx_h = (gx[1:] + gx[:-1]) / 2
+        gy_h = (gy[1:] + gy[:-1]) / 2
+        gz_h = (gz[1:] + gz[:-1]) / 2
+
+        # half cell lengths between h components
+        dx_h = (dx[1:] + dx[:-1]) / 2
+        dy_h = (dy[1:] + dy[:-1]) / 2
+        dz_h = (dz[1:] + dz[:-1]) / 2
+
+        self.g_edges = gx, gy, gz
+        self.g_cells = gx_h, gy_h, gz_h
+        self.d_cells = dx, dy, dz
+        self.dh_cells = dx_h, dy_h, dz_h
+        self.dx_h, self.dy_h, self.dz_h = dx_h, dy_h, dz_h
+
+        self.eps = np.ones(self.n_cells) * e0
+
+        for (sub, er) in self.substrate.values():
+            x0, y0, z0 = self.pos_to_idx(np.min(sub.points, axis=0), mode="cell")
+            x1, y1, z1 = self.pos_to_idx(np.max(sub.points, axis=0), mode="cell")
+
+            self.eps[x0: x1, y0: y1, z0: z1] = e0 * er
+
+        # locations of all field components in grid
+        self.floc = dict(
+            ex=(gx_h, gy, gz),
+            ey=(gx, gy_h, gz),
+            ez=(gx, gy, gz_h),
+            hx=(gx, gy_h, gz_h),
+            hy=(gx_h, gy, gz_h),
+            hz=(gx_h, gy_h, gz)
+        )
+
+        # field shapes
+        Nx, Ny, Nz = self.n_cells
+        self.fshape = dict(
+            ex=(Nx, Ny+1, Nz+1),
+            ey=(Nx+1, Ny, Nz+1),
+            ez=(Nx+1, Ny+1, Nz),
+            hx=(Nx+1, Ny, Nz),
+            hy=(Nx, Ny+1, Nz),
+            hz=(Nx, Ny, Nz+1)
+        )
+
+        # pad the combined cell widths
+        # so edge components are assigned zero width
+        dx_hp = np.pad(dx_h, (1, 1))
+        dy_hp = np.pad(dy_h, (1, 1))
+        dz_hp = np.pad(dz_h, (1, 1))
+        # cell widths along the direction of the component
+        self.fcell_w = dict(
+            ex=(dx, dy_hp, dz_hp),
+            ey=(dx_hp, dy, dz_hp),
+            ez=(dx_hp, dy_hp, dz),
+            hx=(dx_hp, dy, dz),
+            hy=(dx, dy_hp, dz),
+            hz=(dx, dy, dz_hp)
+        )
 
 
     def init_coefficients(self):
@@ -492,56 +695,98 @@ class Solver_PCB():
                     if len(y0_ports) == 0:
                         x0, y0, z0 = self.field_pos_to_idx(np.min(pec.points, axis=0), "ex")
                         x1, y1, z1 = self.field_pos_to_idx(np.max(pec.points, axis=0), "ex")
-                        # ex edge correction
-                        eps = self.eps_ex[x0: x1, y0, z0]
-                        sig = 0
-                        self.Ca["ex_y"][x0: x1, y0, z0] = 1
-                        self.Cb["ex_y"][x0: x1, y0, z0] = (self.dt / (eps)) 
 
+                        # self.Ca["ex_y"][x0: x1, y0, z0] = 1
+                        # self.Cb["ex_y"][x0: x1, y0, z0] = (self.dt / (eps)) 
                         # self.Ca["ex_z"][x0: x1, y0, z0] = 1
                         # self.Cb["ex_z"][x0: x1, y0, z0] = (self.dt / (eps)) 
 
-                        # self.Cb["ey_x"][x0: x1+1, y0-1, z1] *= (dx[x0: x1+1] / (dx[x0: x1+1] * 0.8))
+                        # self.Db["hy_z2"][x0: x1, y0, z0-1] = 0
+                        # self.Db["hy_z1"][x0: x1, y0, z0] = 0
 
-                        # self.Db["hy_x"][x0: x1, y0, z1-1] = self.dt / (2 * u0)
-                        # self.Db["hy_x"][x0: x1, y0, z1] = self.dt / (2 * u0)
+                        # self.Db["hz_y1"][x0: x1, y0-1, z0] *= hy_CF
+                        # self.Db["hz_y2"][x0: x1, y0-1, z0] *= hy_CF
+                        CF = 2 * np.sqrt(1/2)
+                        # hz in the same plane as the trace
+                        self.Db["hz_y"][x0: x1, y0-1, z0] *= 1 / CF
 
-                        # self.Cb["ez_x"][x0: x1, y0, z1-1] *= (dx[x0: x1] / (dx[x0: x1] * 0.9))
-                        # self.Cb["ez_x"][x0: x1, y0, z1] *= (dx[x0: x1] / (dx[x0: x1] * 0.9))
+                        # hy directly above and below trace edge
+                        self.Db["hy_z"][x0: x1, y0, z0-1] *= 1 / CF
+                        self.Db["hy_z"][x0: x1, y0, z0] *= 1 / CF
 
-                        # self.Cb["ex_z"][x0: x1, y0, z0] = 2 * (self.dt / eps) 
+                        # hx below the trace, correct ez component on the edge
+                        # self.Db["hx_y2"][x0+1: x1-1, y0-1, z0-1] *= CF
+                        # self.Db["hx_y1"][x0+1: x1-1, y0, z0-1] *= CF
+                        # # hy above the trace, correct the ez component on the edge
+                        # self.Db["hx_y2"][x0+1: x1-1, y0-1, z0] *= CF
+                        # self.Db["hx_y1"][x0+1: x1-1, y0, z0] *= CF
 
-                        # self.Db["hz_x"][x0: x1, y0-1, z0] = self.dt / (20 * u0)
-                        # self.Db["hz_y"][x0: x1, y0-1, z0] = self.dt / (0.05 * u0)
+                        # # ez below and above the trace
+                        # self.Cb["ez_y"][x0+1: x1-1, y0, z0] *= 1/0.785
+                        # self.Cb["ez_y"][x0+1: x1-1, y0, z0-1] *= 1/0.785
+
+                        # # # ey in the plane of the trace
+                        # self.Cb["ey_z"][x0: x1, y0-1, z0] *= 1/0.785
+
+
 
                     if len(y1_ports) == 0:
                         x0, y0, z0 = self.field_pos_to_idx(np.min(pec.points, axis=0), "ex")
                         x1, y1, z1 = self.field_pos_to_idx(np.max(pec.points, axis=0), "ex")
-                        # ex edge correction
-                        eps = self.eps_ex[x0: x1, y1, z0]
-                        sig = 0
-                        self.Ca["ex_y"][x0: x1, y1, z0] = 1
-                        self.Cb["ex_y"][x0: x1, y1, z0] = (self.dt / eps) 
 
-                        # self.Ca["ex_z"][x0: x1, y1, z0] = 1
-                        # self.Cb["ex_z"][x0: x1, y1, z0] = (self.dt / eps) 
+                        CF = 2 * np.sqrt(1/2)
 
-                        # self.Cb["ey_x"][x0: x1+1, y1, z1] *= (dx[x0: x1+1] / (dx[x0: x1+1] * 0.8))
+                        # hz in the same plane as the trace
+                        self.Db["hz_y"][x0: x1, y1, z0] *= 1 / CF
 
-                        # self.Db["hy_x"][x0: x1, y1, z1-1] = self.dt / (2 * u0)
-                        # self.Db["hy_x"][x0: x1, y1, z1] = self.dt / (2 * u0)
+                        # hy directly above and below trace edge
+                        self.Db["hy_z"][x0: x1, y1, z0-1] *= 1 / CF
+                        self.Db["hy_z"][x0: x1, y0, z0] *= 1 / CF
 
-                        # self.Cb["ez_x"][x0: x1, y1, z1-1] *= (dx[x0: x1] / (dx[x0: x1] * 0.9))
-                        # self.Cb["ez_x"][x0: x1, y0, z1] *= (dx[x0: x1] / (dx[x0: x1] * 0.9))
+                        # hy below the trace, correct ez component on the edge
+                        # self.Db["hx_y2"][x0+1: x1-1, y1-1, z0-1] *= CF
+                        # self.Db["hx_y1"][x0+1: x1-1, y1, z0-1] *= CF
+                        # # hy above the trace, correct the ez component on the edge
+                        # self.Db["hx_y2"][x0+1: x1-1, y1-1, z0] *= CF
+                        # self.Db["hx_y1"][x0+1: x1-1, y1, z0] *= CF
 
-                        # self.Cb["ex_z"][x0: x1, y1, z0] = 2 * (self.dt / eps) 
+                        # # ez below and above the trace
+                        # self.Cb["ez_y"][x0+1: x1-1, y1, z0-1] *= 1/0.785
+                        # self.Cb["ez_y"][x0+1: x1-1, y1, z0] *= 1/0.785
 
-                        # self.Db["hz_x"][x0: x1, y1, z0] = self.dt / (20 * u0)
-                        # self.Db["hz_y"][x0: x1, y1, z0] = self.dt / (0.05 * u0)
+                        # # # ey in the plane of the trace
+                        # self.Cb["ey_z"][x0: x1, y1, z0] *= 1/0.785
 
             else:
                 raise NotImplementedError(f"PEC face not supported yet in the given axis.")
-            
+
+    def gaussian_source(self, width: float, t_len: float):
+        """
+        Generate a gaussian source waveform with the given width in seconds. t_len is the total time of the 
+        simulated source.
+        """
+        # pulse length
+        pulse_len = width * 1.5
+        # center of the pulse in time
+        t0 = pulse_len / 2
+        # number of time steps in pulse
+        n_len = int(pulse_len / self.dt)
+
+        t = np.linspace(0, self.dt * n_len, n_len)
+        vsrc = np.exp(-((t - t0) / (width / 4)) ** 2) # np.sin(2* np.pi * f0 * t) * 
+
+        # append the length of the full simulation time
+        t_diff = t_len - (len(vsrc) * self.dt)
+
+        if t_diff < 0:
+            vsrc = vsrc[int(t_len / self.dt)]
+        else:
+            vpad = np.zeros(int(t_diff / self.dt))
+            vsrc = np.concatenate([vsrc, vpad])
+
+        # normalize so amplitude is 1
+        return vsrc / np.max(np.abs(vsrc))
+    
     def init_ports(self, r0=50):
         """
         
@@ -699,7 +944,7 @@ class Solver_PCB():
         if isinstance(ports, int):
             ports = [ports]
 
-        v_waveforms = np.atleast_2d(v_waveforms)
+        v_waveforms = np.atleast_2d(v_waveforms).astype(np.float32)
             
         Nt = len(v_waveforms[0])
 
@@ -826,7 +1071,7 @@ class Solver_PCB():
                 )
             )
 
-        print(f"Running solver with {self.Nx * self.Ny * self.Nz / 1e3:.1f}k cells")
+        print(f"Running solver with {self.Nx * self.Ny * self.Nz / 1e3:.1f}k cells, and {Nt} time steps.")
         stime = time.time()
         core.core_func.solver_run(coefficients, probes, monitors, mem, Nx, Ny, Nz, Nt, n_threads)
         print(f"Done in {time.time() - stime:.3f}s")
@@ -851,6 +1096,44 @@ class Solver_PCB():
         for i, (k, p) in enumerate(self.probes.items()):
             self.probes[k]["values"] = probes[i + cur_source]["values"]
 
+    def add_line_probe(self, name: str, field: str, line: pv.PolyData):
+        """
+        
+        """
+        # get axis that face is constant over (the normal axis)
+        axis = np.argmax(np.any(np.diff(line.points, axis=0), axis=0))
+        # start and end position of the line, end in inclusive
+        line_start, line_end = np.min(line.points, axis=0), np.max(line.points, axis=0)
+        # field indices of the line end points
+        ijk_start = list(self.field_pos_to_idx(line_start, field))
+        ijk_end = list(self.field_pos_to_idx(line_end, field))
+
+        # check if endpoint lands directly on a field component, if it doesn't, the last index shouldn't be
+        # included since field_pos_to_idx returns the index on or directly above the point.
+        if self.floc[field][axis][ijk_end[axis]] > (line_end[axis] + self._tol):
+            ijk_end[axis] -= 1
+
+        # number of probes along line
+        n_probes = ijk_end[axis] - ijk_start[axis] + 1
+
+        # break out into indices for each probe, indices are constant if not on the line axis
+        ijk_probes = np.broadcast_to(ijk_start, (n_probes, 3)).copy()
+        ijk_probes[:, axis] = np.arange(ijk_start[axis], ijk_end[axis] + 1)
+
+        # cell widths at field components
+        fcell_w = self.fcell_w[field]
+
+        # direction of line, +1 if oriented along positive axis direction, -1 if along negative direction
+        direction = 1 if line_end[axis] > line_start[axis] else -1
+
+        for i, idx in enumerate(ijk_probes):
+            # get cell width along the given axis
+            cw = [fcell_w[axis][i] for axis, i in enumerate(idx)][axis]
+            self.probes[f"{name}_{i}"] = dict(field=field, index=(idx), d=direction * conv.m_in(cw))
+
+    def line_probe_values(self, name: str):
+
+        return np.array([p["values"] for k, p in self.probes.items() if k[:len(name)] == name])
 
     def add_field_monitor(self, name: str, field: str, axis: str, position: float, n_step: int):
         """
@@ -1293,7 +1576,7 @@ class Solver_PCB():
         self.slider_value = Nt // 2
         self.slider = plotter.add_slider_widget(
             callback,
-            [0, Nt-1],
+            [0, Nt-2],
             value=Nt // 2,
             title="Time Step",
             interaction_event="always",

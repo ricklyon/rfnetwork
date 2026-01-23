@@ -238,6 +238,8 @@ plotter = s.render()
 plotter.camera_position = "xy"
 plotter.show()
 
+print(s.dt)
+
 
 s.init_ports(r0=100)
 s.init_pec(edge_correction=False)

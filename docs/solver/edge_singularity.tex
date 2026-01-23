@@ -19,63 +19,114 @@
 \includegraphics[width=3in]{ms_edge.pdf}
 
 \vspace{0.2in}
+ 
+\(H_z\) and \(E_y\) vary as \(1 / \sqrt{r}\).
 
-\(H_z\) and \(E_y\) vary as \(1 / r\).
-
-For the Hz, update, instead of linearly interpolating the \(E_x\) fields on either side, use the \(1 / r\) model.
+For the Hz, update, instead of assuming the \(E_x\) fields are constant over the cell width as in the normal FDTD updates,use the  \(1 / \sqrt{r}\) model.
 
 
 The \(H_z\) field at a distance \(r\) from the PEC edge is,
-\[H_z(r) = {H_{z0} \over r}\]
+\[H_z(r) = {H_{z0} \over  \sqrt{r}}\]
 
 The constant \(H_{z0}\) can be found since the field at \(\Delta y \over 2\) is the \(H_z(i,j,k)\) component in the Yee grid,
-\[H_z\Big(r={\Delta y \over 2}\Big) = {2 H_{z0} \over {\Delta y}} = H_z(i,j,k) \]
+\[H_z\Big(r={\Delta y \over 2}\Big) = {H_{z0} \Big({\Delta y \over 2}\Big)^{-{1\over 2}}} = H_z(i,j,k) \]
 
-\[H_{z0} = { H_z(i,j,k) \Delta y \over 2 } \]
+\[H_{z0} = { H_z(i,j,k) } \Big({\Delta y \over 2}\Big)^{{1\over 2}} \]
 
 So the \(H_z\) at any point \(r\) is,
-\[H_z(r) = { H_z(i,j,k) \Delta y \over 2 r}\]
+\[H_z(r) = { H_z(i,j,k) } \Big({\Delta y \over 2}\Big)^{{1\over 2}} {r}^{-{1\over 2}} \]
 
 By similar logic, since \(E_y\) is at the same point along r as \(H_z\),
-\[E_y(r) = { E_y(i,j,k) \Delta y \over 2 r}\]
+\[E_y(r) = { E_y(i,j,k) } \Big({\Delta y \over 2}\Big)^{{1\over 2}} {r}^{-{1\over 2}} \]
 
 Plugging this in to the update equation for \(H_z\),
-\[\mu_0 \int_S {\partial H_z \over \partial t} dS = \Big[E_x(i, j+1, k) - E_x(i, j, k)\Big] \Delta x - \int_{r=a}^{r=\Delta y}\Big[E_y(i+1, k) - E_y(i, k)\Big] dr \] 
+\[\mu_0 \int_S {\partial H_z \over \partial t} dS = \Big[E_x(i, j+1, k) - E_x(i, j, k)\Big] \Delta x - \int_{r=0}^{r=\Delta y}\Big[E_y(i+1, k) - E_y(i, k)\Big] dr \] 
 
-\[\mu_0 \int_{x=0}^{x=\Delta x} \int_{r=a}^{r=\Delta y}{\partial \over \partial t}  { H_z(i,j,k) \Delta y \over 2 r} dxdr =\]
-\[+ \Big[E_x(i, j+1, k) - E_x(i, j, k)\Big] \Delta x\]
-\[- \int_{r=a}^{r=\Delta y}\Big[{ E_y(i+1,j,k) \Delta y \over 2 r} - { E_y(i,j,k) \Delta y \over 2 r}\Big] dr \] 
+The surface integral over \(H_z\) (the left side term) is,
 
+\[\mu_0 \int_{x=0}^{x=\Delta x} \int_{r=0}^{r=\Delta y}{\partial \over \partial t}  { H_z(i,j,k) } \Big({\Delta y \over 2}\Big)^{{1\over 2}} {r}^{-{1\over 2}} dxdr \]
 
-Evaluating the first term,
-\[\mu_0 \int_{x=0}^{x=\Delta x} \int_{r=a}^{r=\Delta y}{\partial \over \partial t}  { H_z(i,j,k) \Delta y \over 2 r} dxdr =\]
-\[ \Delta x \mu_0 { \partial H_z(i,j,k)  \over \partial t} { \Delta y \over 2 } \log(r)\Big|_{r=a}^{r=\Delta y}\]
-\[= \Delta x \mu_0  { \Delta y \over 2 } \log\Big({\Delta y \over a}\Big) { \partial H_z(i,j,k)  \over \partial t}\]
+\[ =\Delta x \mu_0 { \partial H_z(i,j,k)  \over \partial t} \Big({\Delta y \over 2}\Big)^{{1\over 2}} \Big[ 2 \ r^{1 \over 2} \Big]_{r=0}^{r=\Delta y}\]
+%
+\[= 2\Delta x \mu_0  \Big({\Delta y \over 2}\Big)^{{1\over 2}} { \partial H_z(i,j,k)  \over \partial t}  (\Delta y)^{1 \over 2}\]
+\[= 2  \sqrt{1\over 2} \Delta x \Delta y \mu_0  { \partial H_z(i,j,k)  \over \partial t} \]
+
 
 The \(E_y\) terms are similar,
-\[- \int_{r=a}^{r=\Delta y}\Big[{ E_y(i+1,j,k) \Delta y \over 2 r} - { E_y(i,j,k) \Delta y \over 2 r}\Big] dr \] 
-\[= - \Big[{ E_y(i+1,j,k) } - { E_y(i,j,k) }\Big] {\Delta y \over 2} \log\Big({\Delta y \over a}\Big)  \] 
+\[- \int_{r=0}^{r=\Delta y}\Big[{ E_y(i+1,j,k) } \Big({\Delta y \over 2}\Big)^{{1\over 2}} {r}^{-{1\over 2}} -{ E_y(i,j,k) } \Big({\Delta y \over 2}\Big)^{{1\over 2}} {r}^{-{1\over 2}} \Big] dr \] 
+%
+\[= - \Big({\Delta y \over 2}\Big)^{{1\over 2}} \Big[{ E_y(i+1,j,k) } - { E_y(i,j,k) }\Big] \int_{r=0}^{r=\Delta y}  {r}^{-{1\over 2}} dr \] 
+%
+\[= - \Big({\Delta y \over 2}\Big)^{{1\over 2}} \Big[{ E_y(i+1,j,k) } - { E_y(i,j,k) }\Big] (2 {\Delta y }^{1\over 2})\] 
+\[= - 2  \sqrt{1\over 2} {\Delta y}\Big[{ E_y(i+1,j,k) } - { E_y(i,j,k) }\Big] \] 
+
+Using variables for the correction terms,
+\[CF_{Hz} = CF_{Ey} = 2  \sqrt{1\over 2} = \]
+
 
 The full update equation is then,
-\[ \Delta x \mu_0  { \Delta y \over 2 } \log\Big({\Delta y \over a}\Big) { \partial H_z(i,j,k)  \over \partial t}=\]
-\[+ \Big[E_x(i, j+1, k) - E_x(i, j, k)\Big] \Delta x\]
-\[ - \Big[{ E_y(i+1,j,k) } - { E_y(i,j,k) }\Big] {\Delta y \over 2} \log\Big({\Delta y \over a}\Big)  \] 
+\[CF_{Hz} \Delta x \Delta y \mu_0  { \partial H_z(i,j,k)  \over \partial t} = \]
+\[\Big[E_x(i, j+1, k) - E_x(i, j, k)\Big] \Delta x -  CF_{Ey}{\Delta y}\Big[{ E_y(i+1,j,k) } - { E_y(i,j,k) }\Big] \]
 
 Applying central differencing to the \(H_z\) term,
-\[ \Delta x \mu_0  { \Delta y \over 2 } \log\Big({\Delta y \over a}\Big) { H_z^{n+1}(i,j,k) -H_z^{n}(i,j,k)  \over  \Delta t}=\]
-\[+ \Big[E_x(i, j+1, k) - E_x(i, j, k)\Big] \Delta x\]
-\[ - \Big[{ E_y(i+1,j,k) } - { E_y(i,j,k) }\Big] {\Delta y \over 2} \log\Big({\Delta y \over a}\Big)  \] 
+\[CF_{Hz} \Delta x \Delta y \mu_0  { H_z^{n+1}(i,j,k) -H_z^{n}(i,j,k)  \over  \Delta t}=\]
+\[\Big[E_x(i, j+1, k) - E_x(i, j, k)\Big] \Delta x -  CF_{Ey}{\Delta y}\Big[{ E_y(i+1,j,k) } - { E_y(i,j,k) }\Big] \]
 
 Solving for \(H_z^{n+1}\),
 \[ H_z^{n+1}(i,j,k) =  H_z^{n}(i,j,k) + \]
-\[ \Big[E_x(i, j+1, k) - E_x(i, j, k)\Big] {2 \Delta t\over \mu_0 \Delta y \log\Big({\Delta y \over a}\Big) }\]
-\[ - \Big[{ E_y(i+1,j,k) } - { E_y(i,j,k) }\Big] {\Delta t\over \mu_0 \Delta x }  \] 
+\[ \Big[E_x(i, j+1, k) - E_x(i, j, k)\Big] { \Delta t\over \mu_0 \Delta y } {1 \over  CF_{Hz} }\]
+\[ - \Big[{ E_y(i+1,j,k) } - { E_y(i,j,k) }\Big] {\Delta t\over \mu_0 \Delta x } {CF_{Ey} \over CF_{Hz} } \] 
 
-% For the \(E_y\) components,
+The derivation for the E component updates is analogous. For \(E_z\) and a  non-linear \(H_y\) component this is,
+\[ E_z^{n+1}(i,j,k) =  E_z^{n}(i,j,k) + \]
+\[ \Big[H_y(i, j+1, k) - H_y(i, j, k)\Big] { \Delta t\over \varepsilon_0 \Delta x } {CF_{Hy}  \over  CF_{Ez} }\]
+\[ - \Big[{ H_x(i+1,j,k) } - { H_x(i,j,k) }\Big] {\Delta t\over \varepsilon_0 \Delta y } {1\over CF_{Ez} } \] 
 
-% \[{\partial E_y \over \partial t} = { 1 \over \epsilon} \Big[ {\partial H_x \over \partial z} - {\partial H_z \over \partial x} \Big]\]
+If the fields have more complicated variations than simply \(1 \over \sqrt{r}\), they can be found numerically using a very fine mesh. The correction terms are simply the number that \(H_z \Delta z\) (for example) needs to be multiplied by to reach the true value of the integral using the actual non-linear field variation.
+
+\[ CF = {\displaystyle \int_{r=0}^{r=\Delta}  { H_z(r)}  dr \over  H_z(i,j,k) \Delta z}\]
+
+If the field has a \(r^{-v}\) dependence instead of the \(v={1/2}\) used above,
+\[H_z(r) = { H_z(i,j,k) } \Big({\Delta z \over 2}\Big)^{v} {r}^{-v} \]
+
+\[ CF = {1 \over \Delta z} \Big({\Delta z \over 2}\Big)^{v} \; {\displaystyle \int_{r=0}^{r=\Delta z}   {r}^{-v}  dr }\]
+
+\[ CF = {1 \over \Delta z} \Big({\Delta z \over 2}\Big)^{v} \; {  {(\Delta z)}^{1-v}  \over (1-v) }\]
+
+\[ CF = \Big({1\over 2}\Big)^{v} \; {  1  \over (1-v) }\]
+
+\section{\(E_z\) Correction}
+
+The \(E_z\) component above and below the edge of the trace varies along y as,
+
+\[E_z(a) = E_{z,0} \Big( {\Delta z /2 \over a^2 + (\Delta z / 2)^2) }\Big)\]
+
+where \(a=0\) is directly under the edge.
+
+\( E_{z,0}\) can be found by setting \(a=0\), which corresponds to the \(E_z(i,j,k)\) component in the Yee grid.
+
+\[E_{z,0} = E_z(a=0)  {\Delta z \over 2} = E_z(i,j,k) {\Delta z \over 2}\]
+
+The correction factor is then,
+
+\[ CF = {\displaystyle \int_{a=-\Delta y /2}^{a=\Delta y / 2}  {E_{z,0} \Big( {\Delta z /2\over a^2 + (\Delta z/2)^2 }\Big)}  da \over  E_z(i,j,k) \Delta y}\]
+
+\[ CF =  {\Delta z \over 2 \Delta y} \int_{a=-\Delta y /2}^{a=\Delta y / 2}  { {\Delta z /2 \over a^2 + (\Delta z /2)^2 }}  da \]
+
+\[ CF = \Big({\Delta z \over 2 }\Big)^2 {1 \over \Delta y}\int_{a=-\Delta y /2}^{a=\Delta y / 2}  { {1\over a^2 + (\Delta z /2)^2 }}  da \]
+
+\[ CF = \Big({\Delta z \over 2 }\Big)^2 {1 \over \Delta y} \Bigg[ {\tan^{-1} \Big({a \over \Delta z /2}\Big) \over \Delta z /2 } \Bigg]_{a=-\Delta y /2}^{a=\Delta y / 2}  \]
+
+\[ CF = \Big({\Delta z \over 2 }\Big) {1 \over \Delta y} \Bigg[ {\tan^{-1} \Big({a \over \Delta z /2}\Big) } \Bigg]_{a=-\Delta y /2}^{a=\Delta y / 2}  \]
+
+\[ CF = \Big({\Delta z \over 2 }\Big) {1 \over \Delta y} \Bigg[ {\tan^{-1} \Big({\Delta y / 2 \over \Delta z /2}\Big) - \tan^{-1} \Big({-\Delta y / 2 \over \Delta z /2}\Big)} \Bigg]\]
+
+\[ CF = \Big({\Delta z \over 2 }\Big) {1 \over \Delta y} \Bigg[ 2{\tan^{-1} \Big({\Delta y / 2 \over \Delta z /2}\Big) } \Bigg]\]
+
+\[ CF = {\Delta z \over \Delta y }{\tan^{-1} \Big({\Delta y \over \Delta z}\Big) } \]
+
+\(H_y\) has the same correction factor along y under and above the trace edge.
 
 
-% \[{\partial H_z \over \partial t} = { 1 \over \mu} \Big[ {\partial E_x \over \partial y} - {\partial E_y \over \partial x} \Big]\]
 
 \end{document}
