@@ -70,13 +70,13 @@ class Solver_PCB():
         idx = []
         for i, g in enumerate(floc):
             diff = (g - position[i])
-            # if no cell is above the point, return the last axis index, otherwise return the first cell that is 
+            # if no cell is above the point, return the length of the axis, otherwise return the first cell that is 
             # equal to or larger than the point.
-            idx += [np.argmax(diff >= -self._tol) if diff[-1] > -self._tol else len(g) - 1]
+            idx += [np.argmax(diff >= -self._tol) if diff[-1] > -self._tol else len(g)]
         
         return tuple(idx)
     
-    def init_mesh_edge_method(self, d0, d_edge, n0=2):
+    def init_mesh_edge_method(self, d0, d_edge):
         """
         Initialize the spatial grid.
         """
@@ -112,6 +112,10 @@ class Solver_PCB():
 
             dmax_axis = []  # maximum sub-cell size within each cell
 
+            # to add edge subcells, the edge width must be at least half the minimum width between features
+            edge_subcells_valid = np.all(d_axis_const > (d_edge / 2))
+
+
             for i, cell_w in enumerate(d_axis_const):
                 # edges of this cell
                 # cell_min, cell_max = edges[axis][i:i+2]
@@ -130,7 +134,7 @@ class Solver_PCB():
                 # else:
 
                 # if in PEC, add a small edge sub-cell on either side of the PEC edge
-                if (i > 0):
+                if (i > 0) and edge_subcells_valid:
                     # make the last cell shorter to compensate for adding a new d_edge cell
                     d_axis[-1] -= d_edge
                     dmax_axis[-1] -= d_edge

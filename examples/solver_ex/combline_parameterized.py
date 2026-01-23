@@ -5,6 +5,7 @@ import pyvista as pv
 import time
 from scipy.special import ellipk
 from matplotlib.ticker import ScalarFormatter
+from pathlib import Path
 
 import rfnetwork as rfn
 import mpl_markers as mplm
@@ -23,6 +24,7 @@ plt.rcParams["font.serif"] = ["Times New Roman"] + plt.rcParams["font.serif"]
 
 sys.argv = sys.argv[0:1]
 
+dir_ = Path(__file__).parent
 
 u0 = const.u0
 e0 = const.e0
@@ -230,7 +232,8 @@ s.add_lumped_port(3, port3_face)
 s.add_lumped_port(4, port4_face)
 
 
-s.init_mesh(d0 = lam0/20, n0 = 2, d_pec = lam0/20, n_min_pec=4, d_sub=lam0/20, n_min_sub=4, blend_pec=True)
+# s.init_mesh(d0 = lam0/20, n0 = 2, d_pec = lam0/20, n_min_pec=4, d_sub=lam0/20, n_min_sub=4, blend_pec=True)
+s.init_mesh_edge_method(d0 = lam0/50, d_edge = 0.01)
 s.init_coefficients()
 
 # s.init_mesh_edge_method(d0 = 0.1, d_edge=0.01)
@@ -247,29 +250,30 @@ print(s.Nx * s.Ny * s.Nz / 1e3, "kcells")
 s.init_ports(r0=100)
 s.init_pec()
 
-s.add_field_monitor("mon1", "ez", "z", 0, 5)
+s.add_field_monitor("mon1", "ez", "z", 0, 30)
 # s.add_field_monitor("mon1", "ey", "z", sub_h, 5)
 # s.add_field_monitor("mon2", "ey", "z", sub_h, 15)
 # s.add_field_monitor("mon3", "ex", "z", sub_h, 10)
 
-pulse_n = 20000
-# width of half pulse in time
-t_half = (s.dt * 100)
-# center of the pulse in time
-t0 = (s.dt * 400)
+pulse_n = 30000
+# # width of half pulse in time
+# t_half = (s.dt * 100)
+# # center of the pulse in time
+# t0 = (s.dt * 400)
 
-t = np.linspace(0, s.dt * pulse_n, pulse_n)
-vsrc = 1e-2 * (np.sin(2* np.pi * f0 * (t)) * np.exp(-((t - t0) / t_half)**2)).astype(np.float32)
+vsrc = 1e-2 * s.gaussian_source(s.dt * 300, s.dt * pulse_n)
+
+# t = np.linspace(0, s.dt * pulse_n, pulse_n)
+# vsrc = 1e-2 * (np.sin(2* np.pi * f0 * (t)) * np.exp(-((t - t0) / t_half)**2)).astype(np.float32)
 # plt.plot(vsrc)
 
-frequency: np.ndarray = np.arange(0.5e9, 3e9, 1e6)
-len(frequency)
+frequency: np.ndarray = np.arange(0.5e9, 3e9, 2e6)
 
 s.run([1, 2], [vsrc, -vsrc], n_threads=4)
 self = s
 
 
-p = s.plot_monitor(["mon1"], el=0, zoom=1.1, az=0, view="xy", opacity=[0.8, 1], linear=False, cmap="jet", style="surface")
+p = s.plot_monitor(["mon1"], el=0, zoom=1.1, az=0, view="xy", opacity=[0.8, 1], linear=False, cmap="jet", style="surface", gif_file=dir_ / "combline.gif")
 p.camera_position = "xy"
 p.show(title="EM Solver")
 
