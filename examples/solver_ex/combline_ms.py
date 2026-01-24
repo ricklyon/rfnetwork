@@ -31,64 +31,26 @@ e0 = const.e0
 c0 = const.c0
 eta0 = const.eta0
 
-er = 2
+er = 3.0
 
-f1 = 1.425e9
-f2 = 1.575e9
-
+f1 = 1.2e9
+f2 = 1.5e9
 f0 = (f1 + f2) / 2
-w = (f2 - f1) / f0
 
-wp = 1
-
-lam0 = rfn.const.c0_in / f0
-
-n = 6
-theta_1 = (np.pi / 2) * (1 - (w / 2))
-Y_a = (1 / 50)
-
-h = 0.05143
-
-
-# page 619 example
-g = [1, 1.1681, 1.4039, 2.0562, 1.5170, 1.9029, 0.8618, 1.3554]
-
-# Table 10.06-1, pg 617
-J0_Y = 1 / np.sqrt(g[0] * g[1] * wp)
-Jk_Y = [1 / (wp * np.sqrt(g[k] * g[k+1])) for k in range(1, n)]
-Jn_y = 1 / np.sqrt(g[n] * g[n+1] * wp)
-
-Jk_Y = [J0_Y] + Jk_Y + [Jn_y]
-
-Nk = [0] + [np.sqrt(Jk_Y[k]**2 + ((np.tan(theta_1)**2) / 4)) for k in range(1, n)]
-
-M1 = Y_a * (J0_Y * np.sqrt(h) + 1)
-Mn = Y_a * (Jn_y * np.sqrt(h) + 1)
-
-# self capacitances, normalized by epsilon
-C0 = (eta0 / np.sqrt(er)) * (2 * Y_a - M1)
-C1 = (eta0 / np.sqrt(er)) * (Y_a - M1 + h * Y_a * ((np.tan(theta_1) / 2) + (Jk_Y[0]) **2 + Nk[1] - (Jk_Y[1])))
-Ck = [(eta0 / np.sqrt(er)) * h * Y_a * (Nk[k-1] + Nk[k] - Jk_Y[k-1] - Jk_Y[k]) for k in range(2, n)]
-Cn = (eta0 / np.sqrt(er)) * (Y_a - Mn + h * Y_a * ((np.tan(theta_1) / 2) + (Jk_Y[-1])**2 + Nk[-1] - Jk_Y[-2]))
-Cn1 = (eta0 / np.sqrt(er)) * (2 * Y_a - Mn)
-
-Ck = np.array([C0] + [C1] + Ck + [Cn] +[Cn1])
-
-
-# mutual capacitance, normalized by epsilon
-Cm0 = (eta0 / np.sqrt(er)) * (M1 - Y_a)
-Cmk = [(eta0 / np.sqrt(er)) * (Y_a * h) * (Jk_Y[k]) for k in range(1, n)]
-CmN = (eta0 / np.sqrt(er)) * (Mn - Y_a)
-
-Cmk = np.array([Cm0] + Cmk + [CmN])
-
-
-b = 0.625
+b = 0.04
 # w = b * 0.5
 # er = 1
 
+g_wb = [1, 1.1897, 1.4346, 2.1199, 1.6010, 2.1699, 1.5640, 1.9444, 0.8778, 1.3554]
+g_nb = [1, 1.1681, 1.4039, 2.0562, 1.5170, 1.9029, 0.8618, 1.3554]
+
+g = [1, 3.4817, 0.7618, 4.5381, 0.7618, 3.4817, 1.0000]
+Ck, Cmk = rfn.utils.combline_sections_nb(g, f1, f2, er=er, h=0.12)
+
+# print(Ck, Cmk)
+
 def find_Cab_spacing(sp, target_Cab):
-   w = b * 0.25
+   w = b * 0.5
    Cf_o, Cf_e = utils.coupled_sline_fringing_cap(w, sp, b, er)
    # normalized Cab
    Cab = (Cf_o - Cf_e) / (e0 * er)
@@ -103,6 +65,8 @@ for i, cmk in enumerate(Cmk):
 # even mode fringing capacitance for each space between lines, width is arbitrary here
 Cf_e = np.array([utils.coupled_sline_fringing_cap(0.5*b, s, b, er)[1] for s in sk]) / (e0 * er)
 # fringing capacitance on the outer edges (not between the two lines), figure 5.05-10b, for t=0
+t = 0.001
+# Cf = (2 / np.pi) * np.log((1 / (1 - t/b) + 1)) - (t / (np.pi * b)) * np.log((1 / (1 - t/b)**2 - 1))
 Cf = 0.44
 # Ck is the even mode capacitance Ce. Use equation 5.05-25 to determine the per unit length parallel plate capacitance 
 # for each line. Normalized by eps
@@ -112,27 +76,30 @@ Cp_e = (Ck / 2) - Cf_eps_left - Cf_eps_right
 # determine width using parallel plate capacitance Cp_e = 2w / b
 wk = (Cp_e / 2) * b
 
+print(wk, sk)
+
 # fringing_capacitance_figure(b=b, w=0.3, er=er)
 
+# Cf = np.sqrt(er) / rfn.const.c0 * 
 
 # design taken from table 10.07-2 in Matthaei
-K = 8
+K = len(wk)
 #k       0      1      2      3      4      5      6      7
 # w_k =   [0.126, 0.121, 0.126, 0.127, 0.127, 0.126, 0.121, 0.126]
 # s_k =   [0.092, 0.136, 0.143, 0.146, 0.143, 0.136, 0.087]
 
 # y coordinates of the bottom and top edge of each line
 ymax = rfn.const.c0_in / (f0 * np.sqrt(er) * 4)#* 1.968
-y0 = 0.15
+y0 = 0.06
 y1 = ymax - y0
 #k       0      1       2     3       4      5      6      7
-y0_k =  [0.1,   0,    y0,     0,    y0,     0,     y0,    0]
-y1_k =  [ymax,  y1,   ymax,   y1,   ymax,   y1,    ymax, ymax - 0.1  ]
+y0_k =  [0.1,   0,    y0,     0,    y0,     0,      0.1]
+y1_k =  [ymax,  y1,   ymax,   y1,   ymax,   y1,    ymax ]
 
 # x coordinates of the left and right edge of each line
 x0_k = np.zeros(K)
 x1_k = np.zeros(K)
-x0_k[0] = 0.750
+x0_k[0] = 0.15
 x1_k[0] = x0_k[0] + wk[0]
 
 
@@ -142,9 +109,9 @@ for i in range(1, K):
     x0_k[i] = x1_k[i-1] + sk[i-1]
     x1_k[i] = x0_k[i] + wk[i]
 
-sbox_w = x1_k[-1] + 0.750
+sbox_w = x1_k[-1] + 0.15
 sbox_len = ymax
-sbox_h = 0.625
+sbox_h = b
 substrate = pv.Cube(center=(sbox_w/2, sbox_len/2, 0), x_length=sbox_w, y_length=sbox_len, z_length=sbox_h)
 sbox =      pv.Cube(center=(sbox_w/2, sbox_len/2, 0), x_length=sbox_w, y_length=sbox_len, z_length=sbox_h)
 
@@ -175,16 +142,16 @@ port2_face = pv.Rectangle([
 
 
 port3_face = pv.Rectangle([
-    (x0_k[-1], y1_k[-1], 0),
-    (x1_k[-1], y1_k[-1], 0),
-    (x1_k[-1], y1_k[-1], -sbox_h/2),
+    (x0_k[-1], y0_k[-1], 0),
+    (x1_k[-1], y0_k[-1], 0),
+    (x1_k[-1], y0_k[-1], -sbox_h/2),
 ])
 
 
 port4_face = pv.Rectangle([
-    (x0_k[-1], y1_k[-1], 0),
-    (x1_k[-1], y1_k[-1], 0),
-    (x1_k[-1], y1_k[-1], sbox_h/2),
+    (x0_k[-1], y0_k[-1], 0),
+    (x1_k[-1], y0_k[-1], 0),
+    (x1_k[-1], y0_k[-1], sbox_h/2),
 ])
 
 s.add_lumped_port(1, port1_face)
@@ -193,14 +160,14 @@ s.add_lumped_port(3, port3_face)
 s.add_lumped_port(4, port4_face)
 
 
-s.init_mesh(d0 = lam0/20, n0 = 2, d_pec = lam0/20, n_min_pec=4, d_sub=lam0/20, n_min_sub=4, blend_pec=True)
-# s.init_mesh_edge_method(d0 = lam0/40, d_edge = 0.015)
+# s.init_mesh(d0 = lam0/20, n0 = 2, d_pec = lam0/20, n_min_pec=4, d_sub=lam0/20, n_min_sub=4, blend_pec=True)
+s.init_mesh_edge_method(d0 = 0.02, d_edge = 0.005)
 s.init_coefficients()
 
 # s.init_mesh_edge_method(d0 = 0.1, d_edge=0.01)
 # s.init_coefficients()
 
-
+self = s
 
 plotter = s.render()
 plotter.camera_position = "xy"
@@ -216,7 +183,7 @@ s.add_field_monitor("mon1", "ez", "z", 0, 30)
 # s.add_field_monitor("mon2", "ey", "z", sub_h, 15)
 # s.add_field_monitor("mon3", "ex", "z", sub_h, 10)
 
-pulse_n = 50000
+pulse_n = 200000
 # # width of half pulse in time
 # t_half = (s.dt * 100)
 # # center of the pulse in time
