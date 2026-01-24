@@ -252,3 +252,97 @@ def blend_cell_widths(
         return np.flip(cells_best).astype(dtype_) if flip_a_b else cells_best
     else:
         raise RuntimeError("Mesh did not converge.")
+
+
+def combline_sections_nb(g: list, f1: float, f2: float, er: float, h: float, wp: float = 1):
+    """
+    Normalized capacitances for edge coupled combline narrowband filter.
+
+    Table 10.06-1, pg 617, Matthaei
+    """
+    eta0 = const.eta0
+
+    n = len(g) - 2
+    f0 = (f1 + f2) / 2
+    w = (f2 - f1) / f0
+
+    theta_1 = (np.pi / 2) * (1 - (w / 2))
+    Y_a = (1 / 50)
+
+    J0_Y = 1 / np.sqrt(g[0] * g[1] * wp)
+    Jk_Y = [1 / (wp * np.sqrt(g[k] * g[k+1])) for k in range(1, n)]
+    Jn_y = 1 / np.sqrt(g[n] * g[n+1] * wp)
+
+    Jk_Y = [J0_Y] + Jk_Y + [Jn_y]
+
+    Nk = [0] + [np.sqrt(Jk_Y[k]**2 + ((np.tan(theta_1)**2) / 4)) for k in range(1, n)]
+
+    M1 = Y_a * (J0_Y * np.sqrt(h) + 1)
+    Mn = Y_a * (Jn_y * np.sqrt(h) + 1)
+
+    # self capacitances, normalized by epsilon
+    C0 = (eta0 / np.sqrt(er)) * (2 * Y_a - M1)
+    C1 = (eta0 / np.sqrt(er)) * (Y_a - M1 + h * Y_a * ((np.tan(theta_1) / 2) + (Jk_Y[0]) **2 + Nk[1] - (Jk_Y[1])))
+    Ck = [(eta0 / np.sqrt(er)) * h * Y_a * (Nk[k-1] + Nk[k] - Jk_Y[k-1] - Jk_Y[k]) for k in range(2, n)]
+    Cn = (eta0 / np.sqrt(er)) * (Y_a - Mn + h * Y_a * ((np.tan(theta_1) / 2) + (Jk_Y[-1])**2 + Nk[-1] - Jk_Y[-2]))
+    Cn1 = (eta0 / np.sqrt(er)) * (2 * Y_a - Mn)
+
+    Ck = np.array([C0] + [C1] + Ck + [Cn] +[Cn1])
+
+    # mutual capacitance, normalized by epsilon
+    Cm0 = (eta0 / np.sqrt(er)) * (M1 - Y_a)
+    Cmk = [(eta0 / np.sqrt(er)) * (Y_a * h) * (Jk_Y[k]) for k in range(1, n)]
+    CmN = (eta0 / np.sqrt(er)) * (Mn - Y_a)
+
+    Cmk = np.array([Cm0] + Cmk + [CmN])
+
+    return Ck, Cmk
+
+def combline_sections_wb(g: list, f1: float, f2: float, er: float, h: float, wp: float = 1):
+    """
+    Normalized capacitances for edge coupled combline wideband filter.
+
+    Table 10.07-1, pg 628, Matthaei
+    """
+    eta0 = const.eta0
+
+    n = len(g) - 2
+    f0 = (f1 + f2) / 2
+    w = (f2 - f1) / f0
+
+    theta_1 = (np.pi / 2) * (1 - (w / 2))
+    Y_a = (1 / 50)
+
+    # Table 10.07-1, pg 628
+    Jk2_Y = [g[2] / ( g[0] * np.sqrt(g[k] * g[k+1]) ) for k in range(2, n-2)]
+    Jn_Y = (1 / g[0]) * np.sqrt((g[2] * g[0]) / (g[n-2] * g[n+1]))
+    Jk_Y = [0, 0] + Jk2_Y + [Jn_Y]
+
+    Nk = [0, 0] + [np.sqrt((Jk_Y[k])**2 + ((wp * g[2] * np.tan(theta_1)) / (2 * g[0]))**2) for k in range(2, n-1)]
+
+    Zn_Za = [(wp * g[k] * g[k+1] * np.tan(theta_1)) for k in range(n+1)]
+
+    Y2_Ya = ((wp * g[2]) / (2 * g[0])) * np.tan(theta_1) + Nk[2] - (Jk_Y[2])
+    Yk3_Ya = [Nk[k-1] + Nk[k] - Jk_Y[k-1] - Jk_Y[k] for k in range(3, n-1)]
+    Yn_Ya = ((wp * ( 2 * g[0] * g[n-1] - g[2] * g[n+1]) * np.tan(theta_1)) / (2 * g[0] * g[n+1])) + Nk[n-2] - Jk_Y[n-2]
+    Yk_Ya = [0, 0] + [Y2_Ya] + Yk3_Ya + [Yn_Ya]
+
+    # self capacitance, normalized by epsilon
+    C1 = (eta0 / np.sqrt(er)) * Y_a * (1 - np.sqrt(h)) / (Zn_Za[0])
+    C2 = (eta0 / np.sqrt(er)) * (Y_a * h) * (Yk_Ya[2]) - np.sqrt(h) * (C1)
+
+    Ck3 = [(eta0 / np.sqrt(er)) * (Y_a * h) * (Yk_Ya[k]) for k in range(3, n-1)]
+
+    CN = (eta0 / np.sqrt(er)) * Y_a * (1 - np.sqrt(h)) / (Zn_Za[-1])
+    CN_1 = (eta0 / np.sqrt(er)) * (Y_a * h) * (Yk_Ya[n-1]) - np.sqrt(h) * (CN)
+
+    Ck = np.array([C1] + [C2] + Ck3 + [CN_1] + [CN])
+
+    # mutual capacitance, normalized by epsilon
+    Cm12 = (eta0 / np.sqrt(er)) * Y_a * (np.sqrt(h) / (Zn_Za[0]))
+    Cmk2 = [(eta0 / np.sqrt(er)) * (Y_a * h) * (Jk_Y[k]) for k in range(2, n-1)]
+    CmN = (eta0 / np.sqrt(er)) * Y_a * (np.sqrt(h) / (Zn_Za[-1]))
+
+    Cmk = np.array([Cm12] + Cmk2 + [CmN])
+
+    return Ck, Cmk
