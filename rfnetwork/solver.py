@@ -112,9 +112,6 @@ class Solver_PCB():
 
             dmax_axis = []  # maximum sub-cell size within each cell
 
-            # to add edge subcells, the edge width must be at least half the minimum width between features
-            edge_subcells_valid = np.all(d_axis_const > (d_edge / 2))
-
 
             for i, cell_w in enumerate(d_axis_const):
                 # edges of this cell
@@ -134,16 +131,22 @@ class Solver_PCB():
                 # else:
 
                 # if in PEC, add a small edge sub-cell on either side of the PEC edge
-                if (i > 0) and edge_subcells_valid:
+                if (i > 0) and d_axis[-1] > (d_edge * 2): 
                     # make the last cell shorter to compensate for adding a new d_edge cell
                     d_axis[-1] -= d_edge
                     dmax_axis[-1] -= d_edge
+                    # add new sub-cells around the edge
+                    dmax_axis += [d_edge]
+                    d_axis += [d_edge]
+                    # is_pec_axis += [is_pec_axis[-1], is_pec]
+
+                if (i > 0) and cell_w > (d_edge * 2):
                     # make the current shorter 
                     cell_w -= d_edge
                     # add new sub-cells around the edge
-                    dmax_axis += [d_edge, d_edge]
-                    d_axis += [d_edge, d_edge]
-                    # is_pec_axis += [is_pec_axis[-1], is_pec]
+                    dmax_axis += [d_edge]
+                    d_axis += [d_edge]
+
 
                 # split cells larger than d0*5 into two cells, this prevents large cells bounded by 
                 # equal sized small ones from being broken up into small cells, and instead ensures

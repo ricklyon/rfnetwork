@@ -32,6 +32,7 @@ class TestUtils(unittest.TestCase):
             Cmk, [1.582, 0.301, 0.226, 0.218, 0.226, 0.301, 1.582], decimal=2
         )
 
+    def test_combline_section_wb(self):
         # check wideband example, page 632
         f0 = 1.5e9
         w = 0.7 * f0
