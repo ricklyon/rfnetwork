@@ -31,21 +31,21 @@ e0 = const.e0
 c0 = const.c0
 eta0 = const.eta0
 
-er = 3.0
+er = 3.66
 
-f1 = 1.2e9
-f2 = 1.5e9
+f1 = 1.1e9
+f2 = 1.7e9
 f0 = (f1 + f2) / 2
 
-b = 0.04
+b = 0.06
 # w = b * 0.5
 # er = 1
 
 g_wb = [1, 1.1897, 1.4346, 2.1199, 1.6010, 2.1699, 1.5640, 1.9444, 0.8778, 1.3554]
 g_nb = [1, 1.1681, 1.4039, 2.0562, 1.5170, 1.9029, 0.8618, 1.3554]
 
-g = [1, 3.4817, 0.7618, 4.5381, 0.7618, 3.4817, 1.0000]
-Ck, Cmk = rfn.utils.combline_sections_nb(g, f1, f2, er=er, h=0.12)
+g = [1, 1.7372, 1.2583, 2.6381, 1.3444, 2.6381, 1.2583, 1.7372]
+Ck, Cmk = rfn.utils.combline_sections_nb(g, f1, f2, er=er, h=0.2)
 
 # print(Ck, Cmk)
 
@@ -65,9 +65,9 @@ for i, cmk in enumerate(Cmk):
 # even mode fringing capacitance for each space between lines, width is arbitrary here
 Cf_e = np.array([utils.coupled_sline_fringing_cap(0.5*b, s, b, er)[1] for s in sk]) / (e0 * er)
 # fringing capacitance on the outer edges (not between the two lines), figure 5.05-10b, for t=0
-t = 0.001
-# Cf = (2 / np.pi) * np.log((1 / (1 - t/b) + 1)) - (t / (np.pi * b)) * np.log((1 / (1 - t/b)**2 - 1))
-Cf = 0.44
+t = 0.002
+Cf = (2 / np.pi) * np.log((1 / (1 - t/b) + 1)) - (t / (np.pi * b)) * np.log((1 / (1 - t/b)**2 - 1))
+# Cf = 0.44
 # Ck is the even mode capacitance Ce. Use equation 5.05-25 to determine the per unit length parallel plate capacitance 
 # for each line. Normalized by eps
 Cf_eps_left = np.concatenate([[Cf], Cf_e])
@@ -78,6 +78,8 @@ wk = (Cp_e / 2) * b
 
 print(wk, sk)
 
+# wk[0] -= 0.005
+# wk[-1] -= 0.005
 # fringing_capacitance_figure(b=b, w=0.3, er=er)
 
 # Cf = np.sqrt(er) / rfn.const.c0 * 
@@ -89,25 +91,31 @@ K = len(wk)
 # s_k =   [0.092, 0.136, 0.143, 0.146, 0.143, 0.136, 0.087]
 
 # y coordinates of the bottom and top edge of each line
-ymax = rfn.const.c0_in / (f0 * np.sqrt(er) * 4)#* 1.968
-y0 = 0.06
+ymax = rfn.const.c0_in / (f0 * np.sqrt(er) * 4)
+y0 = 0.04
 y1 = ymax - y0
-#k       0      1       2     3       4      5      6      7
-y0_k =  [0.1,   0,    y0,     0,    y0,     0,      0.1]
-y1_k =  [ymax,  y1,   ymax,   y1,   ymax,   y1,    ymax ]
 
 # x coordinates of the left and right edge of each line
 x0_k = np.zeros(K)
 x1_k = np.zeros(K)
+y0_k = np.zeros(K)
+y1_k = np.zeros(K)
+
 x0_k[0] = 0.15
 x1_k[0] = x0_k[0] + wk[0]
 
-
-y1 = np.zeros(K)
+for i in range(K):
+    if i % 2: # if odd
+        y0_k[i] = 0
+        y1_k[i] = y1
+    else: # if even
+        y0_k[i] = y0
+        y1_k[i] = ymax
 
 for i in range(1, K):
     x0_k[i] = x1_k[i-1] + sk[i-1]
     x1_k[i] = x0_k[i] + wk[i]
+
 
 sbox_w = x1_k[-1] + 0.15
 sbox_len = ymax
@@ -116,7 +124,7 @@ substrate = pv.Cube(center=(sbox_w/2, sbox_len/2, 0), x_length=sbox_w, y_length=
 sbox =      pv.Cube(center=(sbox_w/2, sbox_len/2, 0), x_length=sbox_w, y_length=sbox_len, z_length=sbox_h)
 
 s = rfn.Solver_PCB(sbox, nports=4)
-s.add_substrate("sub", substrate, er=er, opacity=0.0)
+s.add_substrate("sub", substrate, er=er, opacity=0.0, loss_tan=0.003, f0=1.5e9)
 
 
 for i in range(K):
@@ -140,18 +148,19 @@ port2_face = pv.Rectangle([
     (x1_k[0], y0_k[0], sbox_h/2),
 ])
 
+port34_y = y0_k[-1] if y1_k[-1] == ymax else y1_k[-1]
 
 port3_face = pv.Rectangle([
-    (x0_k[-1], y0_k[-1], 0),
-    (x1_k[-1], y0_k[-1], 0),
-    (x1_k[-1], y0_k[-1], -sbox_h/2),
+    (x0_k[-1], port34_y, 0),
+    (x1_k[-1], port34_y, 0),
+    (x1_k[-1], port34_y, -sbox_h/2),
 ])
 
 
 port4_face = pv.Rectangle([
-    (x0_k[-1], y0_k[-1], 0),
-    (x1_k[-1], y0_k[-1], 0),
-    (x1_k[-1], y0_k[-1], sbox_h/2),
+    (x0_k[-1], port34_y, 0),
+    (x1_k[-1], port34_y, 0),
+    (x1_k[-1], port34_y, sbox_h/2),
 ])
 
 s.add_lumped_port(1, port1_face)
@@ -161,7 +170,7 @@ s.add_lumped_port(4, port4_face)
 
 
 # s.init_mesh(d0 = lam0/20, n0 = 2, d_pec = lam0/20, n_min_pec=4, d_sub=lam0/20, n_min_sub=4, blend_pec=True)
-s.init_mesh_edge_method(d0 = 0.02, d_edge = 0.005)
+s.init_mesh_edge_method(d0 = 0.03, d_edge = 0.0025)
 s.init_coefficients()
 
 # s.init_mesh_edge_method(d0 = 0.1, d_edge=0.01)
@@ -183,7 +192,7 @@ s.add_field_monitor("mon1", "ez", "z", 0, 30)
 # s.add_field_monitor("mon2", "ey", "z", sub_h, 15)
 # s.add_field_monitor("mon3", "ex", "z", sub_h, 10)
 
-pulse_n = 200000
+pulse_n = 150000
 # # width of half pulse in time
 # t_half = (s.dt * 100)
 # # center of the pulse in time
@@ -202,7 +211,7 @@ self = s
 
 
 p = s.plot_monitor(
-    ["mon1"], zoom=1.1, view="xy", el=0, opacity=[0.5, 1], 
+    ["mon1"], zoom=1.1, view="xy", el=0, opacity=[0.9, 1], 
     linear=False, cmap="jet", style="surface",
 )
 # p.camera_position = "xy"
