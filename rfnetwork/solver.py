@@ -32,8 +32,8 @@ class Solver_PCB():
         self._places = 5 # hundredth of a mil
         self._tol = 1 / (10 ** self._places)
 
-    def add_substrate(self, name, obj, er: float, **kwargs):
-        self.substrate[name] = (obj, er)
+    def add_substrate(self, name, obj, er: float, loss_tan=0, f0=0, **kwargs):
+        self.substrate[name] = dict(obj=obj, er=er, loss_tan=loss_tan, f0=f0)
         self.styles[name] = kwargs
 
     def add_pec_face(self, name, obj, **kwargs):
@@ -82,7 +82,7 @@ class Solver_PCB():
         """
         edges = [np.array([], dtype=np.float32) for i in range(3)]
 
-        objects = [self.bounding_box] + list(self.pec_face.values()) + [sub[0] for sub in self.substrate.values()]
+        objects = [self.bounding_box] + list(self.pec_face.values()) + [sub["obj"] for sub in self.substrate.values()]
         dtype_ = np.float32
 
         # build list of edge coordinates along each axis
@@ -98,9 +98,9 @@ class Solver_PCB():
         sub_z_max = 0
         # maximum er of any substrate
         sub_er_max = 1
-        for sub, sub_er in self.substrate.values():
-            sub_z_max = np.max([sub_z_max, np.max(sub.points[:, 2])])
-            sub_er_max = np.max([sub_er_max, sub_er])
+        for sub in self.substrate.values():
+            sub_z_max = np.max([sub_z_max, np.max(sub["obj"].points[:, 2])])
+            sub_er_max = np.max([sub_er_max, sub["er"]])
 
         # build a list of cell widths along each axis
         cell_d = [[], [], []]
@@ -244,12 +244,15 @@ class Solver_PCB():
         self.dx_h, self.dy_h, self.dz_h = dx_h, dy_h, dz_h
 
         self.eps = np.ones(self.n_cells) * e0
+        self.sigma = np.zeros(self.n_cells)
 
-        for (sub, er) in self.substrate.values():
-            x0, y0, z0 = self.pos_to_idx(np.min(sub.points, axis=0), mode="cell")
-            x1, y1, z1 = self.pos_to_idx(np.max(sub.points, axis=0), mode="cell")
+        for sub in self.substrate.values():
+            x0, y0, z0 = self.pos_to_idx(np.min(sub["obj"].points, axis=0), mode="cell")
+            x1, y1, z1 = self.pos_to_idx(np.max(sub["obj"].points, axis=0), mode="cell")
         
-            self.eps[x0: x1, y0: y1, z0: z1] = e0 * er
+            self.eps[x0: x1, y0: y1, z0: z1] = e0 * sub["er"]
+            # non-dispersive conductivity at a single frequency
+            self.sigma[x0: x1, y0: y1, z0: z1] = sub["loss_tan"] * e0 * sub["er"] * 2 * np.pi * sub["f0"]
 
         # locations of all field components in grid
         self.floc = dict(
@@ -322,7 +325,7 @@ class Solver_PCB():
         """
         edges = [np.array([], dtype=np.float32) for i in range(3)]
 
-        objects = [self.bounding_box] + list(self.pec_face.values()) + [sub[0] for sub in self.substrate.values()]
+        objects = [self.bounding_box] + list(self.pec_face.values()) + [sub["obj"] for sub in self.substrate.values()]
         dtype_ = np.float32
 
         # build list of edge coordinates along each axis
@@ -347,9 +350,9 @@ class Solver_PCB():
         sub_z_max = 0
         # maximum er of any substrate
         sub_er_max = 1
-        for sub, sub_er in self.substrate.values():
+        for sub in self.substrate.values():
             sub_z_max = np.max([sub_z_max, np.max(sub.points[:, 2])])
-            sub_er_max = np.max([sub_er_max, sub_er])
+            sub_er_max = np.max([sub_er_max, sub["er"]])
 
         # build a list of cell widths along each axis
         cell_d = [[], [], []]
@@ -482,12 +485,15 @@ class Solver_PCB():
         self.dx_h, self.dy_h, self.dz_h = dx_h, dy_h, dz_h
 
         self.eps = np.ones(self.n_cells) * e0
+        self.sigma = np.zeros(self.n_cells)
 
-        for (sub, er) in self.substrate.values():
-            x0, y0, z0 = self.pos_to_idx(np.min(sub.points, axis=0), mode="cell")
-            x1, y1, z1 = self.pos_to_idx(np.max(sub.points, axis=0), mode="cell")
+        for sub in self.substrate.values():
+            x0, y0, z0 = self.pos_to_idx(np.min(sub["obj"].points, axis=0), mode="cell")
+            x1, y1, z1 = self.pos_to_idx(np.max(sub["obj"].points, axis=0), mode="cell")
         
-            self.eps[x0: x1, y0: y1, z0: z1] = e0 * er
+            self.eps[x0: x1, y0: y1, z0: z1] = e0 * sub["er"]
+            # non-dispersive conductivity at a single frequency
+            self.sigma[x0: x1, y0: y1, z0: z1] = sub["loss_tan"] * e0 * sub["er"] * 2 * np.pi * sub["f0"]
 
         # locations of all field components in grid
         self.floc = dict(
@@ -530,27 +536,33 @@ class Solver_PCB():
         Da_0 = 1  # (2 * u0 - (sigm_0 * dt)) / (2 * u0 + (sigm_0 * dt))
         Db_0 = dt / u0
 
-        # substrate
-        # ez components are on the edge of the x/y cell boundaries, average epsilon from the adjacent cells
-        dx0, dx1 = dx[:-1][..., None, None], dx[1:][..., None, None]
-        dy0, dy1 = dy[:-1][None, :, None], dy[1:][None, :, None]
-        dz0, dz1 = dz[:-1][None, None], dz[1:][None, None]
 
-        eps = self.eps
-        # average epsilon cells adjacent to x edges
-        eps_x = (eps[:-1] * (dx0/2) + eps[1:] * (dx1/2)) / (dx0/2 + dx1/2)
-        # average epsilon cells adjacent to y edges
-        eps_y = (eps[:, :-1] * (dy0/2) + eps[:, 1:] * (dy1/2)) / (dy0/2 + dy1/2)
-        # average epsilon cells adjacent to z edges
-        eps_z = (eps[..., :-1] * (dz0/2) + eps[..., 1:] * (dz1/2)) / (dz0/2 + dz1/2)
+        def average_cells(cell_values):
+            # cell widths broadcasted across the full 3D grid
+            dx0, dx1 = dx[:-1][..., None, None], dx[1:][..., None, None]
+            dy0, dy1 = dy[:-1][None, :, None], dy[1:][None, :, None]
+            dz0, dz1 = dz[:-1][None, None], dz[1:][None, None]
 
-        # average epsilon cells along y and z
-        eps_yz = ((eps_y[..., :-1] * (dz0/2) + eps_y[..., 1:] * (dz1/2)) / (dz0/2 + dz1/2))
-        # average epsilon cells along x and z
-        eps_xz = ((eps_x[..., :-1] * (dz0/2) + eps_x[..., 1:] * (dz1/2)) / (dz0/2 + dz1/2))
-        # average epsilon cells along x and y
-        eps_xy = ((eps_x[:, :-1] * (dy0/2) + eps_x[:, 1:] * (dy1/2)) / (dy0/2 + dy1/2))
+            # average cells adjacent to x edges
+            v_x = (cell_values[:-1] * (dx0/2) + cell_values[1:] * (dx1/2)) / (dx0/2 + dx1/2)
+            # average cells adjacent to y edges
+            v_y = (cell_values[:, :-1] * (dy0/2) + cell_values[:, 1:] * (dy1/2)) / (dy0/2 + dy1/2)
+            # average cells adjacent to z edges
+            v_z = (cell_values[..., :-1] * (dz0/2) + cell_values[..., 1:] * (dz1/2)) / (dz0/2 + dz1/2)
 
+            # average cells along y and z
+            v_yz = ((v_y[..., :-1] * (dz0/2) + v_y[..., 1:] * (dz1/2)) / (dz0/2 + dz1/2))
+            # average cells along x and z
+            v_xz = ((v_x[..., :-1] * (dz0/2) + v_x[..., 1:] * (dz1/2)) / (dz0/2 + dz1/2))
+            # average cells along x and y
+            v_xy = ((v_x[:, :-1] * (dy0/2) + v_x[:, 1:] * (dy1/2)) / (dy0/2 + dy1/2))
+
+            return v_x, v_y, v_z, v_xy, v_xz, v_yz
+
+
+        eps_x, eps_y, eps_z, eps_xy, eps_xz, eps_yz = average_cells(self.eps)
+
+        sig_x, sig_y, sig_z, sig_xy, sig_xz, sig_yz = average_cells(self.sigma)
 
         self.eps_ex = np.ones(self.fshape["ex"], dtype=dtype_) * e0
         self.eps_ey = np.ones(self.fshape["ey"], dtype=dtype_) * e0
@@ -575,15 +587,26 @@ class Solver_PCB():
         # ez component is on the x and y edge of the cell, average eps from adjacent cells on both axis
         self.eps_hz[..., 1:-1] = eps_z
 
+        self.sig_ex = np.zeros(self.fshape["ex"], dtype=dtype_)
+        self.sig_ey = np.zeros(self.fshape["ey"], dtype=dtype_)
+        self.sig_ez = np.zeros(self.fshape["ez"], dtype=dtype_)
+
+        # sigma values at ex
+        self.sig_ex[:, 1:-1, 1:-1] = sig_yz
+        # sigma values at ey
+        self.sig_ey[1:-1, :, 1:-1] = sig_xz
+        # sigma values az ez
+        self.sig_ez[1:-1, 1:-1] = sig_xy
+
         # coefficient in front of the previous time values of E
-        Ca_ex = np.ones((Nx, Ny+1, Nz+1), dtype=dtype_) * Ca_0
-        Ca_ey = np.ones((Nx+1, Ny, Nz+1), dtype=dtype_) * Ca_0
-        Ca_ez = np.ones((Nx+1, Ny+1, Nz), dtype=dtype_) * Ca_0
+        Ca_ex = (2 * self.eps_ex - (self.sig_ex * dt)) / (2 * self.eps_ex + (self.sig_ex * dt))
+        Ca_ey = (2 * self.eps_ey - (self.sig_ey * dt)) / (2 * self.eps_ey + (self.sig_ey * dt))
+        Ca_ez = (2 * self.eps_ez - (self.sig_ez * dt)) / (2 * self.eps_ez + (self.sig_ez * dt))
         
         # coefficient in front of the difference terms of H
-        Cb_ex = dt / self.eps_ex
-        Cb_ey = dt / self.eps_ey
-        Cb_ez = dt / self.eps_ez
+        Cb_ex = (2 * dt) / ((2 * self.eps_ex + (self.sig_ex * dt)))
+        Cb_ey = (2 * dt) / ((2 * self.eps_ey + (self.sig_ey * dt)))
+        Cb_ez = (2 * dt) / ((2 * self.eps_ez + (self.sig_ez * dt)))
     
         self.Ca = dict(
             ex_y = Ca_ex.copy(),
@@ -602,10 +625,6 @@ class Solver_PCB():
             ez_x = Cb_ez.copy(),
             ez_y = Cb_ez.copy()
         )
-
-        # self.eps_ex_z = self.eps_ex.copy()
-        # self.eps_ex_z[..., 4] = e0 * 1
-        # self.Cb["ex_z"] = dt / self.eps_ex_z
 
         self.Da = dict(
             hx_y = np.ones((Nx+1, Ny, Nz), dtype=dtype_) * Da_0,
@@ -1350,8 +1369,8 @@ class Solver_PCB():
         plotter.add_mesh(grid, style="wireframe", line_width=0.05, color="k", opacity=0.05)
 
         # add substrates
-        for name, (sub, er) in self.substrate.items():
-            plotter.add_mesh(sub, **self.styles[name])
+        for name, (sub) in self.substrate.items():
+            plotter.add_mesh(sub["obj"], **self.styles[name])
             
         # add pec
         for name, pec in self.pec_face.items():
@@ -1473,10 +1492,10 @@ class Solver_PCB():
         # source port applied voltage
         src_applied = self.ports[source_port-1]["src"]
 
-        i_s = self.vi_probe_values(f"port{source_port}")
-        Is = utils.dtft(i_s, frequency, 1 / self.dt)
+        # i_s = self.vi_probe_values(f"port{source_port}")
+        # Is = utils.dtft(i_s, frequency, 1 / self.dt)
 
-        Vs = utils.dtft(src_vp, frequency, 1 / self.dt)
+        # Vs = utils.dtft(src_vp, frequency, 1 / self.dt)
 
         # delay current by half a time-step to be at the same time sample as the voltage
         # h components are ahead of the e components by half a time step
@@ -1487,6 +1506,14 @@ class Solver_PCB():
 
         # B[:, source_port-1] = Bs
 
+
+        # plt.plot(src_vp)
+
+        freq = np.fft.fftfreq(len(src_vp), self.dt)
+        max_arg = np.argmin(np.abs(freq - 3e9))
+        V = np.fft.fft(src_vp)
+
+        # plt.plot(freq[:max_arg], V[:max_arg])
 
         # source port S11, reflected wave (b) is the difference of the total voltage across the port,
         # and the incident wave V = a + b
