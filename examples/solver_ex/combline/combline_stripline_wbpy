@@ -33,19 +33,22 @@ eta0 = const.eta0
 
 er = 3.66
 
-f1 = 1.1e9
-f2 = 1.7e9
-f0 = (f1 + f2) / 2
+f1 = 1.5e9
+f2 = 1.6e9
+
+f0 = 1.5e9
+w = 0.55
+
+f1 = f0 - (w * f0)/ 2
+f2 = f0 + (w * f0)/ 2
 
 b = 0.06
-# w = b * 0.5
-# er = 1
 
 g_wb = [1, 1.1897, 1.4346, 2.1199, 1.6010, 2.1699, 1.5640, 1.9444, 0.8778, 1.3554]
 g_nb = [1, 1.1681, 1.4039, 2.0562, 1.5170, 1.9029, 0.8618, 1.3554]
 
-g = [1, 1.7372, 1.2583, 2.6381, 1.3444, 2.6381, 1.2583, 1.7372]
-Ck, Cmk = rfn.utils.combline_sections_nb(g, f1, f2, er=er, h=0.2)
+g = [1, 0.5176, 1.4142, 1.9318, 1.9318, 1.4142, 0.5176, 1.0000]
+Ck, Cmk = rfn.utils.combline_sections_wb(g, f1, f2, er=er, h=0.2)
 
 # print(Ck, Cmk)
 
@@ -65,9 +68,9 @@ for i, cmk in enumerate(Cmk):
 # even mode fringing capacitance for each space between lines, width is arbitrary here
 Cf_e = np.array([utils.coupled_sline_fringing_cap(0.5*b, s, b, er)[1] for s in sk]) / (e0 * er)
 # fringing capacitance on the outer edges (not between the two lines), figure 5.05-10b, for t=0
-t = 0.002
-Cf = (2 / np.pi) * np.log((1 / (1 - t/b) + 1)) - (t / (np.pi * b)) * np.log((1 / (1 - t/b)**2 - 1))
-# Cf = 0.44
+t = 0
+# Cf = (2 / np.pi) * np.log((1 / (1 - t/b) + 1)) - (t / (np.pi * b)) * np.log((1 / (1 - t/b)**2 - 1))
+Cf = 0.44
 # Ck is the even mode capacitance Ce. Use equation 5.05-25 to determine the per unit length parallel plate capacitance 
 # for each line. Normalized by eps
 Cf_eps_left = np.concatenate([[Cf], Cf_e])
@@ -92,7 +95,7 @@ K = len(wk)
 
 # y coordinates of the bottom and top edge of each line
 ymax = rfn.const.c0_in / (f0 * np.sqrt(er) * 4)
-y0 = 0.04
+y0 = 0.05 * ymax
 y1 = ymax - y0
 
 # x coordinates of the left and right edge of each line
@@ -106,11 +109,14 @@ x1_k[0] = x0_k[0] + wk[0]
 
 for i in range(K):
     if i % 2: # if odd
-        y0_k[i] = 0
-        y1_k[i] = y1
-    else: # if even
         y0_k[i] = y0
         y1_k[i] = ymax
+    else: # if even
+        y0_k[i] = 0
+        y1_k[i] = y1
+
+y0_k[0] = 0.025 * ymax
+y1_k[-1] = ymax - (0.025 * ymax)
 
 for i in range(1, K):
     x0_k[i] = x1_k[i-1] + sk[i-1]
@@ -124,7 +130,7 @@ substrate = pv.Cube(center=(sbox_w/2, sbox_len/2, 0), x_length=sbox_w, y_length=
 sbox =      pv.Cube(center=(sbox_w/2, sbox_len/2, 0), x_length=sbox_w, y_length=sbox_len, z_length=sbox_h)
 
 s = rfn.Solver_PCB(sbox, nports=4)
-s.add_substrate("sub", substrate, er=er, opacity=0.0, loss_tan=0.003, f0=1.5e9)
+s.add_substrate("sub", substrate, er=er, opacity=0.0, loss_tan=0.0035, f0=1.5e9)
 
 
 for i in range(K):
@@ -170,7 +176,7 @@ s.add_lumped_port(4, port4_face)
 
 
 # s.init_mesh(d0 = lam0/20, n0 = 2, d_pec = lam0/20, n_min_pec=4, d_sub=lam0/20, n_min_sub=4, blend_pec=True)
-s.init_mesh_edge_method(d0 = 0.03, d_edge = 0.0025)
+s.init_mesh_edge_method(d0 = 0.05, d_edge = 0.0025)
 s.init_coefficients()
 
 # s.init_mesh_edge_method(d0 = 0.1, d_edge=0.01)
@@ -204,7 +210,7 @@ vsrc = 1e-2 * s.gaussian_source(s.dt * 300, s.dt * pulse_n)
 # vsrc = 1e-2 * (np.sin(2* np.pi * f0 * (t)) * np.exp(-((t - t0) / t_half)**2)).astype(np.float32)
 # plt.plot(vsrc)
 
-frequency: np.ndarray = np.arange(0.5e9, 3e9, 2e6)
+frequency: np.ndarray = np.arange(0.4e9, 6e9, 2e6)
 
 s.run([1, 2], [vsrc, -vsrc], n_threads=4)
 self = s
@@ -223,41 +229,41 @@ S11 = sdata[:, 0]
 S21 = sdata[:, 2]
 
 
-fig, axes = plt.subplots(2, 2, figsize=(9, 9))
+fig, axes = plt.subplots(2, 2, figsize=(11, 8))
 
 ax = axes[0,0]
 rfn.plots.draw_smithchart(ax)
 ax.plot(S11.real, S11.imag)
 
-ax = axes[0,1]
+ax = axes[1,1]
 ax.plot(frequency / 1e9, conv.db20_lin(S11))
 ax.set_xlabel("Frequency [GHz]")
-ax.set_xticks(np.arange(0.6, 2.6, 0.2))
-ax.set_xlim([0.6, 2.4])
+ax.set_xticks(np.arange(0.4, 3.2, 0.2))
+ax.set_xlim([0.4, 3])
 ax.set_ylabel("[dB]")
 ax.set_ylim([-40, 2])
 ax.grid(True)
-ax.legend(["S11", "Ref"])
+ax.legend(["S11"], loc="lower left")
 
 ax = axes[1,0]
 ax.plot(frequency / 1e9, conv.db20_lin(S21))
 mplm.line_marker(x = f0/1e9, axes=ax)
-ax.set_xticks(np.arange(0.6, 2.6, 0.2))
-ax.set_xlim([0.6, 2.4])
+ax.set_xticks(np.arange(0.4, 3.2, 0.2))
+ax.set_xlim([0.4, 3])
 ax.set_ylim([-60, 2])
 ax.grid(True)
 ax.set_xlabel("Frequency [GHz]")
 ax.set_ylabel("[dB]")
-ax.legend(["S21", "Ref"])
+ax.legend(["S21"], loc="lower left")
 
-ax = axes[1,1]
+ax = axes[0,1]
 ax.plot(frequency / 1e9, np.unwrap(np.angle(S21, deg=True)))
-ax.set_xticks(np.arange(0.6, 2.6, 0.2))
-ax.set_xlim([0.6, 2.4])
+ax.set_xticks(np.arange(0.4, 3.2, 0.2))
+ax.set_xlim([0.4, 3])
 mplm.line_marker(x = f0/1e9, axes=ax)
 ax.set_xlabel("Frequency [GHz]")
 ax.set_ylabel("[deg]")
-ax.legend(["S21", "Ref"])
+ax.legend(["S21"], loc="lower left")
 
 fig.tight_layout()
 plt.show()

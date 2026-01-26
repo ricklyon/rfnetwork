@@ -188,7 +188,7 @@ substrate = pv.Cube(center=(sbox_w/2, sbox_len/2, 0), x_length=sbox_w, y_length=
 sbox =      pv.Cube(center=(sbox_w/2, sbox_len/2, 0), x_length=sbox_w, y_length=sbox_len, z_length=sbox_h)
 
 s = rfn.Solver_PCB(sbox, nports=4)
-s.add_substrate("sub", substrate, er=1, opacity=0.0)
+s.add_substrate("sub", substrate, er=er, opacity=0.0)
 
 
 for i in range(K):
@@ -255,7 +255,7 @@ s.add_field_monitor("mon1", "ez", "z", 0, 30)
 # s.add_field_monitor("mon2", "ey", "z", sub_h, 15)
 # s.add_field_monitor("mon3", "ex", "z", sub_h, 10)
 
-pulse_n = 30000
+pulse_n = 8000
 # # width of half pulse in time
 # t_half = (s.dt * 100)
 # # center of the pulse in time
@@ -273,8 +273,11 @@ s.run([1, 2], [vsrc, -vsrc], n_threads=4)
 self = s
 
 
-p = s.plot_monitor(["mon1"], el=0, zoom=1.1, az=0, view="xy", opacity=[0.8, 1], linear=False, cmap="jet", style="surface", gif_file=dir_ / "combline.gif")
-p.camera_position = "xy"
+p = s.plot_monitor(
+    ["mon1"], zoom=1.1, view="xy", el=0, opacity=[0.5, 1], 
+    linear=False, cmap="jet", style="surface", #gif_file=dir_ / "combline.gif"
+)
+# p.camera_position = "xy"
 p.show(title="EM Solver")
 
 
