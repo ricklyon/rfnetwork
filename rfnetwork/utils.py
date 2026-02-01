@@ -195,65 +195,67 @@ def lp_filter_prototype(n: int, ripple: float = 0.5):
 
     return lp_table[f"{ripple:.1f}"][n]
 
+    
 def blend_cell_widths(
-    a: float, b: float, d: float, r_max: float = 1.5, n_min: int = 1, tol: float = 0.0001, dtype_=np.float32
+    a: float, b: float, d: float, n_min: int = 1, tol: float = 0.0001, dtype_=np.float32
 ):
     """
     Return a list of cell widths that divide a cell with width d into cells that do not exceed the given
     growth rate r_max. a is the width of the previous cell, b is the width of the next cell.
     """
 
+    # if d is less than or equal to a, no grading is possible, return d as the cell width
+    if np.abs(d - a) < tol:
+        return np.array([d])
+    
     # swap a and b if a is larger than b. Always start with the smaller cell and increase up to b
     flip_a_b = False
     if (b < a):
         a, b = b, a
         flip_a_b = True
 
-    # if no grading is needed, split the cell into equal sections
-    if ((b / a) < r_max):
-        # get number of cells that divides this cell into equal sections as close to a as possible
-        n = d / a
-        n = np.clip(int(n + 1 if n % 1 > 0.5 else n), n_min, None)
-        
-        return np.array([d / n] * n, dtype=np.float32)
-    
-    # if d is less than or equal to a, no grading is possible, return d as the cell width
-    if np.abs(d - a) < tol:
-        return np.array([d])
-
     # number of cells can be no larger than d/a (with all cells are of width a)
     n_max = int(d / a) + 1
+    
+    # if cells are nearly equal, use symmetrical grading
+    symmetric_grading = ((b / a) < 1.2) and d > (2 * a)
+    
+    if symmetric_grading:
+        # growth rates for each case where the cell is divided into n cells
+        n_test = [n for n in range(2, n_max + 1) if n % 2 == 0]
 
-    # growth rates for each case where the cell is divided into n cells
-    n_test = np.arange(n_min, n_max + 1)
+        def compute_d(m, n):
+            return a * np.sum([m**r for r in range(1, int(n / 2) + 1)]) - (d / 2)
+    else:
+        # growth rates for each case where the cell is divided into n cells
+        n_test = np.arange(n_min, n_max + 1)
+
+        def compute_d(m, n):
+            return a * np.sum([m**r for r in range(1, n+1)]) - d
+
+    # initialize arrays for the optimal growth rate m for each n
     m_result = np.zeros((len(n_test), 2))
-
     cells_m = [None] * len(n_test)
 
     for i, n in enumerate(n_test):
-        # growth rate of cells must make the last cell at least 2/3 of b
-        # a * m^n > (2/3) b
-        m_min = ((1 / r_max) * (b/a))**(1/n)
+
+        m = fsolve(compute_d, x0=1.2, args=(n))[0]
         
-        # last cell can be no larger than b, and growth rate can be no larger than r_max
-        # a * m^n < b
-        m_max = np.clip((b / a)**(1/n), None, r_max)
-
-        # at this point, we know that n can generate the target width d. Find the growth rate that does this.
-        def compute_d(m):
-            return a * np.sum([m**r for r in range(1, n+1)]) - d
-
-        m0 = np.sqrt(m_min * m_max) # initial guess for growth rate m
-        m = fsolve(compute_d, x0=m0, args=())[0]
+        # if using symmetrical grading, the optimizer found the growth rate that reaches half of the cell width,
+        # create the full subcell vector
+        if symmetric_grading:
+            cells_half = np.array([m**r for r in range(1, int(n / 2) + 1)])
+            cells_m[i] = a * (np.concatenate([cells_half, np.flip(cells_half)]))
+        # if using linear grading, create the list of cells with the growth rate m
+        else:
+            cells_m[i] = a * np.array([m**r for r in range(1, n+1)]).flatten()
         
-        cells_m[i] = a * np.array([m**r for r in range(1, n+1)], dtype=np.float32).flatten()
-
         m_result[i] = m, b / cells_m[i][-1]
 
     # growth rates will decrease as n increases, so maximizing the growth rate will produce the smallest number of cells.
     # Find the growth rate the yields the fewest number of cells, while keeping the growth rate (for both internal 
     # sub-cells and between the last sub-cell and the next cell b) as near to 1.5 as possible. 
-    m_err = np.abs(m_result - 1.5) # np.argsort(np.abs(m_result[:, 0] - 1.5), axis=0)
+    m_err = np.abs(m_result - np.array([1.5, 1])) # np.argsort(np.abs(m_result[:, 0] - 1.5), axis=0)
 
     # get the m with the lowest combined difference from the desired growth rate of 1.5
     n_best_idx = np.argsort(np.sum(m_err, axis=1))[0]

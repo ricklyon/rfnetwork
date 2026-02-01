@@ -92,7 +92,8 @@ self = s
 # else:
 #     d_pec = 0.01
 
-s.init_mesh_edge_method(d0 = 0.02, d_edge=0.005)
+# s.init_mesh_edge_method(d0 = [0.01, 0.005, 0.0025], d_edge=None)
+s.init_mesh_edge_method(d0=0.01, d_edge=0.005)
 s.init_coefficients()
 
 s.init_ports()
@@ -112,13 +113,14 @@ s.add_line_probe("v2", "ez", voltage_line2)
 plotter = s.render(show_probes=True)
 plotter.camera_position = "yz"
 plotter.show()
+print(s.Nx * s.Ny * s.Nz / 1e3)
 
 
 Db_0 = s.dt / u0
 Cb_0 = s.dt / e0 
-p = s.plot_cooeficients("ez_y", "b", "z", sub_h, point_size=15, cmap="brg", normalization=Cb_0)
-p.camera_position = "xy"
-p.show()
+# p = s.plot_cooeficients("ez_y", "b", "z", sub_h, point_size=15, cmap="brg", normalization=Cb_0)
+# p.camera_position = "xy"
+# p.show()
 # p = s.plot_cooeficients("hy_x1", "b", "x", 0, point_size=15, cmap="brg", normalization=Db_0)
 # p.camera_position = "yz"
 # p.show()
