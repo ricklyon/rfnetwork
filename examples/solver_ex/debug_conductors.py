@@ -55,10 +55,14 @@ port1_face = pv.Rectangle([
 ])
 
 s = rfn.Solver_3D(sbox)
+
+
 s.add_dielectric("sub", substrate, er=er, style=dict(opacity=0.1))
 
 s.add_conductor("ms1", ms, style=dict(color="gold", opacity=0.5))
 s.add_lumped_port(1, port1_face)
+
+s.assign_PML_boundaries("x+", "z+")
 
 self = s
 
@@ -69,7 +73,6 @@ plotter.camera_position = "yz"
 plotter.show()
 print(s.Nx * s.Ny * s.Nz / 1e3)
 
-s.add_xPML(side="upper")
 
 p = s.plot_coefficients("ez_x", "a", "x", 0, point_size=15, cmap="brg")
 p.camera_position = "yz"

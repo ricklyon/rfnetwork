@@ -3,6 +3,7 @@ import time
 import numpy as np 
 from scipy import signal
 import pyvista as pv
+from copy import copy
 
 from rfnetwork import const, conv, utils, core
 
@@ -19,12 +20,14 @@ class Solver_3D():
     def __init__(self, bounding_box):
         self.dielectric = dict()
         self.conductor = dict()
+        self.pml_boundaries = []
 
         self.port_face = []
         self.bounding_box = bounding_box
         self.monitors=dict()
         self.probes=dict()
         self.slider_value = 0
+        self.n_pml = None
 
         self.sbox_max = np.max(bounding_box.points, axis=0)
         self.sbox_min = np.min(bounding_box.points, axis=0)
@@ -59,6 +62,23 @@ class Solver_3D():
             self.port_face = self.port_face + [None] * (number - len(self.port_face))
 
         self.port_face[number - 1] = face
+
+    def assign_PML_boundaries(self, *sides: str, n_pml: float = 10):
+        """
+        Assign a PML boundary to sides of the solve box.
+
+        Parameters
+        ----------
+        sides : list, str
+            Valid values are ("x+", "x-", "y+", "y-", "z+", "z-",)
+        """
+
+        valid_sides = ("x+", "x-", "y+", "y-", "z+", "z-")
+        if any([s not in valid_sides for s in sides]):
+            raise ValueError(f"PML side not recognized. Expecting one of {valid_sides}")
+
+        self.pml_boundaries = copy(list(sides))
+        self.n_pml = n_pml
 
     def pos_to_idx(self, p, mode="edge"):
         """
@@ -97,13 +117,20 @@ class Solver_3D():
         """
         
         """
-        self._init_mesh(d0=d0, d_edge=d_edge)
+        self._init_grid(d0=d0, d_edge=d_edge)
         self._init_coefficients()
         self._init_dielectrics()
+
+        # add PML layers before conductors and ports, this gives priority to any conductors that may extend into the 
+        # PML
+        for pml_side in self.pml_boundaries:
+            self._init_PML(pml_side)
+
         self._init_conductors()
         self._init_ports()
+
                 
-    def _init_mesh(self, d0: float, d_edge: float = None):
+    def _init_grid(self, d0: float, d_edge: float = None):
         """
         Initialize the spatial grid.
         """
@@ -660,74 +687,87 @@ class Solver_3D():
             else:
                 raise NotImplementedError(f"Port face normal to the z-axis not implemented yet")
 
-    
 
-    def add_xPML(self, d_pml=10, side="upper"):
+    def _init_PML(self, side):
         """
         Add PML layer to the top face of the solution box.
         """
+        n_pml = self.n_pml
+
+        axis = side[0]
+        axis_i = dict(x=0, y=1, z=2)[axis]
         m_pml = 3 # sigma profile order
 
         dt = self.dt
-        dx = conv.m_in(self.dx[-1]) if side == "upper" else conv.m_in(self.dx[0])
+        dcells = self.d_cells[axis_i]
+        d_border = conv.m_in(dcells[-1]) if side[1] == "+" else conv.m_in(dcells[0])
         eta0 = np.sqrt(u0 / e0)
         # now define the values of sigma and sigma_m from the profiles
-        sigma_max = 0.8 * (m_pml + 1) / (eta0 * dx)
+        sigma_max = 0.8 * (m_pml + 1) / (eta0 * d_border)
     
-        # define sigma profile in the PML region on the right side of the grid. 
-        i_pml = np.arange(0, d_pml)[..., None, None]
+        # define sigma profile in the PML region on the right side of the grid.
+        i_pml_axis = np.arange(0, n_pml)
+        # broadcast across other dimensions that are not the PML direction
+        i_pml_b = [None] * 3
+        i_pml_b[axis_i] = slice(None)
+        i_pml = i_pml_axis[*i_pml_b]
     
         # sigma on the cell edges. Components on the edge of the PML have a sigma of 0.
-        sigma_e_n = sigma_max * ((i_pml) / (d_pml))**m_pml
+        sigma_e_n = sigma_max * ((i_pml) / (n_pml))**m_pml
         # sigma in the middle of the cells. First Hz component in the PML is 0.5 cells into the PML
-        sigma_e_np5 = sigma_max * ((i_pml + 0.5) / (d_pml))**m_pml
+        sigma_e_np5 = sigma_max * ((i_pml + 0.5) / (n_pml))**m_pml
 
         # magnetic conductivity
         # plt.figure()
-        # plt.plot(np.arange(0, d_pml, 1), sigma_e_n.squeeze())
-        # plt.plot(np.arange(0.5, d_pml + .5, 1), sigma_e_np5.squeeze())
+        # plt.plot(np.arange(0, n_pml, 1), sigma_e_n.squeeze())
+        # plt.plot(np.arange(0.5, n_pml + .5, 1), sigma_e_np5.squeeze())
 
-        e_idx = slice(d_pml, 0, -1) if side == "lower" else slice(-d_pml-1, -1)
-        h_idx = slice(d_pml-1, None, -1) if side == "lower" else slice(-d_pml, None)
+        e_idx = [slice(None) for i in range(3)]
+        h_idx = [slice(None) for i in range(3)]
 
-        # ez
-        # first ez component is at the edge of the PML where sigma = 0, last component is at the solve boundary 
-        # and not updated.
-        # sigma / eps must be constant across y and z, page 291 in taflove
-        # scale sigma by eps so that sigma / eps is constant
-        eps_ez = self.eps_ez[e_idx]
-        sigma_ez = np.broadcast_to(sigma_e_n, eps_ez.shape).copy()
-        sigma_ez *= (eps_ez / e0)
-        
-        self.Ca["ez_x"][e_idx] = (2 * eps_ez - (sigma_ez * dt)) / (2 * eps_ez + (sigma_ez * dt))
-        self.Cb["ez_x"][e_idx] = (2 * dt) / ((2 * eps_ez + (sigma_ez * dt)))
+        e_idx[axis_i] = slice(n_pml, 0, -1) if side[1] == "-" else slice(-n_pml-1, -1)
+        h_idx[axis_i] = slice(n_pml-1, None, -1) if side[1] == "-" else slice(-n_pml, None)
 
-        # ey
-        eps_ey = self.eps_ey[e_idx]
-        sigma_ey = np.broadcast_to(sigma_e_n, eps_ey.shape).copy()
-        sigma_ey *= (eps_ey / e0)
+        field_eps = dict(
+            ex=self.eps_ex,
+            ey=self.eps_ey,
+            ez=self.eps_ez,
+            hx=self.eps_hx,
+            hy=self.eps_hy,
+            hz=self.eps_hz,  
+        )
 
-        self.Ca["ey_x"][e_idx] = (2 * eps_ey - (sigma_ey * dt)) / (2 * eps_ey + (sigma_ey * dt))
-        self.Cb["ey_x"][e_idx] = (2 * dt) / ((2 * eps_ey + (sigma_ey * dt)))
+        # get the two e and h fields that are graded by the PML for the given axis direction
+        pml_efields = [("ey", "ez"), ("ez", "ex"), ("ex", "ey")][axis_i]
+        pml_hfields = [("hy", "hz"), ("hz", "hx"), ("hx", "hy")][axis_i]
 
-        # hx/hy components are in the middle of the PML cells, use half cell indices
-        eps_hy = self.eps_hy[h_idx]
-        simga_e_hy = np.broadcast_to(sigma_e_np5, (d_pml,) + self.Da["hy_x"].shape[1:]).copy()
-        simga_e_hy *= (eps_hy / e0)
-        sigma_m_hy = simga_e_hy * u0 / eps_hy
+        # grade the e-field components along axis
+        for e in pml_efields:
+            # first e component is at the edge of the PML where sigma = 0, last component is at the solve boundary 
+            # and not updated.
+            # sigma / eps must be constant across y and z, page 291 in taflove
+            # scale sigma by eps so that sigma / eps is constant
+            eps = field_eps[e][*e_idx]
+            sigma_e = np.broadcast_to(sigma_e_n, eps.shape).copy()
+            sigma_e *= (eps / e0)
+            
+            self.Ca[f"{e}_{axis}"][*e_idx] = (2 * eps - (sigma_e * dt)) / (2 * eps + (sigma_e * dt))
+            self.Cb[f"{e}_{axis}"][*e_idx] = (2 * dt) / ((2 * eps + (sigma_e * dt)))
 
-        self.Da["hy_x"][h_idx] = (2 * u0 - (sigma_m_hy * dt)) / (2 * u0 + (sigma_m_hy * dt))
-        self.Db["hy_x1"][h_idx] = (2 * dt) / ((2 * u0 + (sigma_m_hy * dt))) 
-        self.Db["hy_x2"][h_idx] = (2 * dt) / ((2 * u0 + (sigma_m_hy * dt))) 
+        # grade the h-field components along axis
+        for h in pml_hfields:
+            # h components are in the middle of the PML cells, use half cell indices
+            eps = field_eps[h][*h_idx]
+            # electrical conductivity
+            simga_e = np.broadcast_to(sigma_e_np5, eps.shape).copy()
+            simga_e *= (eps / e0)
+            # magnetic conductivity
+            sigma_m = simga_e * u0 / eps
 
-        eps_hz = self.eps_hz[h_idx]
-        sigma_e_hz = np.broadcast_to(sigma_e_np5, (d_pml,) + self.Da["hz_x"].shape[1:]).copy()
-        sigma_e_hz *= (eps_hz / e0)
-        sigma_m_hz = sigma_e_hz * u0 / eps_hz
+            self.Da[f"{h}_{axis}"][*h_idx] = (2 * u0 - (sigma_m * dt)) / (2 * u0 + (sigma_m * dt))
+            self.Db[f"{h}_{axis}1"][*h_idx] = (2 * dt) / ((2 * u0 + (sigma_m * dt))) 
+            self.Db[f"{h}_{axis}2"][*h_idx] = (2 * dt) / ((2 * u0 + (sigma_m * dt))) 
 
-        self.Da["hz_x"][h_idx] = (2 * u0 - (sigma_m_hz * dt)) / (2 * u0 + (sigma_m_hz * dt))
-        self.Db["hz_x1"][h_idx] = (2 * dt) / ((2 * u0 + (sigma_m_hz * dt)))
-        self.Db["hz_x2"][h_idx] = (2 * dt) / ((2 * u0 + (sigma_m_hz * dt)))
 
     def gaussian_source(self, width: float, t0: float, t_len: float):
         """
