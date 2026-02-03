@@ -113,13 +113,15 @@ class Solver_3D():
         
         return tuple(idx)
     
-    def generate_mesh(self, d0: float, d_edge: float = None):
+    def generate_mesh(self, d0: float, d_edge: float = None, z_bounds: float = None):
         """
         
         """
-        self._init_grid(d0=d0, d_edge=d_edge)
-        self._init_coefficients()
+        self._init_grid(d0=d0, d_edge=d_edge, z_bounds=z_bounds)
+        # init dielectrics sets the cell sigma and er but does not set the coefficients
         self._init_dielectrics()
+        # initialize coefficients from the cell sigma and er set by the dielectrics
+        self._init_coefficients()
 
         # add PML layers before conductors and ports, this gives priority to any conductors that may extend into the 
         # PML
@@ -127,16 +129,21 @@ class Solver_3D():
             self._init_PML(pml_side)
 
         self._init_conductors()
-        self._init_ports()
+        self.init_ports()
 
                 
-    def _init_grid(self, d0: float, d_edge: float = None):
+    def _init_grid(self, d0: float, d_edge: float = None, z_bounds: float = None):
         """
         Initialize the spatial grid.
         """
 
         if not isinstance(d0, list):
             d0 = [d0] * 3
+
+        d_bounds = [[d0[i], d0[i]] for i in range(3)]
+
+        if z_bounds is not None:
+            d_bounds[2] = z_bounds
 
         edges = [np.array([], dtype=np.float32) for i in range(3)]
 
@@ -213,22 +220,22 @@ class Solver_3D():
                     dprev = np.clip(subcells_d[i - 1], 0, d0[axis] )
                 # If on the edge of the grid, match to the default d0
                 else:
-                    dprev = d0[axis] 
+                    dprev = d_bounds[axis][0]
 
                 # next cell width
                 if (i < len(subcells_d) - 1) and (graded_subcells_d[i + 1] is not None):
                     dnext = graded_subcells_d[i + 1][0]
                 elif (i < len(subcells_d) - 1) :
                     dnext = np.clip(subcells_d[i + 1], 0, d0[axis] )
-                # If on the edge of the grid, match to the default d0
+                # If on the edge of the grid, match to the boundary width
                 else:
-                    dnext = d0[axis] 
+                    dnext = d_bounds[axis][1]
 
                 # if cell is bounded by d0 cells on either side, divide the cell equally 
                 if all([(g / d0[axis] ) > 0.8 for g in [dprev, dnext, d]]):
                     n_split = int(np.around(d / d0[axis] ))
                     graded_subcells_d[i] = [d / n_split] * n_split
-
+                # create a gradient of cell widths to span the space that minimizes the growth rate. 
                 else:
                     graded_subcells_d[i] = list(
                         utils.blend_cell_widths(dprev, dnext, d, tol=self._tol)
@@ -601,7 +608,7 @@ class Solver_3D():
         else:
             raise NotImplementedError(f"PEC face not supported yet in the given axis.")
             
-    def _init_ports(self, r0=50):
+    def init_ports(self, r0=50):
         """
         
         """
