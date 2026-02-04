@@ -25,17 +25,15 @@ ms_w = 0.04
 ms_len = 1
 ms1_y = 0
 
-sbox_h = lam0 / 2
-sbox_w = lam0 / 2
-sbox_len = lam0 / 2
+sbox_h = lam0
+sbox_w = lam0
+sbox_len = lam0
 
-sub_h = 0.02
 gap = 0.01
 ms_x = (0, 0)
 ms_y = (-ms_w / 2, ms_w / 2)
-ms_z = (gap, gap + (lam0 / 4))
+ms_z = (gap, (lam0 / 4) * 0.95)
 
-# substrate = pv.Cube(center=(0, 0, sub_h/2), x_length=sbox_len, y_length=sbox_w, z_length=sub_h)
 
 sbox = pv.Cube(center=(0, 0, sbox_h/2), x_length=sbox_len, y_length=sbox_w, z_length=sbox_h)
 
@@ -52,22 +50,22 @@ port1_face = pv.Rectangle([
 ])
 
 
-s = rfn.Solver_PCB(sbox)
-# s.add_dielectric("sub", substrate, er=3.66, style=dict(opacity=0.0))
+s = rfn.Solver_3D(sbox)
+# s.add_dielectric("sub", substrate, er=1, style=dict(opacity=0.0))
 s.add_conductor("ms1", ms1_trace, style=dict(color="gold"))
 s.add_lumped_port(1, port1_face)
 
-s.assign_PML_boundaries("x-", "x+", "y-", "y+", "z+")
+s.assign_PML_boundaries("x-", "x+", "y-", "y+", "z+", n_pml=5)
 
 self = s
 # having three cells in the PEC instead of 4 causes the edge correction to fail
 # s.init_mesh(d0 = 0.02, n0 = 3, d_pec = 0.01, n_min_pec=4, d_sub=0.01, n_min_sub=4, blend_pec=False)
-s.generate_mesh(d0 = 0.02, d_edge=0.0025, z_bounds = [0.0025, 0.02])
+s.generate_mesh(d0 = 0.03, d_edge=0.005, z_bounds = [0.005, 0.03])
 
-s.add_field_monitor("mon1", "ey", "x", 0, 5)
-s.add_field_monitor("mon2", "ey", "y", 0, 5)
 
-s.add_field_monitor("mon3", "ez", "z", 0.2, 5)
+s.add_field_monitor("mon3", "ex", "z", 0.2, 15)
+s.add_field_monitor("mon4", "ex", "y", 0, 15)
+s.add_field_monitor("mon5", "ex", "x", 0.0, 15)
 
 
 
@@ -78,8 +76,8 @@ s.add_field_monitor("mon3", "ez", "z", 0.2, 5)
 
 Db_0 = s.dt / u0
 Cb_0 = s.dt / e0 
-p = s.plot_coefficients("ez_x", "b", "x", 0, point_size=15, cmap="brg")
-p.show()
+# p = s.plot_coefficients("ez_x", "b", "x", 0, point_size=15, cmap="brg")
+# p.show()
 
 f0 = 10e9
 pulse_n = 2800
@@ -88,8 +86,8 @@ pulse_width = (s.dt * 400)
 # center of the pulse in time
 t0 = (s.dt * 500)
 
-vsrc = 1e-2 * self.gaussian_modulated_source(f0, width=80e-12, t0=80e-12, t_len=400e-12)
-plt.plot(vsrc)
+vsrc = 1e-2 * self.gaussian_modulated_source(f0, width=400e-12, t0=220e-12, t_len=800e-12)
+# plt.plot(vsrc)
 
 frequency: np.ndarray = np.arange(5e9, 15e9, 10e6)
 
@@ -100,8 +98,17 @@ S11 = sdata[:, 0]
 
 
 
-p = s.plot_monitor(["mon1"], el=0, zoom=1.1, az=0, view="xy", opacity=[0.8, 1], linear=False, cmap="jet", style="surface")
-p.show(title="EM Solver")
+p = s.plot_monitor(["mon4"], el=30, zoom=1.1, az=45, view="xz", opacity=[1, 1, 1], linear=False, cmap="jet", style="surface", vmin=-30, vmax=30)
 
-p = s.plot_monitor(["mon3"], el=0, zoom=1.1, az=0, view="xy", opacity=[0.8, 1], linear=False, cmap="jet", style="surface")
-p.show(title="EM Solver")
+
+# p.show(title="EM Solver")
+
+
+fig, ax = plt.subplots()
+plt.plot(frequency / 1e9, conv.db20_lin(S11))
+mplm.line_marker(x = 10, axes=ax)
+ax.set_xlabel("Frequency [GHz]")
+ax.set_ylabel("[dB]")
+ax.legend(["S11"])
+
+plt.show()

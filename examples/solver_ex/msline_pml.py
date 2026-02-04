@@ -64,26 +64,20 @@ voltage_line2 = pv.Line(
     [0.25, ms1_y, 0], [0.25, ms1_y, sub_h]
 )
 
-s = rfn.Solver_PCB(sbox, nports=1)
-s.add_substrate("sub", substrate, er=3.66, opacity=0.0)
-s.add_pec_face("ms1", ms1_trace, color="gold")
+s = rfn.Solver_3D(sbox)
+s.add_dielectric("sub", substrate, er=3.66, style=dict(opacity=0.0))
+s.add_conductor("ms1", ms1_trace, style=dict(color="gold"))
 s.add_lumped_port(1, port1_face)
 
 self = s
 
-d0 = 0.02
-d_pec = 0.01
-n_min_pec=4
-d_sub=0.01
-n_min_sub=4
-n0 = 2
+s.assign_PML_boundaries("x+")
 
-s.init_mesh(d0 = 0.02, n0 = 3, d_pec = 0.01, n_min_pec=3, d_sub=0.005, n_min_sub=2, blend_pec=False)
-s.init_coefficients()
+s.generate_mesh(d0 = 0.02, d_edge=0.005)
 
-s.init_ports()
-s.add_xPML(side="upper")
-s.init_pec(edge_correction=True)
+
+
+
 
 s.add_field_monitor("mon1", "hz", "z", sub_h, 10)
 s.add_field_monitor("mon2", "ey", "z", sub_h, 10)
@@ -101,7 +95,7 @@ s.add_voltage_probe("v2", voltage_line2)
 
 Db_0 = s.dt / u0
 Cb_0 = s.dt / e0 
-p = s.plot_cooeficients("hz_y2", "b", "z", sub_h, point_size=15, cmap="brg", normalization=Db_0)
+p = s.plot_coefficients("hz_y2", "b", "z", sub_h, point_size=15, cmap="brg", normalization=Db_0)
 p.camera_position = "xy"
 p.show()
 

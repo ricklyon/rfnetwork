@@ -129,8 +129,8 @@ sbox_h = b
 substrate = pv.Cube(center=(sbox_w/2, sbox_len/2, 0), x_length=sbox_w, y_length=sbox_len, z_length=sbox_h)
 sbox =      pv.Cube(center=(sbox_w/2, sbox_len/2, 0), x_length=sbox_w, y_length=sbox_len, z_length=sbox_h)
 
-s = rfn.Solver_PCB(sbox, nports=4)
-s.add_substrate("sub", substrate, er=er, opacity=0.0, loss_tan=0.0035, f0=1.5e9)
+s = rfn.Solver_PCB(sbox)
+s.add_dielectric("sub", substrate, er=er, loss_tan=0.0035, f0=1.5e9, style=dict(opacity=0.0))
 
 
 for i in range(K):
@@ -140,7 +140,7 @@ for i in range(K):
         (x1_k[i], y1_k[i], 0),
     ])
 
-    s.add_pec_face(f"line_{i}", line, color="gold")
+    s.add_conductor(f"line_{i}", line, style=dict(color="gold"))
 
 port1_face = pv.Rectangle([
     (x0_k[0], y0_k[0], 0),
@@ -176,8 +176,7 @@ s.add_lumped_port(4, port4_face)
 
 
 # s.init_mesh(d0 = lam0/20, n0 = 2, d_pec = lam0/20, n_min_pec=4, d_sub=lam0/20, n_min_sub=4, blend_pec=True)
-s.init_mesh_edge_method(d0 = 0.05, d_edge = 0.0025)
-s.init_coefficients()
+s.generate_mesh(d0 = 0.05, d_edge = 0.0025)
 
 # s.init_mesh_edge_method(d0 = 0.1, d_edge=0.01)
 # s.init_coefficients()
@@ -191,7 +190,6 @@ print(s.Nx * s.Ny * s.Nz / 1e3, "kcells")
 
 
 s.init_ports(r0=100)
-s.init_pec()
 
 s.add_field_monitor("mon1", "ez", "z", 0, 30)
 # s.add_field_monitor("mon1", "ey", "z", sub_h, 5)
@@ -204,11 +202,11 @@ pulse_n = 150000
 # # center of the pulse in time
 # t0 = (s.dt * 400)
 
-vsrc = 1e-2 * s.gaussian_source(s.dt * 300, s.dt * pulse_n)
+vsrc = 1e-2 * s.gaussian_source(s.dt * 300, s.dt * 300, t_len=pulse_n * s.dt)
 
 # t = np.linspace(0, s.dt * pulse_n, pulse_n)
 # vsrc = 1e-2 * (np.sin(2* np.pi * f0 * (t)) * np.exp(-((t - t0) / t_half)**2)).astype(np.float32)
-# plt.plot(vsrc)
+# plt.plot(vsrc[:1000])
 
 frequency: np.ndarray = np.arange(0.4e9, 6e9, 2e6)
 

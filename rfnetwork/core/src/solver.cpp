@@ -213,20 +213,20 @@ int solver_init_fields(PyObject * py_mem, PyObject * coefficients, int Nx, int N
     if (PyArray_TYPE(mem_array) != NPY_FLOAT)
     {
         throw std::runtime_error("Invalid data array. Must be float type.");
-        return NULL;
+        return 1;
     }
 
     if (!(PyArray_FLAGS(mem_array) & NPY_ARRAY_C_CONTIGUOUS))
     {
         oss << "Invalid memory data array. Must be row ordered (C-style)";
         throw std::runtime_error(oss.str());
-        return NULL;
+        return 1;
     }
 
     if ((int) PyArray_NDIM(mem_array) != 1)
     {
         throw std::runtime_error("Invalid memory buffer array. Must be 1 dimension.");
-        return NULL;
+        return 1;
     }
 
     npy_intp * npy_shape = PyArray_SHAPE(mem_array); 
@@ -304,10 +304,12 @@ int solver_init_fields(PyObject * py_mem, PyObject * coefficients, int Nx, int N
     Dx.Da_hx_y = get_solver_array(coefficients, "Da_hx_y", Nx, Hx.Ny, Hx.Nz);
     Dx.Da_hx_z = get_solver_array(coefficients, "Da_hx_z", Nx, Hx.Ny, Hx.Nz);
     // ensure coefficients at the end of the x-axis are zero to create a PEC boundary
-    // memset(Dx.Db_hx_y + ((Nx - 1) * Hx.Ny * Hx.Nz), 0, Hx.Ny * Hx.Nz * sizeof(float));
-    // memset(Dx.Db_hx_z + ((Nx - 1) * Hx.Ny * Hx.Nz), 0, Hx.Ny * Hx.Nz * sizeof(float));
-    // memset(Dx.Da_hx_y + ((Nx - 1) * Hx.Ny * Hx.Nz), 0, Hx.Ny * Hx.Nz * sizeof(float));
-    // memset(Dx.Da_hx_z + ((Nx - 1) * Hx.Ny * Hx.Nz), 0, Hx.Ny * Hx.Nz * sizeof(float));
+    memset(Dx.Db_hx_y1 + ((Nx - 1) * Hx.Ny * Hx.Nz), 0, Hx.Ny * Hx.Nz * sizeof(float));
+    memset(Dx.Db_hx_y2 + ((Nx - 1) * Hx.Ny * Hx.Nz), 0, Hx.Ny * Hx.Nz * sizeof(float));
+    memset(Dx.Db_hx_z1 + ((Nx - 1) * Hx.Ny * Hx.Nz), 0, Hx.Ny * Hx.Nz * sizeof(float));
+    memset(Dx.Db_hx_z2 + ((Nx - 1) * Hx.Ny * Hx.Nz), 0, Hx.Ny * Hx.Nz * sizeof(float));
+    memset(Dx.Da_hx_y + ((Nx - 1) * Hx.Ny * Hx.Nz), 0, Hx.Ny * Hx.Nz * sizeof(float));
+    memset(Dx.Da_hx_z + ((Nx - 1) * Hx.Ny * Hx.Nz), 0, Hx.Ny * Hx.Nz * sizeof(float));
 
     // initialize hy pointers
     Hy.Nx = Nx;
@@ -351,6 +353,8 @@ int solver_init_monitors(PyObject * py_monitors, int Nt)
     }
 
     // shapes of field components
+    // the shapes of Ey, Ez, and Hx along x are incremented by 1 because the solver grid cells include these
+    // components on the right edge of the cell, and the left most components are not included. 
     int Nx[6] = {Ex.Nx, Ey.Nx+1, Ez.Nx+1, Hx.Nx+1, Hy.Nx, Hz.Nx};
     int Ny[6] = {Ex.Ny, Ey.Ny, Ez.Ny, Hx.Ny, Hy.Ny, Hz.Ny};
     int Nz[6] = {Ex.Nz, Ey.Nz, Ez.Nz, Hx.Nz, Hy.Nz, Hz.Nz};
@@ -630,6 +634,8 @@ void solver_thread(int x_start, int x_stop, int Nt, int thread_idx)
     // each grid cell contains the ex, ey, hz components in the middle of the x axis of the cell, and the
     // ey, ez, hx components on the RIGHT side of the cell. The first cell does not update the ey, ez, hx compoennts
     // on the left
+
+    // x_stop is non-inclusive
 
     std::stringstream msg;
     // msg << "Starting Thread " << thread_idx << " " << x_start << " " << x_stop << "\n";
@@ -1042,6 +1048,7 @@ void solver_thread(int x_start, int x_stop, int Nt, int thread_idx)
             // pointer to field in grid
             mon_field = fields_base[mon.field_type];
 
+            // only update if at the time step interval of the monitor
             if ((n > 0) && ((n % (mon.n_step)) != 0))
             {
                 continue;
@@ -1060,14 +1067,13 @@ void solver_thread(int x_start, int x_stop, int Nt, int thread_idx)
                 {
                     continue;
                 }
-                MatrixFloatType m_field (mon_field + (mon.position * (mon.NyNz)), mon.Ny, mon.Nz);
+                MatrixFloatType m_field (mon_field + ((mon.position - x_start) * (mon.NyNz)), mon.Ny, mon.Nz);
                 m_values = m_field;
             }
 
             else if (mon.axis == 1)
             {
-                // components on the edge of the grid that have an extra component will not be updated at x=0 by 
-                // the solver and will be left at 0 by the monitors. The x_offset accounts for the offset between
+                // The x_offset accounts for the offset between
                 // the global grid and the thread grid which skips x=0.
                 for (int i = x_start; i < x_stop; i++)
                 {

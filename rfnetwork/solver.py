@@ -827,9 +827,15 @@ class Solver_3D():
         dy_h_inv = 1 / dy_h[None, :, None]
         dz_h_inv = 1 / dz_h[None, None, :]
 
-        # dx with an extra component for the dummy end cell
+        # dx with an extra component for the last component at the x edge of the grid that has no neighboring
+        # cell.
         dx1_h_inv = np.vstack([dx_h_inv, [[[0]]]])
 
+        # to avoid inefficiently indexing the coefficients at every update, the ends of the coefficients are indexed
+        # out so they can be directly multiplied with the difference operations in the update equations. 
+        # The grid in the C++ solver is parallelized along x, each x cell is defined as the Ex, Hz, Hy components, and
+        # the Ey, Ez, and Hx components at the right end of the cell. The Ey, Ez, and Hx components at the left end of
+        # the grid are not included in any cell and are not updated (PEC boundary.) 
         coefficients = dict(
             # ex coefficients, edges along y and z do not get updated
             Ca_ex_y = np.array(self.Ca["ex_y"][:, 1:-1, 1:-1], order="C", dtype=dtype_),
@@ -977,8 +983,8 @@ class Solver_3D():
         name : str
         field : {'ex', 'ey', 'ez', 'hx', 'hy', 'hz'}
         axis : {'x', 'y', 'z'}
-        position : int
-            index on axis of the slice
+        position : float
+            position on axis of the slice
         t_step : int, default: 1
             number of time steps between each capture.
         """
@@ -996,13 +1002,13 @@ class Solver_3D():
         # convert position to field index
         full_pos = [0] * 3
         full_pos[axis_i] = position
-        idx = self.field_pos_to_idx(full_pos, field)
+        idx = int(self.field_pos_to_idx(full_pos, field)[axis_i])
 
-        if idx[axis_i] >= (axis_len - 1):
+        if idx >= (axis_len - 1):
             raise ValueError("Field position out of bounds")
 
         self.monitors[name] = dict(
-            field=field, axis=axis_i, position=position, index=int(idx[axis_i]), n_step=n_step, shape=tuple(shape)
+            field=field, axis=axis_i, position=position, index=idx, n_step=n_step, shape=tuple(shape)
         )
 
     def add_voltage_probe(self, name: str, line: pv.PolyData):
