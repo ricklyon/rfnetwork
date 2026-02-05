@@ -609,8 +609,7 @@ class Component_Data(Component):
     def __init__(self, data: ldarray, state: dict = dict()):
 
         self._sdata = data
-        nports = data.shape[-2]
-        super().__init__(nports, passive=False, state=state)
+        super().__init__(n_ports=data.shape[-2], passive=False, state=state)
 
     @property
     def frequency(self):
