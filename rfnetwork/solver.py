@@ -4,6 +4,8 @@ import numpy as np
 from scipy import signal
 import pyvista as pv
 from copy import copy
+from np_struct import ldarray
+
 
 from rfnetwork import const, conv, utils, core
 
@@ -1388,6 +1390,29 @@ class Solver_3D():
         
         # return a single column of the full s-matrix
         return B / As[..., None]
+    
+    def get_monitor_data(self, name):
+        """
+        
+        """
+        monitor = self.monitors[name]
+        values = monitor["values"]
+        t_len = len(values) * self.dt * monitor["n_step"]
+
+        time_values = np.arange(0, t_len, self.dt * monitor["n_step"], dtype=np.float64)
+
+        # build coordinates in inches for the two spatial dimensions of the slice
+        spatial_axis = [0, 1, 2]
+        spatial_dims = ["x", "y", "z"]
+        spatial_axis.pop(monitor["axis"])
+        spatial_coords = {spatial_dims[i]: self.floc[name][i] for i in spatial_axis}
+
+        return ldarray(
+            monitor["values"], 
+            coords=dict(time=time_values, **spatial_coords)
+        )
+
+ 
     
     def plot_monitor(
         self,
