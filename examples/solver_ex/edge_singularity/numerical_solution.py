@@ -77,7 +77,10 @@ self = s
 
 s.assign_PML_boundaries("x+", "z+", "y-", "y+", n_pml=5)
 
-s.generate_mesh(d0=0.01, d_edge=0.001, z_bounds=[0.001, 0.01])
+s.generate_mesh(d0=0.01, d_edge=0.005, z_bounds=[0.005, 0.01])
+
+pec_face = ms1_trace
+s.edge_correction(ms1_trace)
 
 s.add_current_probe("c1", current_face)
 s.add_line_probe("v1", "ez", voltage_line1)
@@ -88,6 +91,17 @@ s.add_field_monitor("ez", "ez", "x", 0, 10)
 s.add_field_monitor("hx", "hx", "x", 0, 10)
 s.add_field_monitor("hy", "hy", "x", 0, 10)
 s.add_field_monitor("hz", "hz", "x", 0, 10)
+
+s.add_field_monitor("ez_xy", "ez", "z", 0, 10)
+
+Db_0 = s.dt / u0
+p = s.plot_coefficients("hy_z1", "b", "z", sub_h, point_size=15, cmap="brg", normalization=Db_0, vmax=1.5)
+p.camera_position = "xy"
+p.show()
+
+# p = s.plot_coefficients("hy_z1", "b", "z", sub_h, point_size=15, cmap="brg")
+# p.camera_position = "xy"
+# p.show()
 
 
 # plotter = s.render(show_probes=True)
@@ -109,8 +123,11 @@ sdata = s.get_sparameters(frequency)
 S11 = sdata[:, 0]
 
 
-p = s.plot_monitor(["ey"], el=0, zoom=1.1, az=0, view="yz", opacity=[0.8, 1], linear=False, cmap="jet", style="surface", vmax=20)
+p = s.plot_monitor(["ez_xy"], el=0, zoom=1.1, az=0, view="xy", opacity=[0.8, 1], linear=False, cmap="jet", style="surface", vmax=20)
 p.show(title="EM Solver")
+
+# edge correction
+pec_face = ms1_trace
 
 # sample the x=0 fields when they are at their strongest
 t0 = 56e-12
@@ -125,21 +142,18 @@ hz_plane = self.get_monitor_data("hz").sel(time=t0)
 
 # E fields
 plt.plot(ey_plane.coords["y"], ey_plane.sel(z=sub_h), marker=".")
-
-plt.plot(ey_plane.coords["z"], ey_plane.sel(y=ms_w/2 +0.001), marker=".")
-
-plt.plot(ez_plane.coords["y"], ez_plane.sel(z=sub_h), marker=".")
-
 plt.plot(ez_plane.coords["z"], ez_plane.sel(y=ms_w/2), marker=".")
 
+plt.plot(ey_plane.coords["z"], ey_plane.sel(y=ms_w/2 +0.005), marker=".")
+plt.plot(ez_plane.coords["y"], ez_plane.sel(z=sub_h - 0.005), marker=".")
+
 # H fields
-plt.plot(hy_plane.coords["y"], hy_plane.sel(z=sub_h), marker=".")
-
 plt.plot(hy_plane.coords["z"], hy_plane.sel(y=ms_w/2), marker=".")
-
 plt.plot(hz_plane.coords["y"], hz_plane.sel(z=sub_h), marker=".")
 
-plt.plot(hz_plane.coords["z"], hz_plane.sel(y=ms_w/2 + 0.001), marker=".")
+plt.plot(hy_plane.coords["y"], hy_plane.sel(z=sub_h - 0.005), marker=".")
+plt.plot(hz_plane.coords["z"], hz_plane.sel(y=ms_w/2 + 0.005), marker=".")
+
 
 # x components do not contribute much error relative to the singularities in the other components
 # plt.plot(ex_plane.coords["y"], ex_plane.sel(z=sub_h), marker=".")
@@ -156,6 +170,7 @@ ZP = VP / IP
 
 fig, ax = plt.subplots()
 plt.plot(frequency / 1e9, ZP.real)
+plt.plot(frequency / 1e9, conv.db20_lin(S11))
 plt.ylim([0, 120])
 plt.axhline(y=z_ref, linestyle=":", color="k")
 ax.set_xlabel("Frequency [GHz]")

@@ -131,7 +131,7 @@ class Solver_3D():
             self._init_PML(pml_side)
 
         self._init_conductors()
-        self.init_ports()
+        self._init_ports()
 
                 
     def _init_grid(self, d0: float, d_edge: float = None, z_bounds: float = None):
@@ -610,7 +610,7 @@ class Solver_3D():
         else:
             raise NotImplementedError(f"PEC face not supported yet in the given axis.")
             
-    def init_ports(self, r0=50):
+    def _init_ports(self, r0=50):
         """
         
         """
@@ -1390,6 +1390,168 @@ class Solver_3D():
         
         # return a single column of the full s-matrix
         return B / As[..., None]
+    
+    def edge_correction(self, pec_face):
+        """
+        Analytic correction factors for singularity correction at PEC edges. Corrects asymptotic Ez, Hy fields 
+        along the z-axis at the face edge, and Ey, Hz fields along the y-axis at the face edge.
+        """
+
+        pec_size = np.max(pec_face.points, axis=0) - np.min(pec_face.points, axis=0)
+
+        if pec_size[2] > 0:
+            raise NotImplementedError("Edge correction is only supported for 2D objects in the xy plane.")
+        
+        CF = 2 * np.sqrt(1/2)
+
+        # get ex and ey component indices at edges of the face
+        _, y0, z0 = self.field_pos_to_idx(np.min(pec_face.points, axis=0), "ex")
+        _, y1, _ = self.field_pos_to_idx(np.max(pec_face.points, axis=0), "ex")
+        x0, _, _ = self.field_pos_to_idx(np.min(pec_face.points, axis=0), "ey")
+        x1, _, _ = self.field_pos_to_idx(np.max(pec_face.points, axis=0), "ey")
+
+        x1_at_edge = (x1 >= len(self.floc["ey"][0]) -1)
+
+        ###################
+        # X Axis Edges
+        ###################
+        # correct H components that use the Ey component in the same plane as the edge that points into the edge.
+        # Hz in the same plane as the face. Both Hz and Ey are asymtotic so the correction factor cancels out
+        # on all components but the ex integration.
+        for y in [y0-1, y1]:
+            self.Db["hz_y2"][x0: x1, y, z0] *= 1 / CF
+            self.Db["hz_y1"][x0: x1, y, z0] *= 1 / CF
+            # hz components using Ey that are just past the face along the x direction
+            self.Db["hz_x2"][x0-1, y, z0] *= CF
+            if not x1_at_edge:
+                self.Db["hz_x1"][x1, y, z0] *= CF
+            # Hx just below the Ey component
+            self.Db["hx_z2"][x0: x1+1, y, z0-1] *= CF
+            # Hx just above the Ey component
+            self.Db["hx_z1"][x0: x1+1, y, z0] *= CF
+
+        # correct Hy components that use the Ez component below and above the edge 
+        # Hy and Ez are both asymptotic and the correction factors cancel out
+        for y in [y0, y1]:
+            self.Db["hy_z1"][x0: x1, y, z0-1] *= 1 / CF
+            self.Db["hy_z2"][x0: x1, y, z0-1] *= 1 / CF
+            self.Db["hy_z1"][x0: x1, y, z0] *= 1 / CF
+            self.Db["hy_z2"][x0: x1, y, z0] *= 1 / CF
+            # hy components just past the face along the x direction
+            self.Db["hy_x2"][x0-1, y, z0-1] *= CF
+            self.Db["hy_x2"][x0-1, y, z0] *= CF
+            if not x1_at_edge:
+                self.Db["hy_x1"][x1, y, z0] *= CF
+                self.Db["hy_x1"][x1, y, z0-1] *= CF
+
+        # correct Hx components just past the face in the y direction that use the Ez components under the edge
+        for z in [z0-1, z0]:
+            self.Db["hx_y2"][x0: x1+1, y0-1, z] *= CF
+            self.Db["hx_y1"][x0: x1+1, y0, z] *= CF
+            self.Db["hx_y2"][x0: x1+1, y1-1, z] *= CF
+            self.Db["hx_y1"][x0: x1+1, y1, z] *= CF
+
+        ###################
+        # Y Axis Edges
+        ###################
+        # correct H components that use the Ex component in the same plane as the edge that points into the edge.
+        # Hz is in the same plane as the face. Both Hz and Ex are asymtotic so the correction factor cancels out
+        # on all components but the ex integration.
+        x_sides = [x0-1, x1] if not x1_at_edge else [x0 - 1]
+        for x in x_sides:
+            self.Db["hz_x2"][x, y0: y1, z0] *= 1 / CF
+            self.Db["hz_x1"][x, y0: y1, z0] *= 1 / CF
+            # hz components using Ex that are just past the face along the y direction
+            self.Db["hz_y2"][x, y0-1, z0] *= CF
+            self.Db["hz_y1"][x, y1, z0] *= CF
+            # Hy just below the Ex component
+            self.Db["hy_z2"][x, y0: y1+1, z0-1] *= CF
+            # Hy just above the Ex component
+            self.Db["hy_z1"][x, y0: y1+1, z0] *= CF
+
+        # correct Hx components that use the Ez component below and above the edge 
+        # Hx and Ez are both asymptotic and the correction factors cancel out
+        for x in [x0, x1]:
+            self.Db["hx_z1"][x, y0: y1, z0-1] *= 1 / CF
+            self.Db["hx_z2"][x, y0: y1, z0-1] *= 1 / CF
+            self.Db["hx_z1"][x, y0: y1, z0] *= 1 / CF
+            self.Db["hx_z2"][x, y0: y1, z0] *= 1 / CF
+            # hx components just past the face along the y direction
+            self.Db["hx_y2"][x, y0-1, z0-1] *= CF
+            self.Db["hx_y2"][x, y0-1, z0] *= CF
+            self.Db["hx_y1"][x, y1, z0] *= CF
+            self.Db["hx_y1"][x, y1, z0-1] *= CF
+
+        # correct Hy components just past the face in the x direction that use the Ez components under the edge
+        for z in [z0-1, z0]:
+            self.Db["hy_x2"][x0-1, y0: y1+1, z] *= CF
+            self.Db["hy_x1"][x0, y0: y1+1, z] *= CF
+
+            self.Db["hy_x1"][x1-1, y0: y1+1, z] *= CF
+            if not x1_at_edge:
+                self.Db["hy_x1"][x1, y0: y1+1, z] *= CF
+
+    def edge_correction2(self, face):
+
+        x0, y0, z0 = self.field_pos_to_idx(np.min(face.points, axis=0), "ex")
+        x1, y1, z1 = self.field_pos_to_idx(np.max(face.points, axis=0), "ex")
+
+        CF = 2 * np.sqrt(1/2)
+        # hz in the same plane as the trace
+        self.Db["hz_y2"][x0: x1, y0-1, z0] *= 1 / CF
+        self.Db["hz_y1"][x0: x1, y0-1, z0] *= 1 / CF
+
+        # hy directly above and below trace edge
+        self.Db["hy_z1"][x0: x1, y0, z0-1] *= 1 / CF
+        self.Db["hy_z2"][x0: x1, y0, z0-1] *= 1 / CF
+        self.Db["hy_z1"][x0: x1, y0, z0] *= 1 / CF
+        self.Db["hy_z2"][x0: x1, y0, z0] *= 1 / CF
+
+        # hx below the trace, correct ez component on the edge
+        self.Db["hx_y2"][x0+1: x1-1, y0-1, z0-1] *= CF
+        self.Db["hx_y1"][x0+1: x1-1, y0, z0-1] *= CF
+        # hy above the trace, correct the ez component on the edge
+        self.Db["hx_y2"][x0+1: x1-1, y0-1, z0] *= CF
+        self.Db["hx_y1"][x0+1: x1-1, y0, z0] *= CF
+
+        # ez below and above the trace
+        # self.Cb["ez_y"][x0+1: x1-1, y0, z0] *= 1/0.785
+        # self.Cb["ez_y"][x0+1: x1-1, y0, z0-1] *= 1/0.785
+
+        # # # ey in the plane of the trace
+        # self.Cb["ey_z"][x0: x1, y0-1, z0] *= 1/0.785
+
+    
+
+        x0, y0, z0 = self.field_pos_to_idx(np.min(face.points, axis=0), "ex")
+        x1, y1, z1 = self.field_pos_to_idx(np.max(face.points, axis=0), "ex")
+
+        CF = 2 * np.sqrt(1/2)
+
+        # hz in the same plane as the trace
+        self.Db["hz_y1"][x0: x1, y1, z0] *= 1 / CF
+        self.Db["hz_y2"][x0: x1, y1, z0] *= 1 / CF
+
+        # hy directly above and below trace edge
+        self.Db["hy_z1"][x0: x1, y1, z0-1] *= 1 / CF
+        self.Db["hy_z2"][x0: x1, y1, z0-1] *= 1 / CF
+        self.Db["hy_z1"][x0: x1, y1, z0] *= 1 / CF
+        self.Db["hy_z2"][x0: x1, y1, z0] *= 1 / CF
+
+        # hy below the trace, correct ez component on the edge
+        self.Db["hx_y2"][x0+1: x1-1, y1-1, z0-1] *= CF
+        self.Db["hx_y1"][x0+1: x1-1, y1, z0-1] *= CF
+        # hy above the trace, correct the ez component on the edge
+        self.Db["hx_y2"][x0+1: x1-1, y1-1, z0] *= CF
+        self.Db["hx_y1"][x0+1: x1-1, y1, z0] *= CF
+
+        # # ez below and above the trace
+        # self.Cb["ez_y"][x0+1: x1-1, y1, z0-1] *= 1/0.785
+        # self.Cb["ez_y"][x0+1: x1-1, y1, z0] *= 1/0.785
+
+        # # # ey in the plane of the trace
+        # self.Cb["ey_z"][x0: x1, y1, z0] *= 1/0.785
+
     
     def get_monitor_data(self, name):
         """
