@@ -75,9 +75,14 @@ s.add_lumped_port(1, port1_face)
 
 self = s
 
+run_reference = False
+
 s.assign_PML_boundaries("x+", "z+", "y-", "y+", n_pml=5)
 
-s.generate_mesh(d0=0.01, d_edge=0.005, z_bounds=[0.005, 0.01])
+if run_reference:
+    s.generate_mesh(d0=0.01, d_edge=0.001, z_bounds=[0.001, 0.01])
+else:
+    s.generate_mesh(d0=0.01, d_edge=0.005, z_bounds=[0.005, 0.01])
 
 pec_face = ms1_trace
 s.edge_correction(ms1_trace)
@@ -126,9 +131,6 @@ S11 = sdata[:, 0]
 p = s.plot_monitor(["ez_xy"], el=0, zoom=1.1, az=0, view="xy", opacity=[0.8, 1], linear=False, cmap="jet", style="surface", vmax=20)
 p.show(title="EM Solver")
 
-# edge correction
-pec_face = ms1_trace
-
 # sample the x=0 fields when they are at their strongest
 t0 = 56e-12
 ex_plane = self.get_monitor_data("ex").sel(time=t0)
@@ -139,21 +141,76 @@ hx_plane = self.get_monitor_data("hx").sel(time=t0)
 hy_plane = self.get_monitor_data("hy").sel(time=t0)
 hz_plane = self.get_monitor_data("hz").sel(time=t0)
 
+def save_fields(coords, values, name):
+
+    np.save(dir_ / f"data/{name}_values", values)
+    np.save(dir_ / f"data/{name}_coords", coords)
+
+def plot_fields(ax, coords, values, name):
+    ax.plot(coords, values, marker=".", label=name)
+
+def plot_ref_fields(ax, name):
+    values = np.load(dir_ / f"data/{name}_values.npy")
+    coords = np.load(dir_ / f"data/{name}_coords.npy")
+
+    ax.plot(coords, values, label=f"Ref {name}", color="grey")
+
+if run_reference:
+    save_fields(ey_plane.coords["y"], ey_plane.sel(z=sub_h), "ey_y")
+    save_fields(ey_plane.coords["z"], ey_plane.sel(y=ms_w/2 + 0.005), "ey_z")
+
+    save_fields(ez_plane.coords["z"], ez_plane.sel(y=ms_w/2), "ez_z")
+    save_fields(ez_plane.coords["y"], ez_plane.sel(z=sub_h - 0.005), "ez_y")
+
+    save_fields(hy_plane.coords["z"], hy_plane.sel(y=ms_w/2), "hy_z")
+    save_fields(hy_plane.coords["y"], hy_plane.sel(z=sub_h - 0.005), "hy_y")
+
+    save_fields(hz_plane.coords["z"], hz_plane.sel(y=ms_w/2 + 0.005), "hz_z")
+    save_fields(hz_plane.coords["y"], hz_plane.sel(z=sub_h), "hz_y")
+
+
 
 # E fields
-plt.plot(ey_plane.coords["y"], ey_plane.sel(z=sub_h), marker=".")
-plt.plot(ez_plane.coords["z"], ez_plane.sel(y=ms_w/2), marker=".")
+fig, (ax1, ax2) = plt.subplots(2, 1)
+plot_fields(ax1, ey_plane.coords["y"], ey_plane.sel(z=sub_h), "Ey")
+plot_fields(ax2, ez_plane.coords["z"], ez_plane.sel(y=ms_w/2), "Ez")
+plot_ref_fields(ax1, "ey_y")
+plot_ref_fields(ax2, "ez_z")
+ax1.set_xlim([-ms_w, ms_w])
+ax2.set_xlim([0, sub_h*2])
+ax1.legend()
+ax2.legend()
 
-plt.plot(ey_plane.coords["z"], ey_plane.sel(y=ms_w/2 +0.005), marker=".")
-plt.plot(ez_plane.coords["y"], ez_plane.sel(z=sub_h - 0.005), marker=".")
+fig, (ax1, ax2) = plt.subplots(2, 1)
+plot_fields(ax1, ey_plane.coords["z"], ey_plane.sel(y=ms_w/2 + 0.005), "Ey")
+plot_fields(ax2, ez_plane.coords["y"], ez_plane.sel(z=sub_h - 0.005), "Ez")
+plot_ref_fields(ax1, "ey_z")
+plot_ref_fields(ax2, "ez_y")
+ax2.set_xlim([-ms_w, ms_w])
+ax1.set_xlim([0, sub_h*2])
+ax1.legend()
+ax2.legend()
 
 # H fields
-plt.plot(hy_plane.coords["z"], hy_plane.sel(y=ms_w/2), marker=".")
-plt.plot(hz_plane.coords["y"], hz_plane.sel(z=sub_h), marker=".")
+fig, (ax1, ax2) = plt.subplots(2, 1)
+plot_fields(ax1, hy_plane.coords["z"], hy_plane.sel(y=ms_w/2), "Hy")
+plot_fields(ax2, hz_plane.coords["y"], hz_plane.sel(z=sub_h), "Hz")
+plot_ref_fields(ax1, "hy_z")
+plot_ref_fields(ax2, "hz_y")
+ax1.set_xlim([0, sub_h*2])
+ax2.set_xlim([-ms_w, ms_w])
+ax1.legend()
+ax2.legend()
 
-plt.plot(hy_plane.coords["y"], hy_plane.sel(z=sub_h - 0.005), marker=".")
-plt.plot(hz_plane.coords["z"], hz_plane.sel(y=ms_w/2 + 0.005), marker=".")
-
+fig, (ax1, ax2) = plt.subplots(2, 1)
+plot_fields(ax1, hy_plane.coords["y"], hy_plane.sel(z=sub_h - 0.005), "Hy")
+plot_fields(ax2, hz_plane.coords["z"], hz_plane.sel(y=ms_w/2 + 0.005), "Hz")
+plot_ref_fields(ax1, "hy_y")
+plot_ref_fields(ax2, "hz_z")
+ax2.set_xlim([0, sub_h*2])
+ax1.set_xlim([-ms_w, ms_w])
+ax1.legend()
+ax2.legend()
 
 # x components do not contribute much error relative to the singularities in the other components
 # plt.plot(ex_plane.coords["y"], ex_plane.sel(z=sub_h), marker=".")
@@ -170,10 +227,11 @@ ZP = VP / IP
 
 fig, ax = plt.subplots()
 plt.plot(frequency / 1e9, ZP.real)
-plt.plot(frequency / 1e9, conv.db20_lin(S11))
+# plt.plot(frequency / 1e9, conv.z_gamma(S11))
 plt.ylim([0, 120])
 plt.axhline(y=z_ref, linestyle=":", color="k")
 ax.set_xlabel("Frequency [GHz]")
 ax.set_ylabel("Impedance [Ohm]")
 mplm.line_marker(x = 10, axes=ax)
 
+plt.show()

@@ -55,7 +55,7 @@ class Solver_3D():
         
         self.conductor[name] = dict(obj=obj, sigma=sigma, style=style)
 
-    def add_lumped_port(self, number, face):
+    def add_lumped_port(self, number, face, r0=50):
         """
         Attach a lumped port to a face
         """
@@ -63,7 +63,7 @@ class Solver_3D():
         if len(self.port_face) < number:
             self.port_face = self.port_face + [None] * (number - len(self.port_face))
 
-        self.port_face[number - 1] = face
+        self.port_face[number - 1] = dict(face = face, r0=r0)
 
     def assign_PML_boundaries(self, *sides: str, n_pml: float = 10):
         """
@@ -610,7 +610,7 @@ class Solver_3D():
         else:
             raise NotImplementedError(f"PEC face not supported yet in the given axis.")
             
-    def _init_ports(self, r0=50):
+    def _init_ports(self):
         """
         
         """
@@ -619,7 +619,10 @@ class Solver_3D():
         dx, dy, dz = [conv.m_in(d) for d in self.d_cells]
         dx_h, dy_h, dz_h = [conv.m_in(d) for d in self.dh_cells]
         
-        for i, face in enumerate(self.port_face):
+        for i, p in enumerate(self.port_face):
+
+            face = p["face"]
+            r0 = p["r0"]
     
             if face.n_cells > 1 or face.faces[0] != 4:
                 raise ValueError("Only rectangular port faces are supported.")
@@ -1210,8 +1213,8 @@ class Solver_3D():
             plotter.add_mesh(cond["obj"], **cond["style"])
 
         # add ports
-        for port_face in self.port_face:
-            plotter.add_mesh(port_face, color="pink", opacity=0.5)
+        for p in self.port_face:
+            plotter.add_mesh(p["face"], color="pink", opacity=0.5)
 
         if show_probes:
             points = []

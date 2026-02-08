@@ -169,10 +169,10 @@ port4_face = pv.Rectangle([
     (x1_k[-1], port34_y, sbox_h/2),
 ])
 
-s.add_lumped_port(1, port1_face)
-s.add_lumped_port(2, port2_face)
-s.add_lumped_port(3, port3_face)
-s.add_lumped_port(4, port4_face)
+s.add_lumped_port(1, port1_face, r0=100)
+s.add_lumped_port(2, port2_face, r0=100)
+s.add_lumped_port(3, port3_face, r0=100)
+s.add_lumped_port(4, port4_face, r0=100)
 
 
 # s.init_mesh(d0 = lam0/20, n0 = 2, d_pec = lam0/20, n_min_pec=4, d_sub=lam0/20, n_min_sub=4, blend_pec=True)
@@ -187,9 +187,6 @@ plotter = s.render()
 plotter.camera_position = "xy"
 plotter.show()
 print(s.Nx * s.Ny * s.Nz / 1e3, "kcells")
-
-
-s.init_ports(r0=100)
 
 s.add_field_monitor("mon1", "ez", "z", 0, 30)
 # s.add_field_monitor("mon1", "ey", "z", sub_h, 5)

@@ -33,22 +33,24 @@ eta0 = const.eta0
 
 er = 3.66
 
-f1 = 1.5e9
+f1 = 1.1e9
 f2 = 1.6e9
 
-f0 = 1.4e9
-w = 0.2
+f0 = (f1 + f2) / 2
 
-f1 = f0 - (w * f0)/ 2
-f2 = f0 + (w * f0)/ 2
+# f0 = 1.4e9
+# w = 0.2
 
-b = 0.062
+# f1 = f0 - (w * f0)/ 2
+# f2 = f0 + (w * f0)/ 2
+
+b = 0.06
 
 g_wb = [1, 1.1897, 1.4346, 2.1199, 1.6010, 2.1699, 1.5640, 1.9444, 0.8778, 1.3554]
 g_nb = [1, 1.1681, 1.4039, 2.0562, 1.5170, 1.9029, 0.8618, 1.3554]
 
-g = [1, 1.7254, 1.2479, 2.6064, 1.3137, 2.4758, 0.8696, 1.9841]
-Ck, Cmk = rfn.utils.combline_sections_nb(g, f1, f2, er=er, h=0.2)
+g = [1, 1.7058, 1.2296, 2.5408, 1.2296, 1.7058, 1.0000]
+Ck, Cmk = rfn.utils.combline_sections_nb(g, f1, f2, er=er, h=0.25)
 
 # print(Ck, Cmk)
 
@@ -63,7 +65,7 @@ def find_Cab_spacing(sp, target_Cab, w):
 sk = np.zeros_like(Cmk)
 wk = np.ones_like(Ck) * (b / 2)
 
-for m in range(5):
+for m in range(10):
     for i, cmk in enumerate(Cmk):
         w = wk[i+1] if i < len(wk) - 2 else wk[i-1]
         sk[i] = least_squares(find_Cab_spacing, x0=b*0.5, args=(cmk, w), bounds=(0.001, b)).x[0]
@@ -85,7 +87,7 @@ for m in range(5):
     # determine width using parallel plate capacitance Cp_e = 2w / b
     wk = (Cp_e / 2) * b
 
-print(wk, sk)
+print(wk[1:-1], sk[1:-1])
 
 # wk[0] -= 0.005
 # wk[-1] -= 0.005
@@ -101,8 +103,16 @@ K = len(wk)
 
 # y coordinates of the bottom and top edge of each line
 ymax = rfn.const.c0_in / (f0 * np.sqrt(er) * 4)
-y0 = 0.05 * ymax
+y0 = 0.06 * ymax
 y1 = ymax - y0
+
+
+w0 = 0.035
+feed_y = 0.37
+feed_x = 0.06
+y1_tune = 0.065
+sk_adjust = 0.000
+
 
 # x coordinates of the left and right edge of each line
 x0_k = np.zeros(K)
@@ -113,6 +123,9 @@ y1_k = np.zeros(K)
 x0_k[0] = 0.15
 x1_k[0] = x0_k[0] + wk[0]
 
+# wk[1] -= 0.004
+# wk[-2] -= 0.004
+
 for i in range(K):
     if i % 2: # if odd
         y0_k[i] = 0
@@ -121,12 +134,13 @@ for i in range(K):
         y0_k[i] = y0
         y1_k[i] = ymax
 
-y0_k[0] = 0.025 * ymax
-y1_k[-1] = ymax - (0.025 * ymax)
-
 for i in range(1, K):
     x0_k[i] = x1_k[i-1] + sk[i-1]
     x1_k[i] = x0_k[i] + wk[i]
+
+# adjust outer lines
+y1_k[1] += y1_tune
+y1_k[-2] += y1_tune
 
 
 sbox_w = x1_k[-1] + 0.15
@@ -136,10 +150,10 @@ substrate = pv.Cube(center=(sbox_w/2, sbox_len/2, 0), x_length=sbox_w, y_length=
 sbox =      pv.Cube(center=(sbox_w/2, sbox_len/2, 0), x_length=sbox_w, y_length=sbox_len, z_length=sbox_h)
 
 s = rfn.Solver_3D(sbox)
-s.add_dielectric("sub", substrate, er=er, loss_tan=0.0035, f0=1.5e9, style=dict(opacity=0.0))
+s.add_dielectric("sub", substrate, er=er, loss_tan=0.003, f0=1.5e9, style=dict(opacity=0.0))
 
-
-for i in range(K):
+# add resonators. Skip the first and last line as these are impedance transformers and we're using the tap instead
+for i in range(1, K-1):
     line = pv.Rectangle([
         (x0_k[i], y0_k[i], 0),
         (x1_k[i], y0_k[i], 0),
@@ -148,31 +162,49 @@ for i in range(K):
 
     s.add_conductor(f"line_{i}", line, style=dict(color="gold"))
 
+# add feed lines
+rfn.elements.Stripline(w=0.035, b=b, er=er).get_properties(f0)
+
+feed_1 = pv.Rectangle([
+        (feed_x, feed_y-w0/2, 0),
+        (feed_x, feed_y+w0/2, 0),
+        (x0_k[1], feed_y+w0/2, 0),
+])
+
+feed_2 = pv.Rectangle([
+        (sbox_w-feed_x, feed_y-w0/2, 0),
+        (sbox_w-feed_x, feed_y+w0/2, 0),
+        (x1_k[-2], feed_y+w0/2, 0),
+])
+
+s.add_conductor(f"feed_1", feed_1, style=dict(color="gold"))
+s.add_conductor(f"feed_2", feed_2, style=dict(color="gold"))
+
+
 port1_face = pv.Rectangle([
-    (x0_k[0], y0_k[0], 0),
-    (x1_k[0], y0_k[0], 0),
-    (x1_k[0], y0_k[0], -sbox_h/2),
+    (feed_x, feed_y-w0/2, 0),
+    (feed_x, feed_y+w0/2, 0),
+    (feed_x, feed_y+w0/2, -sbox_h/2),
 ])
 
 port2_face = pv.Rectangle([
-    (x0_k[0], y0_k[0], 0),
-    (x1_k[0], y0_k[0], 0),
-    (x1_k[0], y0_k[0], sbox_h/2),
+    (feed_x, feed_y-w0/2, 0),
+    (feed_x, feed_y+w0/2, 0),
+    (feed_x, feed_y+w0/2, sbox_h/2),
 ])
 
-port34_y = y0_k[-1] if y1_k[-1] == ymax else y1_k[-1]
 
 port3_face = pv.Rectangle([
-    (x0_k[-1], port34_y, 0),
-    (x1_k[-1], port34_y, 0),
-    (x1_k[-1], port34_y, -sbox_h/2),
+    (sbox_w-feed_x, feed_y-w0/2, 0),
+    (sbox_w-feed_x, feed_y+w0/2, 0),
+    (sbox_w-feed_x, feed_y+w0/2, -sbox_h/2),
 ])
 
 
 port4_face = pv.Rectangle([
-    (x0_k[-1], port34_y, 0),
-    (x1_k[-1], port34_y, 0),
-    (x1_k[-1], port34_y, sbox_h/2),
+    (sbox_w-feed_x, feed_y-w0/2, 0),
+    (sbox_w-feed_x, feed_y+w0/2, 0),
+    (sbox_w-feed_x, feed_y+w0/2, sbox_h/2),
 ])
 
 s.add_lumped_port(1, port1_face, r0=100)
@@ -188,28 +220,29 @@ s.generate_mesh(d0 = 0.02, d_edge = 0.005, z_bounds=[0.01, 0.01])
 
 self = s
 
-plotter = s.render(show_probes=True)
-plotter.camera_position = "xy"
-plotter.show()
-print(s.Nx * s.Ny * s.Nz / 1e3, "kcells")
+# plotter = s.render(show_probes=False)
+# plotter.camera_position = "xy"
+# plotter.show()
+# print(s.Nx * s.Ny * s.Nz / 1e3, "kcells")
 
 
-s.add_field_monitor("mon1", "ez", "z", 0, 30)
+s.add_field_monitor("mon1", "ez", "z", 0, 10)
 # s.add_field_monitor("mon1", "ey", "z", sub_h, 5)
 # s.add_field_monitor("mon2", "ey", "z", sub_h, 15)
 # s.add_field_monitor("mon3", "ex", "z", sub_h, 10)
 
-pulse_n = 100000
+pulse_n = 80000
 # # width of half pulse in time
 # t_half = (s.dt * 100)
 # # center of the pulse in time
 # t0 = (s.dt * 400)
 
 vsrc = 1e-2 * s.gaussian_source(s.dt * 300, t0= s.dt * 200, t_len = s.dt * pulse_n)
+# vsrc = 1e-2 * s.gaussian_modulated_source(f0, width=s.dt * 10000, t0=s.dt * 10000, t_len = pulse_n * s.dt)
 
 # t = np.linspace(0, s.dt * pulse_n, pulse_n)
 # vsrc = 1e-2 * (np.sin(2* np.pi * f0 * (t)) * np.exp(-((t - t0) / t_half)**2)).astype(np.float32)
-# plt.plot(vsrc[:400])
+# plt.plot(vsrc)
 
 frequency: np.ndarray = np.arange(0.5e9, 3e9, 2e6)
 
@@ -217,12 +250,12 @@ s.run([1, 2], [vsrc, -vsrc], n_threads=4)
 self = s
 
 
-p = s.plot_monitor(
-    ["mon1"], zoom=1.1, view="xy", el=0, opacity=[0.9, 1], 
-    linear=False, cmap="jet", style="surface",
-)
-# p.camera_position = "xy"
-p.show(title="EM Solver")
+# p = s.plot_monitor(
+#     ["mon1"], zoom=1.1, view="xy", el=0, opacity=[0.9, 1], 
+#     linear=False, cmap="jet", style="surface",
+# )
+# # p.camera_position = "xy"
+# p.show(title="EM Solver")
 
 
 sdata = s.get_sparameters(frequency, 1, z0=100)
