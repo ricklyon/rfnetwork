@@ -35,25 +35,18 @@ c0 = const.c0
 eta0 = const.eta0
 
 er = 3.66
+h = 0.03
 
-f1 = 1.5e9
+f1 = 1.1e9
 f2 = 1.6e9
 
-f0 = 1.5e9
-w = 0.55
-
-f1 = f0 - (w * f0)/ 2
-f2 = f0 + (w * f0)/ 2
-
-h = 0.03
+f0 = (f1 + f2) / 2
 
 g_wb = [1, 1.1897, 1.4346, 2.1199, 1.6010, 2.1699, 1.5640, 1.9444, 0.8778, 1.3554]
 g_nb = [1, 1.1681, 1.4039, 2.0562, 1.5170, 1.9029, 0.8618, 1.3554]
 
-g = [1, 0.5176, 1.4142, 1.9318, 1.9318, 1.4142, 0.5176, 1.0000]
-Ck, Cmk = rfn.utils.combline_sections_wb(g, f1, f2, er=er, h=0.2)
-
-# print(Ck, Cmk)
+g = [1, 1.7058, 1.2296, 2.5408, 1.2296, 1.7058, 1.0000]
+Ck, Cmk = rfn.utils.combline_sections_nb(g, f1, f2, er=er, h=0.24)
 
 def ustrip_fringing_cap(w, h, er):
     """
@@ -97,8 +90,7 @@ def coupled_ustrip_fringing_cap(w: float, s: float, h: float, er: float):
     # return unnormalized capacitance in farads, odd, even
     return (C_gd + C_ga), Cf_e
 
-def find_Cab_spacing(sp, target_Cab):
-    w = h
+def find_Cab_spacing(sp, target_Cab, w):
     Cf_o, Cf_e = coupled_ustrip_fringing_cap(w, sp, h, er)
     # normalized interspace capacitance
     # Derive this from Co = Ca + 2 Cab, using the equations for Co and Ce (Ce=Ca) in the reference linked in 
@@ -107,31 +99,35 @@ def find_Cab_spacing(sp, target_Cab):
 
     return Cab - target_Cab
 
+
 # determine spacings using the capacitance between lines Cmk
 sk = np.zeros_like(Cmk)
-for i, cmk in enumerate(Cmk):
-    sk[i] = least_squares(find_Cab_spacing, x0=h*0.5, args=(cmk,), bounds=(0.001, h*3)).x[0]
+wk = np.ones_like(Ck) * (h)
+
+for m in range(5):
+    for i, cmk in enumerate(Cmk):
+        w = wk[i+1] if i < len(wk) - 2 else wk[i-1]
+        sk[i] = least_squares(find_Cab_spacing, x0=h, args=(cmk, w), bounds=(0.001, h*3)).x[0]
 
 
-# even mode fringing capacitance for each space between lines, width is arbitrary here
-# capacitance is normalized by epsilon
-Cf_e = np.array([coupled_ustrip_fringing_cap(h, s, h, er)[1] for s in sk]) / (e0 * er)
-# fringing capacitance on the outer edges (not between the two lines), figure 5.05-10b, for t=0
-Cf = ustrip_fringing_cap(h, h, er) / (e0 * er)
-# Ck is the even mode capacitance Ce. Ce = Cp + Cf + Cf_e, Ce=Ca=Ck
-Cf_eps_left = np.concatenate([[Cf], Cf_e])
-Cf_eps_right = np.concatenate([Cf_e, [Cf]])
-Cp = Ck - Cf_eps_left - Cf_eps_right
-# determine width using parallel plate capacitance Cp = er * e0 * (w / h)
-wk = Cp * h
+    # even mode fringing capacitance for each space between lines, width is arbitrary here
+    Cf_e = np.array([
+        coupled_ustrip_fringing_cap(wk[i+1] if i < len(wk) - 2 else wk[i-1], s, h, er)[1] for i, s in enumerate(sk)
+    ]) / (e0 * er)
 
 
-# use multiple iterations where actual widths are fed back into the algorithm
-print(wk, sk)
+    # fringing capacitance on the outer edges (not between the two lines), figure 5.05-10b, for t=0
+    Cf = ustrip_fringing_cap(w, h, er) / (e0 * er)
+    # Ck is the even mode capacitance Ce. Ce = Cp + Cf + Cf_e, Ce=Ca=Ck
+    Cf_eps_left = np.concatenate([[Cf], Cf_e])
+    Cf_eps_right = np.concatenate([Cf_e, [Cf]])
+    Cp = Ck - Cf_eps_left - Cf_eps_right
+    # determine width using parallel plate capacitance Cp = er * e0 * (w / h)
+    wk = Cp * h
 
-# manual adjustmment
-sk[0] = 0.012
-sk[-1] = 0.012
+
+print(wk[1:-1], sk[1:-1])
+
 
 # design taken from table 10.07-2 in Matthaei
 K = len(wk)
@@ -140,10 +136,19 @@ K = len(wk)
 # s_k =   [0.092, 0.136, 0.143, 0.146, 0.143, 0.136, 0.087]
 
 # y coordinates of the bottom and top edge of each line
-zc, er_eff, _ = rfn.elements.MSLine(h, er, w=0.02).get_properties(f0).squeeze()
-ymax = rfn.const.c0_in / (f0 * np.sqrt(er_eff) * 4)
-y0 = 0.05 * ymax
+_, er_eff, _ = rfn.elements.MSLine(h, er, w=0.04).get_properties(f0).squeeze()
+
+ymax = rfn.const.c0_in * (1.00) / (f0 * np.sqrt(er_eff) * 4)
+w0 = rfn.elements.MSLine(h, er, z0 = 50).state["w"]
+
+y0 = 0.12
 y1 = ymax - y0
+
+feed_y = 0.32
+feed_x = 0.06
+y1_outer = ymax - 0.02
+y1_center = ymax- y0
+
 
 # x coordinates of the left and right edge of each line
 x0_k = np.zeros(K)
@@ -151,93 +156,88 @@ x1_k = np.zeros(K)
 y0_k = np.zeros(K)
 y1_k = np.zeros(K)
 
-x0_k[0] = 0.2
+x0_k[0] = 0.15
 x1_k[0] = x0_k[0] + wk[0]
+
+sk[1] += 0.005
+sk[-2] += 0.005
+
+# wk[2] += 0.004
+# wk[-3] += 0.004
+
 
 for i in range(K):
     if i % 2: # if odd
-        y0_k[i] = y0
-        y1_k[i] = ymax
-    else: # if even
         y0_k[i] = 0
         y1_k[i] = y1
-
-# y0_k[0] = 0.025 * ymax
-# y1_k[-1] = ymax - (0.025 * ymax)
+    else: # if even
+        y0_k[i] = y0
+        y1_k[i] = ymax
 
 for i in range(1, K):
     x0_k[i] = x1_k[i-1] + sk[i-1]
     x1_k[i] = x0_k[i] + wk[i]
 
-sbox_w = x1_k[-1] + 0.2
+# adjust outer lines
+y1_k[1] = y1_outer
+y1_k[-2] = y1_outer
+
+y1_k[3] = y1_center
+
+sbox_w = x1_k[-1] + 0.15
 sbox_len = ymax
-sbox_h = h * 6
+sbox_h = 0.1
 substrate = pv.Cube(center=(sbox_w/2, sbox_len/2, -h/2), x_length=sbox_w, y_length=sbox_len, z_length=h)
 sbox =      pv.Cube(center=(sbox_w/2, sbox_len/2, (sbox_h - h)/2), x_length=sbox_w, y_length=sbox_len, z_length=sbox_h + h)
 
-s = rfn.Solver_PCB(sbox, nports=2)
-s.add_substrate("sub", substrate, er=er, opacity=0.0, loss_tan=0.0035, f0=1.5e9)
+s = rfn.Solver_3D(sbox)
+s.add_dielectric("sub", substrate, er=er, loss_tan=0.003, f0=1.5e9, style=dict(opacity=0.0))
 
 
-for i in range(K):
+for i in range(1, K-1):
     line = pv.Rectangle([
         (x0_k[i], y0_k[i], 0),
         (x1_k[i], y0_k[i], 0),
         (x1_k[i], y1_k[i], 0),
     ])
 
-    s.add_pec_face(f"line_{i}", line, color="gold")
+    s.add_conductor(f"line_{i}", line, style=dict(color="gold"))
 
 # feed traces
-w0 = rfn.elements.MSLine(h, er, z0 = 50).state["w"]
-feed_y = 0.4
-port_offset = 0.07
-
-port1_feed = pv.Rectangle([
-    (port_offset, feed_y, 0),
-    (x0_k[0], feed_y, 0),
-    (x0_k[0], feed_y + w0, 0),
+feed_1 = pv.Rectangle([
+        (feed_x, feed_y-w0/2, 0),
+        (feed_x, feed_y+w0/2, 0),
+        (x0_k[1], feed_y+w0/2, 0),
 ])
 
-port1_feed = pv.Rectangle([
-    (port_offset, feed_y, 0),
-    (x0_k[0], feed_y, 0),
-    (x0_k[0], feed_y + w0, 0),
+feed_2 = pv.Rectangle([
+        (sbox_w-feed_x, feed_y-w0/2, 0),
+        (sbox_w-feed_x, feed_y+w0/2, 0),
+        (x1_k[-2], feed_y+w0/2, 0),
 ])
 
-port2_feed = pv.Rectangle([
-    (sbox_w- port_offset, ymax - feed_y, 0),
-    (x1_k[-1], ymax - feed_y, 0),
-    (x1_k[-1], ymax - feed_y - w0, 0),
-])
-
-s.add_pec_face(f"port1_feed", port1_feed, color="gold")
-s.add_pec_face(f"port2_feed", port2_feed, color="gold")
+s.add_conductor(f"feed_1", feed_1, style=dict(color="gold"))
+s.add_conductor(f"feed_2", feed_2, style=dict(color="gold"))
 
 
-# ports
 port1_face = pv.Rectangle([
-    (port_offset, feed_y, -h),
-    (port_offset, feed_y + w0, -h),
-    (port_offset, feed_y + w0, 0),
+    (feed_x, feed_y-w0/2, 0),
+    (feed_x, feed_y+w0/2, 0),
+    (feed_x, feed_y+w0/2, -h),
 ])
 
 port2_face = pv.Rectangle([
-    (sbox_w - port_offset, ymax - feed_y, -h),
-    (sbox_w - port_offset, ymax - feed_y - w0, -h),
-    (sbox_w - port_offset, ymax - feed_y, 0),
+    (sbox_w-feed_x, feed_y-w0/2, 0),
+    (sbox_w-feed_x, feed_y+w0/2, 0),
+    (sbox_w-feed_x, feed_y+w0/2, -h),
 ])
 
-s.add_lumped_port(1, port1_face)
-s.add_lumped_port(2, port2_face)
-
+s.add_lumped_port(1, port1_face, r0=50)
+s.add_lumped_port(2, port2_face, r0=50)
 
 # s.init_mesh(d0 = lam0/20, n0 = 2, d_pec = lam0/20, n_min_pec=4, d_sub=lam0/20, n_min_sub=4, blend_pec=True)
-s.init_mesh_edge_method(d0 = 0.07, d_edge = 0.005)
-s.init_coefficients()
+s.generate_mesh(d0 = 0.04, d_edge = 0.005, z_bounds=[0.01, 0.04])
 
-# s.init_mesh_edge_method(d0 = 0.1, d_edge=0.01)
-# s.init_coefficients()
 
 self = s
 
@@ -246,9 +246,6 @@ plotter.camera_position = "xy"
 plotter.show()
 print(s.Nx * s.Ny * s.Nz / 1e3, "kcells")
 
-
-s.init_ports(r0=50)
-s.init_pec()
 
 s.add_field_monitor("mon1", "ez", "z", 0, 30)
 # s.add_field_monitor("mon1", "ey", "z", sub_h, 5)
@@ -261,24 +258,24 @@ pulse_n = 50000
 # # center of the pulse in time
 # t0 = (s.dt * 400)
 
-vsrc = 1e-2 * s.gaussian_source(s.dt * 300, s.dt * pulse_n)
+vsrc = 1e-2 * s.gaussian_source(s.dt * 300, t0= s.dt * 200, t_len = s.dt * pulse_n)
 
 # t = np.linspace(0, s.dt * pulse_n, pulse_n)
 # vsrc = 1e-2 * (np.sin(2* np.pi * f0 * (t)) * np.exp(-((t - t0) / t_half)**2)).astype(np.float32)
 # plt.plot(vsrc)
 
-frequency: np.ndarray = np.arange(0.4e9, 6e9, 2e6)
+frequency: np.ndarray = np.arange(0.5e9, 3e9, 2e6)
 
 s.run([1], [vsrc], n_threads=4)
 self = s
 
 
-p = s.plot_monitor(
-    ["mon1"], zoom=1.1, view="xy", el=0, opacity=[0.9, 1], 
-    linear=False, cmap="jet", style="surface",
-)
-# p.camera_position = "xy"
-p.show(title="EM Solver")
+# p = s.plot_monitor(
+#     ["mon1"], zoom=1.1, view="xy", el=0, opacity=[0.9, 1], 
+#     linear=False, cmap="jet", style="surface",
+# )
+# # p.camera_position = "xy"
+# p.show(title="EM Solver")
 
 
 sdata = s.get_sparameters(frequency, 1, z0=50)
