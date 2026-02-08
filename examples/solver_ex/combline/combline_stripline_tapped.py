@@ -226,19 +226,19 @@ self = s
 # print(s.Nx * s.Ny * s.Nz / 1e3, "kcells")
 
 
-s.add_field_monitor("mon1", "ez", "z", 0, 10)
+s.add_field_monitor("mon1", "ez", "z", 0, 100)
 # s.add_field_monitor("mon1", "ey", "z", sub_h, 5)
 # s.add_field_monitor("mon2", "ey", "z", sub_h, 15)
 # s.add_field_monitor("mon3", "ex", "z", sub_h, 10)
 
-pulse_n = 80000
+pulse_n = 100000
 # # width of half pulse in time
 # t_half = (s.dt * 100)
 # # center of the pulse in time
 # t0 = (s.dt * 400)
 
 vsrc = 1e-2 * s.gaussian_source(s.dt * 300, t0= s.dt * 200, t_len = s.dt * pulse_n)
-# vsrc = 1e-2 * s.gaussian_modulated_source(f0, width=s.dt * 10000, t0=s.dt * 10000, t_len = pulse_n * s.dt)
+# vsrc = 1e-2 * s.gaussian_modulated_source(f0, width=s.dt * 10000, t0=s.dt * 5000, t_len = pulse_n * s.dt)
 
 # t = np.linspace(0, s.dt * pulse_n, pulse_n)
 # vsrc = 1e-2 * (np.sin(2* np.pi * f0 * (t)) * np.exp(-((t - t0) / t_half)**2)).astype(np.float32)
@@ -251,8 +251,8 @@ self = s
 
 
 # p = s.plot_monitor(
-#     ["mon1"], zoom=1.1, view="xy", el=0, opacity=[0.9, 1], 
-#     linear=False, cmap="jet", style="surface",
+#     ["mon1"], zoom=1.5, view="yz", el=30, opacity=[0.9, 1], az=-70,
+#     linear=False, cmap="jet", style="surface",  gif_file=dir_ / "combline.gif"
 # )
 # # p.camera_position = "xy"
 # p.show(title="EM Solver")
@@ -265,7 +265,7 @@ S21 = sdata[:, 2]
 
 fig, axes = plt.subplots(2, 2, figsize=(9, 9))
 
-ax = axes[0,0]
+ax = axes[1,0]
 rfn.plots.draw_smithchart(ax)
 ax.plot(S11.real, S11.imag)
 
@@ -279,7 +279,7 @@ ax.set_ylim([-40, 2])
 ax.grid(True)
 ax.legend(["S11", "Ref"])
 
-ax = axes[1,0]
+ax = axes[0,0]
 ax.plot(frequency / 1e9, conv.db20_lin(S21))
 mplm.line_marker(x = f0/1e9, axes=ax)
 ax.set_xticks(np.arange(0.6, 2.6, 0.2))

@@ -1673,15 +1673,17 @@ class Solver_3D():
                 m.point_data["values"][:] = f[n]
           
         self.slider_value = Nt // 2
-        self.slider = plotter.add_slider_widget(
-            callback,
-            [0, Nt-2],
-            value=Nt // 2,
-            title="Time [ps]",
-            interaction_event="always",
-            style="modern",
-            fmt="%0.0f"
-        )
+
+        if gif_file is None:
+            self.slider = plotter.add_slider_widget(
+                callback,
+                [0, Nt-2],
+                value=Nt // 2,
+                title="Time [ps]",
+                interaction_event="always",
+                style="modern",
+                fmt="%0.0f"
+            )
 
         def set_field_visible(value):
             for m in field_actors:
