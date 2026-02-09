@@ -67,6 +67,7 @@ voltage_line1 = pv.Line(
 )
 
 
+
 s = rfn.Solver_3D(sbox)
 s.add_dielectric("sub", substrate, er=er, style=dict(opacity=0.0))
 s.add_conductor("ms1", ms1_trace, style=dict(color="gold"))
@@ -80,22 +81,26 @@ run_reference = False
 s.assign_PML_boundaries("x+", "z+", "y-", "y+", n_pml=5)
 
 if run_reference:
-    s.generate_mesh(d0=0.01, d_edge=0.001, z_bounds=[0.001, 0.01])
+    s.generate_mesh(d0=0.01, d_edge=0.0005, z_bounds=[0.001, 0.01])
 else:
     s.generate_mesh(d0=0.01, d_edge=0.005, z_bounds=[0.005, 0.01])
 
-pec_face = ms1_trace
-s.edge_correction(ms1_trace)
+    pec_face = ms1_trace
+    # correction factor for Ez components 2.5mils away (dz/2) from trace
+    dz = 0.005
+    dy = 0.005
+    CFh  = (dz / dy) * np.arctan(dy / dz)
+    s.edge_correction(ms1_trace)
 
 s.add_current_probe("c1", current_face)
 s.add_line_probe("v1", "ez", voltage_line1)
 
-s.add_field_monitor("ex", "ex", "x", 0, 10)
-s.add_field_monitor("ey", "ey", "x", 0, 10)
-s.add_field_monitor("ez", "ez", "x", 0, 10)
-s.add_field_monitor("hx", "hx", "x", 0, 10)
-s.add_field_monitor("hy", "hy", "x", 0, 10)
-s.add_field_monitor("hz", "hz", "x", 0, 10)
+s.add_field_monitor("ex", "ex", "x", 0, 1)
+s.add_field_monitor("ey", "ey", "x", 0, 1)
+s.add_field_monitor("ez", "ez", "x", 0, 1)
+s.add_field_monitor("hx", "hx", "x", 0, 1)
+s.add_field_monitor("hy", "hy", "x", 0, 1)
+s.add_field_monitor("hz", "hz", "x", 0, 1)
 
 s.add_field_monitor("ez_xy", "ez", "z", 0, 10)
 
@@ -157,15 +162,15 @@ def plot_ref_fields(ax, name):
 
 if run_reference:
     save_fields(ey_plane.coords["y"], ey_plane.sel(z=sub_h), "ey_y")
-    save_fields(ey_plane.coords["z"], ey_plane.sel(y=ms_w/2 + 0.005), "ey_z")
+    save_fields(ey_plane.coords["z"], ey_plane.sel(y=ms_w/2 + 0.0025), "ey_z")
 
     save_fields(ez_plane.coords["z"], ez_plane.sel(y=ms_w/2), "ez_z")
-    save_fields(ez_plane.coords["y"], ez_plane.sel(z=sub_h - 0.005), "ez_y")
+    save_fields(ez_plane.coords["y"], ez_plane.sel(z=sub_h - 0.0025), "ez_y")
 
     save_fields(hy_plane.coords["z"], hy_plane.sel(y=ms_w/2), "hy_z")
-    save_fields(hy_plane.coords["y"], hy_plane.sel(z=sub_h - 0.005), "hy_y")
+    save_fields(hy_plane.coords["y"], hy_plane.sel(z=sub_h - 0.0025), "hy_y")
 
-    save_fields(hz_plane.coords["z"], hz_plane.sel(y=ms_w/2 + 0.005), "hz_z")
+    save_fields(hz_plane.coords["z"], hz_plane.sel(y=ms_w/2 + 0.0025), "hz_z")
     save_fields(hz_plane.coords["y"], hz_plane.sel(z=sub_h), "hz_y")
 
 
@@ -182,8 +187,8 @@ ax1.legend()
 ax2.legend()
 
 fig, (ax1, ax2) = plt.subplots(2, 1)
-plot_fields(ax1, ey_plane.coords["z"], ey_plane.sel(y=ms_w/2 + 0.005), "Ey")
-plot_fields(ax2, ez_plane.coords["y"], ez_plane.sel(z=sub_h - 0.005), "Ez")
+plot_fields(ax1, ey_plane.coords["z"], ey_plane.sel(y=ms_w/2 + 0.0025), "Ey")
+plot_fields(ax2, ez_plane.coords["y"], ez_plane.sel(z=sub_h - 0.0025), "Ez")
 plot_ref_fields(ax1, "ey_z")
 plot_ref_fields(ax2, "ez_y")
 ax2.set_xlim([-ms_w, ms_w])
@@ -203,8 +208,8 @@ ax1.legend()
 ax2.legend()
 
 fig, (ax1, ax2) = plt.subplots(2, 1)
-plot_fields(ax1, hy_plane.coords["y"], hy_plane.sel(z=sub_h - 0.005), "Hy")
-plot_fields(ax2, hz_plane.coords["z"], hz_plane.sel(y=ms_w/2 + 0.005), "Hz")
+plot_fields(ax1, hy_plane.coords["y"], hy_plane.sel(z=sub_h - 0.0025), "Hy")
+plot_fields(ax2, hz_plane.coords["z"], hz_plane.sel(y=ms_w/2 + 0.0025), "Hz")
 plot_ref_fields(ax1, "hy_y")
 plot_ref_fields(ax2, "hz_z")
 ax2.set_xlim([0, sub_h*2])

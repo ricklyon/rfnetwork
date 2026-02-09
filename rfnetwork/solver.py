@@ -513,102 +513,6 @@ class Solver_3D():
             hz_y2 = np.ones((Nx, Ny, Nz+1), dtype=dtype_) * Db_0,
         )
 
-
-
-    def edge_correction(self, edge):
-        # TODO: having an odd number of cells (3) across the PEC trace causes the edge correction to fail,
-        # spurious fields appear.
-        # apply correction if no ports attach to the x0 edge
-        # if len(x0_ports) == 0:
-        #     x0, y0, z0 = self.field_pos_to_idx(np.min(pec.points, axis=0), "ey")
-        #     x1, y1, z1 = self.field_pos_to_idx(np.max(pec.points, axis=0), "ey")
-        #     # ey edge correction
-        #     eps = self.eps_ey[x0, y0: y1, z0]
-        #     self.Ca["ey_x"][x0, y0: y1, z0] = 1
-        #     self.Cb["ey_x"][x0, y0: y1, z0] = (self.dt / eps)   
-        
-        # if len(x1_ports) == 0:
-        #     x0, y0, z0 = self.field_pos_to_idx(np.min(pec.points, axis=0), "ey")
-        #     x1, y1, z1 = self.field_pos_to_idx(np.max(pec.points, axis=0), "ey")
-        #     # ey edge correction
-        #     eps = self.eps_ey[x0, y0: y1, z0]
-        #     self.Ca["ey_x"][x1, y0: y1, z0] = 1
-        #     self.Cb["ey_x"][x1, y0: y1, z0] = (self.dt / eps) 
-
-
-        if len(y0_ports) == 0:
-            x0, y0, z0 = self.field_pos_to_idx(np.min(pec.points, axis=0), "ex")
-            x1, y1, z1 = self.field_pos_to_idx(np.max(pec.points, axis=0), "ex")
-
-            # self.Ca["ex_y"][x0: x1, y0, z0] = 1
-            # self.Cb["ex_y"][x0: x1, y0, z0] = (self.dt / (eps)) 
-            # self.Ca["ex_z"][x0: x1, y0, z0] = 1
-            # self.Cb["ex_z"][x0: x1, y0, z0] = (self.dt / (eps)) 
-
-            # self.Db["hy_z2"][x0: x1, y0, z0-1] = 0
-            # self.Db["hy_z1"][x0: x1, y0, z0] = 0
-
-            # self.Db["hz_y1"][x0: x1, y0-1, z0] *= hy_CF
-            # self.Db["hz_y2"][x0: x1, y0-1, z0] *= hy_CF
-            CF = 2 * np.sqrt(1/2)
-            # hz in the same plane as the trace
-            self.Db["hz_y2"][x0: x1, y0-1, z0] *= 1 / CF
-            self.Db["hz_y1"][x0: x1, y0-1, z0] *= 1 / CF
-
-            # hy directly above and below trace edge
-            self.Db["hy_z1"][x0: x1, y0, z0-1] *= 1 / CF
-            self.Db["hy_z2"][x0: x1, y0, z0-1] *= 1 / CF
-            self.Db["hy_z1"][x0: x1, y0, z0] *= 1 / CF
-            self.Db["hy_z2"][x0: x1, y0, z0] *= 1 / CF
-
-            # hx below the trace, correct ez component on the edge
-            self.Db["hx_y2"][x0+1: x1-1, y0-1, z0-1] *= CF
-            self.Db["hx_y1"][x0+1: x1-1, y0, z0-1] *= CF
-            # hy above the trace, correct the ez component on the edge
-            self.Db["hx_y2"][x0+1: x1-1, y0-1, z0] *= CF
-            self.Db["hx_y1"][x0+1: x1-1, y0, z0] *= CF
-
-            # ez below and above the trace
-            self.Cb["ez_y"][x0+1: x1-1, y0, z0] *= 1/0.785
-            self.Cb["ez_y"][x0+1: x1-1, y0, z0-1] *= 1/0.785
-
-            # # # ey in the plane of the trace
-            # self.Cb["ey_z"][x0: x1, y0-1, z0] *= 1/0.785
-
-        
-
-        if len(y1_ports) == 0:
-            x0, y0, z0 = self.field_pos_to_idx(np.min(pec.points, axis=0), "ex")
-            x1, y1, z1 = self.field_pos_to_idx(np.max(pec.points, axis=0), "ex")
-
-            CF = 2 * np.sqrt(1/2)
-
-            # hz in the same plane as the trace
-            self.Db["hz_y1"][x0: x1, y1, z0] *= 1 / CF
-            self.Db["hz_y2"][x0: x1, y1, z0] *= 1 / CF
-
-            # hy directly above and below trace edge
-            self.Db["hy_z1"][x0: x1, y1, z0-1] *= 1 / CF
-            self.Db["hy_z2"][x0: x1, y1, z0-1] *= 1 / CF
-            self.Db["hy_z1"][x0: x1, y1, z0] *= 1 / CF
-            self.Db["hy_z2"][x0: x1, y1, z0] *= 1 / CF
-
-            # hy below the trace, correct ez component on the edge
-            self.Db["hx_y2"][x0+1: x1-1, y1-1, z0-1] *= CF
-            self.Db["hx_y1"][x0+1: x1-1, y1, z0-1] *= CF
-            # hy above the trace, correct the ez component on the edge
-            self.Db["hx_y2"][x0+1: x1-1, y1-1, z0] *= CF
-            self.Db["hx_y1"][x0+1: x1-1, y1, z0] *= CF
-
-            # # ez below and above the trace
-            self.Cb["ez_y"][x0+1: x1-1, y1, z0-1] *= 1/0.785
-            self.Cb["ez_y"][x0+1: x1-1, y1, z0] *= 1/0.785
-
-            # # # ey in the plane of the trace
-            # self.Cb["ey_z"][x0: x1, y1, z0] *= 1/0.785
-
-        else:
-            raise NotImplementedError(f"PEC face not supported yet in the given axis.")
             
     def _init_ports(self):
         """
@@ -1394,7 +1298,7 @@ class Solver_3D():
         # return a single column of the full s-matrix
         return B / As[..., None]
     
-    def edge_correction(self, pec_face):
+    def edge_correction(self, pec_face, CFh=None):
         """
         Analytic correction factors for singularity correction at PEC edges. Corrects asymptotic Ez, Hy fields 
         along the z-axis at the face edge, and Ey, Hz fields along the y-axis at the face edge.
@@ -1453,6 +1357,15 @@ class Solver_3D():
             self.Db["hx_y1"][x0: x1+1, y0, z] *= CF
             self.Db["hx_y2"][x0: x1+1, y1-1, z] *= CF
             self.Db["hx_y1"][x0: x1+1, y1, z] *= CF
+
+        # correction E components whose integration plane is a half a cell away from the edge, Ez, and Ey
+        if CFh is not None:
+            for z in [z0-1, z0]:
+                self.Cb["ez_y"][x0+1: x1, y0, z] *= 1 / CFh
+                self.Cb["ez_y"][x0+1: x1, y1, z] *= 1 / CFh
+
+            for y in [y0-1, y1]:
+                self.Cb["ey_z"][x0+1: x1, y, z0] *= 1 / CFh
 
         ###################
         # Y Axis Edges
