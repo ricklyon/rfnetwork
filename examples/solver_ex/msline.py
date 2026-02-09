@@ -22,8 +22,8 @@ ms_w = 0.04
 ms_len = 1
 ms1_y = 0
 
-sbox_h = 0.3
-sbox_w = 0.4
+sbox_h = 0.5
+sbox_w = 0.6
 sbox_len = ms_len * 1.3
 
 sub_h = 0.02
@@ -73,12 +73,13 @@ s.add_conductor("ms1", ms1_trace, style=dict(color="gold"))
 s.add_lumped_port(1, port1_face)
 s.add_lumped_port(2, port2_face)
 
-s.assign_PML_boundaries("z+")
+s.assign_PML_boundaries("z+", "y-", "y+", n_pml=5)
 
 self = s
 # having three cells in the PEC instead of 4 causes the edge correction to fail
 # s.init_mesh(d0 = 0.02, n0 = 3, d_pec = 0.01, n_min_pec=4, d_sub=0.01, n_min_sub=4, blend_pec=False)
-s.generate_mesh(d0 = 0.02, d_edge=0.0025, z_bounds = [0.0025, 0.02])
+s.generate_mesh(d0 = 0.02, d_edge=0.005, z_bounds = [0.005, 0.02])
+s.edge_correction(ms1_trace)
 
 s.add_field_monitor("mon1", "ez", "z", sub_h, 5)
 # s.add_field_monitor("mon1", "ez", "z", sub_h - 0.005, 15)
@@ -94,11 +95,11 @@ plotter.camera_position = "yz"
 plotter.show()
 
 
-Db_0 = s.dt / u0
-Cb_0 = s.dt / e0 
-p = s.plot_coefficients("ex_z", "a", "y", 0, point_size=15, cmap="brg")
-p.camera_position = "xy"
-p.show()
+# Db_0 = s.dt / u0
+# Cb_0 = s.dt / e0 
+# p = s.plot_coefficients("ex_z", "a", "y", 0, point_size=15, cmap="brg")
+# p.camera_position = "xy"
+# p.show()
 
 f0 = 10e9
 pulse_n = 2800
@@ -107,7 +108,7 @@ pulse_width = (s.dt * 400)
 # center of the pulse in time
 t0 = (s.dt * 500)
 
-vsrc = 1e-2 * self.gaussian_modulated_source(f0, width=80e-12, t0=80e-12, t_len=500e-12)
+vsrc = 1e-2 * self.gaussian_source(width=80e-12, t0=80e-12, t_len=500e-12)
 plt.plot(vsrc)
 
 frequency: np.ndarray = np.arange(5e9, 15e9, 10e6)

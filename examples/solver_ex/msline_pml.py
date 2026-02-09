@@ -71,11 +71,12 @@ s.add_lumped_port(1, port1_face)
 
 self = s
 
-s.assign_PML_boundaries("x+")
+s.assign_PML_boundaries("x+", "y-", "y+", "z+", n_pml=5)
+
 
 s.generate_mesh(d0 = 0.02, d_edge=0.005)
 
-
+s.edge_correction(ms1_trace)
 
 
 
@@ -93,11 +94,11 @@ s.add_voltage_probe("v2", voltage_line2)
 # plotter.show()
 
 
-Db_0 = s.dt / u0
-Cb_0 = s.dt / e0 
-p = s.plot_coefficients("hz_y2", "b", "z", sub_h, point_size=15, cmap="brg", normalization=Db_0)
-p.camera_position = "xy"
-p.show()
+# Db_0 = s.dt / u0
+# Cb_0 = s.dt / e0 
+# p = s.plot_coefficients("hz_y2", "b", "z", sub_h, point_size=15, cmap="brg", normalization=Db_0)
+# p.camera_position = "xy"
+# p.show()
 
 f0 = 10e9
 pulse_n = 1600
@@ -118,7 +119,7 @@ sdata = s.get_sparameters(frequency)
 S11 = sdata[:, 0]
 
 
-p = s.plot_monitor(["mon1"], el=0, zoom=1.1, az=0, view="xy", opacity=[0.8, 1], linear=False, cmap="jet", style="points")
+p = s.plot_monitor(["mon1"], el=0, zoom=1.1, az=0, view="xy", opacity=[0.8, 1], linear=False, cmap="jet", style="surface")
 p.show(title="EM Solver")
 
 # compute line impedance
@@ -150,7 +151,7 @@ ZP = VP / IP
 
 fig, ax = plt.subplots()
 plt.plot(frequency / 1e9, ZP.real)
-# ax.plot(frequency / 1e9, conv.z_gamma(S11))
+ax.plot(frequency / 1e9, conv.z_gamma(S11))
 plt.ylim([0, 120])
 plt.axhline(y=z_ref, linestyle=":", color="k")
 ax.set_xlabel("Frequency [GHz]")

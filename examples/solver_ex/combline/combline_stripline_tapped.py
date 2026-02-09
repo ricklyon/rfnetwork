@@ -103,14 +103,15 @@ K = len(wk)
 
 # y coordinates of the bottom and top edge of each line
 ymax = rfn.const.c0_in / (f0 * np.sqrt(er) * 4)
-y0 = 0.06 * ymax
-y1 = ymax - y0
 
+y0 = 0.085
+y1 = ymax - y0
 
 w0 = 0.035
 feed_y = 0.37
 feed_x = 0.06
-y1_tune = 0.065
+y1_outer = ymax - 0.01
+
 sk_adjust = 0.000
 
 
@@ -139,8 +140,8 @@ for i in range(1, K):
     x1_k[i] = x0_k[i] + wk[i]
 
 # adjust outer lines
-y1_k[1] += y1_tune
-y1_k[-2] += y1_tune
+y1_k[1] = y1_outer
+y1_k[-2] = y1_outer
 
 
 sbox_w = x1_k[-1] + 0.15
@@ -220,10 +221,10 @@ s.generate_mesh(d0 = 0.02, d_edge = 0.005, z_bounds=[0.01, 0.01])
 
 self = s
 
-# plotter = s.render(show_probes=False)
-# plotter.camera_position = "xy"
-# plotter.show()
-# print(s.Nx * s.Ny * s.Nz / 1e3, "kcells")
+plotter = s.render(show_probes=False)
+plotter.camera_position = "xy"
+plotter.show()
+print(s.Nx * s.Ny * s.Nz / 1e3, "kcells")
 
 
 s.add_field_monitor("mon1", "ez", "z", 0, 100)
