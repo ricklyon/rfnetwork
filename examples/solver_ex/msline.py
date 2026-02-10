@@ -141,7 +141,7 @@ plt.ylim([0, 120])
 plt.axhline(y=z_ref, linestyle=":", color="k")
 ax.set_xlabel("Frequency [GHz]")
 ax.set_ylabel("Impedance [Ohm]")
-mplm.line_marker(x = 10, axes=ax)
+# mplm.line_marker(x = 10, axes=ax)
 ax.legend(["probe", "port"])
 
 

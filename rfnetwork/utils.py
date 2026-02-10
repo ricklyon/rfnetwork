@@ -3,18 +3,53 @@ from pathlib import Path
 import numpy as np
 from scipy.optimize import fsolve
 from scipy.special import ellipk
+from scipy import signal
 from .core.units import const
 
-def dtft(xn: np.ndarray, f: np.ndarray, fs: float):
+def dtft(xn: np.ndarray, frequency: np.ndarray, fs: float, downsample: bool = False) -> np.ndarray:
     """
-    Compute the DTFT of the discrete time signal x[n] over a frequency range. (cycles per second)
+    Compute the DTFT of the discrete time signal x[n] over a frequency range (cycles per second),
+
+    Parameters
+    ----------
+    xn : np.ndarray
+        time domain samples
+    frequency : np.ndarray
+        frequency points to evaluate the DTFT at
+    fs : float 
+        sampling frequency of xn
+    downsample : bool, default: True
+        allows downsampling prior to computing the DTFT
+    
+    Returns
+    -------
+    np.ndarray
+        discrete time fourier transform of xn
     """
+
+    # resampling frequency
+    frs = np.max(frequency) * 4
+
+    # In most cases 1 / dt is much greater than the highest frequency of interest and the DTFT can be made much faster
+    # by down-sampling. 
+    if downsample and fs > (frs * 2):
+        # number of samples in xn between each sample of frs
+        downsample_factor = int(fs / frs)
+        # create lowpass filter that removes all frequency content above frs/2
+        sos1 = signal.butter(20, frs/2, btype="lowpass", output="sos", fs = fs)
+        # apply filter, then downsample the signal
+        xn_rs = signal.sosfilt(sos1, xn)[::downsample_factor]
+
+        # filter again above fmax
+        sos2 = signal.butter(20, np.max(frequency) * 1.5, btype="lowpass", output="sos", fs = frs)
+        xn = signal.sosfilt(sos2, xn_rs)
+
     # convert the continuous time frequency into a discrete frequency range. The discrete frequencies
     # are bounded by -0.5 to 0.5 if there is no aliasing.
     # To convert the continuous time frequency (cycles / sec), into the discrete frequency (cycles / sample). 
     # divide it by the sampling rate fs (samples / sec):
     # (cycles / sec) / (samples / sec) = (cycles / sample)
-    fn = f / fs
+    fn = frequency / fs
     omega = 2 * np.pi * fn
     
     n = np.arange(len(xn))

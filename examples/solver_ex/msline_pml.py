@@ -89,9 +89,9 @@ s.add_voltage_probe("v1", voltage_line1)
 s.add_voltage_probe("v2", voltage_line2)
 
 
-# plotter = s.render(show_probes=True)
-# plotter.camera_position = "yz"
-# plotter.show()
+plotter = s.render(show_probes=True)
+plotter.camera_position = "yz"
+plotter.show()
 
 
 # Db_0 = s.dt / u0

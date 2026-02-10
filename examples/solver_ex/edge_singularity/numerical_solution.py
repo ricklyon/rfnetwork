@@ -227,12 +227,12 @@ ax2.legend()
 
 
 IP = utils.dtft(self.vi_probe_values("c1"), frequency, 1 / s.dt)
-VP = utils.dtft(-self.vi_probe_values("v1"), frequency, 1 / s.dt) * np.exp(1j * 2 * np.pi * frequency * (-s.dt / 2))
+VP = utils.dtft(-self.vi_probe_values("v1"), frequency, 1 / s.dt) #* np.exp(-1j * 2 * np.pi * frequency * (-s.dt / 2))
 ZP = VP / IP
 
 fig, ax = plt.subplots()
 plt.plot(frequency / 1e9, ZP.real)
-# plt.plot(frequency / 1e9, conv.z_gamma(S11))
+plt.plot(frequency / 1e9, conv.z_gamma(S11))
 plt.ylim([0, 120])
 plt.axhline(y=z_ref, linestyle=":", color="k")
 ax.set_xlabel("Frequency [GHz]")
