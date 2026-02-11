@@ -85,8 +85,8 @@ s.add_field_monitor("mon2", "ey", "z", sub_h, 10)
 s.add_field_monitor("mon3", "ex", "z", sub_h, 10)
 
 s.add_current_probe("c1", current_face)
-s.add_voltage_probe("v1", voltage_line1)
-s.add_voltage_probe("v2", voltage_line2)
+s.add_line_probe("v1", "ez", voltage_line1)
+s.add_line_probe("v2", "ez", voltage_line2)
 
 
 plotter = s.render(show_probes=True)
@@ -124,8 +124,8 @@ p.show(title="EM Solver")
 
 # compute line impedance
 line_i = self.vi_probe_values("c1")
-line_v1 = self.vi_probe_values("v1")
-line_v2 = self.vi_probe_values("v2")
+line_v1 = -self.vi_probe_values("v1")
+line_v2 = -self.vi_probe_values("v2")
 
 def get_vp(v1, v2, d):
     """
@@ -146,7 +146,7 @@ print("vp / c", vp_e / rfn.const.c0)
 
 
 IP = utils.dtft(self.vi_probe_values("c1"), frequency, 1 / s.dt)
-VP = utils.dtft(self.vi_probe_values("v1"), frequency, 1 / s.dt) * np.exp(1j * 2 * np.pi * frequency * (-s.dt / 2))
+VP = utils.dtft(-self.vi_probe_values("v1"), frequency, 1 / s.dt) * np.exp(1j * 2 * np.pi * frequency * (-s.dt / 2))
 ZP = VP / IP
 
 fig, ax = plt.subplots()

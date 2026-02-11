@@ -28,21 +28,21 @@ def dtft(xn: np.ndarray, frequency: np.ndarray, fs: float, downsample: bool = Fa
     """
 
     # resampling frequency
-    frs = np.max(frequency) * 4
+    frs = np.max(frequency) * 20
+    # number of samples in xn between each sample of frs
+    downsample_factor = int(fs / frs)
+    # determine whether downsample can be used. The sampling rate must be at least twice the downsampled rate
+    downsample_apply = downsample and (len(xn) / downsample_factor) > 100 and fs > (frs * 2)
 
     # In most cases 1 / dt is much greater than the highest frequency of interest and the DTFT can be made much faster
     # by down-sampling. 
-    if downsample and fs > (frs * 2):
-        # number of samples in xn between each sample of frs
-        downsample_factor = int(fs / frs)
+    if downsample_apply:
         # create lowpass filter that removes all frequency content above frs/2
-        sos1 = signal.butter(20, frs/2, btype="lowpass", output="sos", fs = fs)
-        # apply filter, then downsample the signal
-        xn_rs = signal.sosfilt(sos1, xn)[::downsample_factor]
-
-        # filter again above fmax
-        sos2 = signal.butter(20, np.max(frequency) * 1.5, btype="lowpass", output="sos", fs = frs)
-        xn = signal.sosfilt(sos2, xn_rs)
+        sos = signal.butter(20, frs/2.5, btype="lowpass", output="sos", fs = fs)
+        # apply filter, then downsample the signal. The downsampling will leave aliases, but at much higher frequencies
+        # than the DTFT will be evaluated.
+        xn = signal.sosfiltfilt(sos, xn)[::downsample_factor]
+        fs = frs
 
     # convert the continuous time frequency into a discrete frequency range. The discrete frequencies
     # are bounded by -0.5 to 0.5 if there is no aliasing.
@@ -56,9 +56,13 @@ def dtft(xn: np.ndarray, frequency: np.ndarray, fs: float, downsample: bool = Fa
     omega_mesh, n_mesh = np.meshgrid(omega, n)
 
     # broadcast input sequence across all omega
-    x_b = np.broadcast_to(xn[..., None], (len(n), len(omega)))
+    # x_b = np.broadcast_to(xn[..., None], (len(n), len(omega)))
     # sum across all non-zero n
-    Xw = np.sum(x_b * np.exp(-1j * omega_mesh * n_mesh), axis=0)
+    Xw = np.sum(xn[..., None] * np.exp(-1j * omega_mesh * n_mesh), axis=0)
+
+    # scale the DTFT so it's identical to the non-downsampled version
+    if downsample_apply:
+        Xw *= downsample_factor
 
     return Xw
 

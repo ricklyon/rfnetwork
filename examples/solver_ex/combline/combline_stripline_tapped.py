@@ -259,7 +259,7 @@ self = s
 # p.show(title="EM Solver")
 
 
-sdata = s.get_sparameters(frequency, 1, z0=100)
+sdata = s.get_sparameters(frequency, 1)
 S11 = sdata[:, 0]
 S21 = sdata[:, 2]
 

@@ -87,7 +87,7 @@ s.add_field_monitor("mon2", "ez", "y", 0, 5)
 s.add_field_monitor("mon3", "ex", "z", sub_h, 10)
 
 s.add_current_probe("c1", current_face)
-s.add_voltage_probe("v1", voltage_line)
+s.add_line_probe("v1", "ez", voltage_line)
 
 
 plotter = s.render(show_probes=True)
@@ -115,7 +115,7 @@ frequency: np.ndarray = np.arange(5e9, 15e9, 10e6)
 
 s.run([1], [vsrc], n_threads=4)
 
-sdata = s.get_sparameters(frequency)
+sdata = s.get_sparameters(frequency, downsample=False)
 S11 = sdata[:, 0]
 S21 = sdata[:, 1]
 
@@ -128,7 +128,7 @@ line_i = self.vi_probe_values("c1")
 line_v = self.vi_probe_values("v1")
 
 IP = utils.dtft(self.vi_probe_values("c1"), frequency, 1 / s.dt)
-VP = utils.dtft(self.vi_probe_values("v1"), frequency, 1 / s.dt) * np.exp(1j * 2 * np.pi * frequency * (-s.dt / 2))
+VP = utils.dtft(-self.vi_probe_values("v1"), frequency, 1 / s.dt) * np.exp(1j * 2 * np.pi * frequency * (-s.dt / 2))
 ZP = VP / IP
 S11_zp = rfn.conv.gamma_z(ZP)
 
