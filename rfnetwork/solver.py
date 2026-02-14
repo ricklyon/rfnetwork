@@ -212,14 +212,22 @@ class Solver_3D():
                 hard_points[axis] = np.concatenate([hard_points[axis], obj.points[:, axis]])
         
             # remove any soft points that are less than d_edge away from an object point
-            for p in hard_points[axis]:
-                soft_points[axis] = np.where(np.abs(p - soft_points[axis]) < (d_edge), np.nan, soft_points[axis])
+            for p in np.unique(hard_points[axis]):
+                soft_points[axis] = np.where(np.abs(p - soft_points[axis]) < (d_edge * 0.8), np.nan, soft_points[axis])
+            
+            # clean up and sort soft mesh points
+            sp_axis = np.sort(np.unique(np.around(soft_points[axis], decimals=self._places)))
+            
+            # create a reduced set of mesh points that are spaced no less than d_edge. Walk through all soft points
+            # and only add points to the reduced list if they are at least d_edge away from the last point.
+            sp_axis_reduced = [sp_axis[0]]
+            last_p = sp_axis[0]
+            for i, p in enumerate(sp_axis[1:]):
+                if (p - last_p) >= d_edge:
+                    sp_axis_reduced += [p]
+                    last_p = p
 
-            # remove points that are less than d_edge away from other soft points
-            for i in range(len(soft_points[axis])-1):
-                soft_points[axis][i + 1:] = np.where(
-                    np.abs(soft_points[axis][i] - soft_points[axis][i + 1:]) < (d_edge / 2), np.nan, soft_points[axis][i+1:]
-                )
+            soft_points[axis] = sp_axis_reduced
 
             # clip points outside of the sbox limits
             soft_points[axis] = np.clip(soft_points[axis], self.sbox_min[axis], self.sbox_max[axis])
@@ -249,6 +257,8 @@ class Solver_3D():
 
         if z_bounds is not None:
             d_bounds[2] = z_bounds
+
+        # mesh_cells_d = [np.diff(all_points[axis]) for axis in range(3)]
 
         # build a list of cell widths along each axis
         mesh_cells_d = [[], [], []]

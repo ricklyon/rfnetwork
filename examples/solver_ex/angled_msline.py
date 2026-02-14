@@ -29,18 +29,18 @@ ms_len1 = 0.5
 ms_len1_x = ms_len1 * np.cos(np.deg2rad(ms_ang))
 ms_len1_y = ms_len1 * np.sin(np.deg2rad(ms_ang))
 
-sbox_h = 0.5
-sbox_w = ms_len1_x + 0.75
-sbox_len = ms_len1_y + 0.5
+sbox_h = 0.35
+sbox_w = ms_len1_x + 0.5
+sbox_len = ms_len1_y + 0.3
 
 sub_h = 0.02
 ms_x = ((-ms_len1_x / 2), (ms_len1_x / 2))
 ms_y = (-ms_len1_y / 2, ms_len1_y / 2)
 
 
-substrate = pv.Cube(center=(0, 0, sub_h/2), x_length=sbox_len, y_length=sbox_w, z_length=sub_h)
+substrate = pv.Cube(center=(0, 0, sub_h/2), x_length=sbox_w, y_length=sbox_len, z_length=sub_h)
 
-sbox = pv.Cube(center=(0, 0, sbox_h/2), x_length=sbox_len, y_length=sbox_w, z_length=sbox_h)
+sbox = pv.Cube(center=(0, 0, sbox_h/2), x_length=sbox_w, y_length=sbox_len, z_length=sbox_h)
 
 ms0_trace = pv.Rectangle([
     (ms_x[0], ms_y[0] - ms_w/2, sub_h),
