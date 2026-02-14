@@ -134,39 +134,128 @@ class Solver_3D():
         self._init_ports()
 
                 
-    def _init_grid(self, d0: float, d_edge: float = None, z_bounds: float = None):
+    def _get_mesh_points(self, d_edge: float):
         """
         Initialize the spatial grid.
         """
 
+        # conductor objects
+        objects = [cond["obj"] for cond in self.conductor.values()]
+
+        # substrate objects
+        sub_objects = [self.bounding_box] + [sub["obj"] for sub in self.dielectric.values()]
+
+        obj_edges = []
+        # build list of edge coordinates along each axis
+        for obj in objects:
+
+            # decremented counter, starts at the number of points in the face, reaches zero after the last point
+            # in the face and a new face begins.
+            face_n_count = 0
+            # first point in a face
+            anchor = None
+            # iterate through the list of faces points
+            for i, p in enumerate(obj.faces):
+                # start a new face
+                if face_n_count == 0:
+                    face_n_count = p
+                    anchor =  obj.faces[i+1]
+                    continue
+                # if on the last point in the face, connect back to the first point in the face
+                elif face_n_count == 1:
+                    # obj_edges.append((p, anchor))
+                    obj_edges.append((obj.points[p], obj.points[anchor]))
+                # connect two points in the face
+                else:
+                    obj_edges.append((obj.points[p], obj.points[obj.faces[i+1]]))
+
+                face_n_count -= 1
+
+        obj_edges = np.around(obj_edges, decimals=self._places).astype(np.float32)
+
+        # object vertices
+        hard_points = [np.unique(obj_edges[..., i].flatten()) for i in range(3)]
+
+        # break angled edges up into sections
+        soft_points = [np.array([]), np.array([]), np.array([])]
+        
+        # object vertices and points for the mesh around angled sections
+        all_points = [np.array([]), np.array([]), np.array([])]
+
+        edge_len = np.abs(np.diff(obj_edges, axis=1).squeeze())
+        # compute the area of a box bound by this edge and the cardinal axis. If area is above a certain threshold
+        # related to d_edge, create soft points along the axis to keep the area below the threshold. 
+        edge_area = np.prod(edge_len[:, :2], axis=-1)
+
+        edge = obj_edges[0]
+        for i, edge in enumerate(obj_edges):
+            if edge_area[i] > d_edge ** 2:
+                # break angled edges along x and y into sub-cells separated by d_edge
+                nx_ny = np.around(np.abs(edge_len[i][:2]) / d_edge).astype(int)
+
+                for axis in range(2):
+                    soft_points[axis] = np.append(
+                        soft_points[axis], np.linspace(edge[0, axis], edge[1, axis], nx_ny[axis])
+                    )
+            
+            # add edge cells on either side of edges aligned with the cardinal axis
+            elif np.abs(edge_area[i]) < self._tol:
+                
+                for axis in range(3):
+                    if edge_len[i][axis] < self._tol:
+                        soft_points[axis] = np.append(soft_points[axis], [edge[0][axis] - d_edge, edge[0][axis] + d_edge])
+
+
+        for axis in range(3):
+            # add points for substrates and bounding box
+            for obj in sub_objects:
+                hard_points[axis] = np.concatenate([hard_points[axis], obj.points[:, axis]])
+        
+            # remove any soft points that are less than d_edge away from an object point
+            for p in hard_points[axis]:
+                soft_points[axis] = np.where(np.abs(p - soft_points[axis]) < (d_edge), np.nan, soft_points[axis])
+
+            # remove points that are less than d_edge away from other soft points
+            for i in range(len(soft_points[axis])-1):
+                soft_points[axis][i + 1:] = np.where(
+                    np.abs(soft_points[axis][i] - soft_points[axis][i + 1:]) < (d_edge / 2), np.nan, soft_points[axis][i+1:]
+                )
+
+            # clip points outside of the sbox limits
+            soft_points[axis] = np.clip(soft_points[axis], self.sbox_min[axis], self.sbox_max[axis])
+            hard_points[axis] = np.clip(hard_points[axis], self.sbox_min[axis], self.sbox_max[axis])
+
+            # combine object points with soft points
+            all_points[axis] = np.concatenate([hard_points[axis], soft_points[axis]])
+            # round to tolerance
+            all_points[axis] = np.around(all_points[axis], decimals=self._places)
+            # remove repeated values and sort
+            all_points[axis] = np.sort(np.unique(all_points[axis]))
+
+            # remove nan values 
+            all_points[axis] = all_points[axis][np.isfinite(all_points[axis])]
+
+        return all_points
+
+    def _init_grid(self, d0: float, d_edge: float = None, z_bounds: float = None):
+        
+        all_points = self._get_mesh_points(d_edge=d0 if d_edge is None else d_edge)
+
         if not isinstance(d0, list):
             d0 = [d0] * 3
 
+        dtype_ = np.float32
         d_bounds = [[d0[i], d0[i]] for i in range(3)]
 
         if z_bounds is not None:
             d_bounds[2] = z_bounds
-
-        edges = [np.array([], dtype=np.float32) for i in range(3)]
-
-        objects = [self.bounding_box] + [cond["obj"] for cond in self.conductor.values()] + [sub["obj"] for sub in self.dielectric.values()]
-        dtype_ = np.float32
-
-        # build list of edge coordinates along each axis
-        for obj in objects:
-            # round points to minimum precision supported by the mesh
-            p_edges = np.around(obj.points.T, decimals=self._places).astype(np.float32)
-        
-            for i in range(3):
-                edges_i = np.unique(np.concatenate([edges[i], p_edges[i]]))
-                edges[i] = edges_i
 
         # build a list of cell widths along each axis
         mesh_cells_d = [[], [], []]
         for axis in range(3):
 
             # list of distances between each edge
-            cells_d = np.diff(edges[axis])
+            cells_d = np.diff(all_points[axis])
 
             # cells are broken up into smaller sub-cells to create small edge cells, and to shorten the span
             # that is graded with increasingly larger cells.
@@ -184,22 +273,7 @@ class Solver_3D():
                     n_split = 1
                     subcells_d_i = [d]
 
-                # add an edge cell at the end of the the last cell
-                if d_edge is not None and (i > 0) and (subcells_d[-1] > (d_edge * 1.5)): 
-                    # make the last cell shorter to compensate for adding a new d_edge cell
-                    subcells_d[-1] -= d_edge
-                    # add new sub-cell at the edge
-                    subcells_d += [d_edge]
-
-                # add an edge cell at the beginning of the current cell
-                if d_edge is not None and (i > 0) and (subcells_d_i[0] > (d_edge * 1.5)):
-                    # make the subcell next to the edge shorter 
-                    subcells_d_i[0] -= d_edge
-                    # add new sub-cell at the edge
-                    subcells_d_i = ([d_edge] + subcells_d_i)
-
                 subcells_d += subcells_d_i
-
 
             # cells indices arranged from largest width to smallest
             # blend large cells first so they transition gradually into smaller ones.

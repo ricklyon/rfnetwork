@@ -399,3 +399,12 @@ def combline_sections_wb(g: list, f1: float, f2: float, er: float, h: float, wp:
     Cmk = np.array([Cm12] + Cmk2 + [CmN])
 
     return Ck, Cmk
+
+
+def round_to_multiple(value, multiple: float = 1, precision: int = 6):
+    """ 
+    Rounds value to nearest multiple. Multiple can be greater or less than 1.
+        
+    """
+    return np.around(np.around(value / multiple) * multiple, precision)
+
