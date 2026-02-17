@@ -184,21 +184,18 @@ class Solver_3D():
         vertices = np.around(obj.points,  decimals=self._places)
         edges = np.around(self.get_object_edges(obj), decimals=self._places)
 
-        # number of intersections the edges make with lines from the object vertices to the point
-        n_edge_intersections = np.zeros_like(x)
-
         # return all zeros if object mesh is empty
         if not len(vertices):
             return n_edge_intersections
+        
+        # number of intersections the edges make with lines from the object vertices to the point
+        n_edge_intersections = np.zeros((len(vertices),) + x.shape, dtype=np.int64)
 
         # fig, ax = plt.subplots(figsize=(8, 8))
         # for e in edges:
         #     ax.plot(e[:, 0], e[:, 1], color="k")
 
-        # bp = vertices[0]
-        # edge = edges[1]
-
-        for bp in vertices:
+        for i, bp in enumerate(vertices):
 
             for edge in edges:
                 
@@ -223,19 +220,17 @@ class Solver_3D():
                     # plug x_int into the line equation with a finite slope to get the y intersection point
                     y_int = np.where(np.isfinite(m1), m1 * x_int + b1, m2 * x_int + b2)
 
-                # is intersection within the object edge
-                n_edge_intersections += (
+                # is intersection within the object edge. Count up to one intersection for each vertices (corner 
+                # intersection count as one).
+                n_edge_intersections[i] |= (
                     ((x_int - tolerance) <= np.max(edge[:, 0])) & ((x_int + tolerance) >= np.min(edge[:, 0])) &
                     ((y_int - tolerance) <= np.max(edge[:, 1])) & ((y_int + tolerance) >= np.min(edge[:, 1]))
                 )
                 
                 # ax.plot(x_int, y_int, marker="o")
 
-        # point is in the object if the number of intersections with the edges is equal to or greater than 
-        # the number of vertices. A line can intersect at a corner, in which case there will be two intersections 
-        # counted and the number. In most cases though, the number of intersections will be equal to the number of
-        # vertices if the point is in the shape.
-        return n_edge_intersections >= len(vertices)
+        # point is in the object if the line from each vertices intersects with an edge 
+        return np.sum(n_edge_intersections, axis=0) == len(vertices)
     
 
     def _get_mesh_points(self, d_edge: float):
