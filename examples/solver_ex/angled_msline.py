@@ -95,6 +95,9 @@ s.add_conductor("corner1", corner1, style=dict(color="gold"))
 s.add_lumped_port(1, port1_face)
 s.add_lumped_port(2, port2_face)
 
+# test_box = pv.Box((-0.1, 0.1, -0.1, 0.1, 0, 0.1))
+# s.add_conductor("test", test_box, style=dict(color="gold", opacity=0.5))
+
 s.assign_PML_boundaries("z+", "y-", "y+", n_pml=5)
 
 self = s
@@ -113,6 +116,32 @@ plotter.camera_position = "xy"
 plotter.show()
 print(s.Nx * s.Ny * s.Nz / 1e3)
 
+# obj = ms_ang_trace
+
+# obj = pv.Sphere()
+
+# obj.plot()
+
+# slc = obj.slice(normal=(0, 0, 1), origin=(0, 0, sub_h))
+
+# slc = slc.slice(normal=(0, 0, 1), origin=(0, 0, sub_h))
+
+# slc.points
+# self.get_object_edges(slc)
+
+# x = 0
+# y = 0.2
+# obj = slc
+# self.is_point_in_object(x, y, slc)
+
+
+# points1 = obj.slice(normal=(1, 0, 1), origin=(0.1, 0, 0)).points
+
+# plt.plot(points0[:, 0], points0[:, 1])
+# plt.scatter(points1[:, 0], points1[:, 1])
+
+
+
 
 
 s.add_field_monitor("mon1", "ez", "z", sub_h, 15)
@@ -125,7 +154,7 @@ s.add_field_monitor("mon3", "ex", "z", sub_h, 10)
 
 Db_0 = s.dt / u0
 Cb_0 = s.dt / e0 
-p = s.plot_coefficients("ey_z", "b", "z", sub_h, point_size=15, cmap="brg")
+p = s.plot_coefficients("ey_x", "b", "z", sub_h, point_size=15, cmap="brg")
 p.camera_position = "xy"
 p.show()
 
@@ -143,7 +172,7 @@ S21 = sdata[:, 1]
 
 
 p = s.plot_monitor(
-    ["mon1"], el=0, zoom=1.1, az=0, view="xy", opacity=[0.8, 1], linear=False, cmap="jet", style="surface", gif_file="angled_ms.gif"
+    ["mon1"], el=0, zoom=1.1, az=0, view="xy", opacity=[0.8, 1], linear=False, cmap="jet", style="surface",
 )
 p.show(title="EM Solver")
 

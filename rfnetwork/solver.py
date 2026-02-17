@@ -142,35 +142,42 @@ class Solver_3D():
         obj_edges = []
         # build list of edge coordinates along each axis
 
-        # decremented counter, starts at the number of points in the face, reaches zero after the last point
-        # in the face and a new face begins.
-        face_n_count = 0
-        # first point in a face
-        anchor = None
-        # iterate through the list of faces points
-        for i, p in enumerate(obj.faces):
-            # start a new face
-            if face_n_count == 0:
-                face_n_count = p
-                anchor =  obj.faces[i+1]
-                continue
-            # if on the last point in the face, connect back to the first point in the face
-            elif face_n_count == 1:
-                # obj_edges.append((p, anchor))
-                obj_edges.append((obj.points[p], obj.points[anchor]))
-            # connect two points in the face
-            else:
-                obj_edges.append((obj.points[p], obj.points[obj.faces[i+1]]))
+        # if obj has no faces and is a collection of points, build edges from consecutive points
+        if not len(obj.faces):
+            for i, p in enumerate(obj.points):
+                end_p = obj.points[i+1] if i < len(obj.points) - 1 else obj.points[0]
+                obj_edges.append((p, end_p))
 
-            face_n_count -= 1
+        else:
+            # decremented counter, starts at the number of points in the face, reaches zero after the last point
+            # in the face and a new face begins.
+            face_n_count = 0
+            # index of first point in a face
+            anchor = None
+            # iterate through the list of faces points
+            for i, p in enumerate(obj.faces):
+                # start a new face
+                if face_n_count == 0:
+                    face_n_count = p
+                    anchor =  obj.faces[i+1]
+                    continue
+                # if on the last point in the face, connect back to the first point in the face
+                elif face_n_count == 1:
+                    obj_edges.append((obj.points[p], obj.points[anchor]))
+                # connect two points in the face
+                else:
+                    obj_edges.append((obj.points[p], obj.points[obj.faces[i+1]]))
+
+                face_n_count -= 1
 
         return obj_edges
 
-    def is_point_in_object(self, x, y, obj):
+    def is_point_in_object(self, x, y, obj, tolerance=0.0005):
         """
         Returns an array the same shape as point with each value set to True if point is inside the object in the xy
-        plane.
+        plane. The z-coordinate of the object is ignored-- object should be sliced first in the xy plane.
         """
+        
         x = np.around(np.atleast_1d(x),  decimals=self._places)
         y = np.around(np.atleast_1d(y),  decimals=self._places)
 
@@ -180,9 +187,16 @@ class Solver_3D():
         # number of intersections the edges make with lines from the object vertices to the point
         n_edge_intersections = np.zeros_like(x)
 
+        # return all zeros if object mesh is empty
+        if not len(vertices):
+            return n_edge_intersections
+
         # fig, ax = plt.subplots(figsize=(8, 8))
         # for e in edges:
         #     ax.plot(e[:, 0], e[:, 1], color="k")
+
+        # bp = vertices[0]
+        # edge = edges[1]
 
         for bp in vertices:
 
@@ -199,12 +213,11 @@ class Solver_3D():
                     m2 = (edge[1, 1] - edge[0, 1]) / (edge[1, 0] - edge[0, 0])
 
                     # y intercept point
-                    # b = y1 - m * x1
                     b1 = y - m1 * x
                     b2 = edge[0, 1] - m2 * edge[0, 0]
 
                     # intersection coordinate.
-                    # if m1 is inifite, the line is vertical and the x intercection coordinate is just the x
+                    # if m1 is infinite, the line is vertical and the x intersection coordinate is just the x
                     # coordinate of the line.
                     x_int = np.where(~np.isfinite(m1), x, np.where(~np.isfinite(m2), edge[0, 0], (b2 - b1) / (m1 - m2)))
                     # plug x_int into the line equation with a finite slope to get the y intersection point
@@ -212,15 +225,17 @@ class Solver_3D():
 
                 # is intersection within the object edge
                 n_edge_intersections += (
-                    ((x_int - self._tol) <= np.max(edge[:, 0])) & ((x_int + self._tol) >= np.min(edge[:, 0])) &
-                    ((y_int - self._tol) <= np.max(edge[:, 1])) & ((y_int + self._tol) >= np.min(edge[:, 1]))
+                    ((x_int - tolerance) <= np.max(edge[:, 0])) & ((x_int + tolerance) >= np.min(edge[:, 0])) &
+                    ((y_int - tolerance) <= np.max(edge[:, 1])) & ((y_int + tolerance) >= np.min(edge[:, 1]))
                 )
                 
-
                 # ax.plot(x_int, y_int, marker="o")
 
-        # point is in the object if the number of intersections with the edges is equal to the number of vertices
-        return n_edge_intersections == len(vertices)
+        # point is in the object if the number of intersections with the edges is equal to or greater than 
+        # the number of vertices. A line can intersect at a corner, in which case there will be two intersections 
+        # counted and the number. In most cases though, the number of intersections will be equal to the number of
+        # vertices if the point is in the shape.
+        return n_edge_intersections >= len(vertices)
     
 
     def _get_mesh_points(self, d_edge: float):
@@ -487,40 +502,92 @@ class Solver_3D():
         Write the coefficient values for the conductors. 
         """
         # xy coordinates for ex and ey components in the grid.
-        # TODO: for now, this assumes conductors are 2D faces on a single layer substrate
         ey_x, ey_y = np.meshgrid(*self.floc["ey"][:2], indexing="ij")
         ex_x, ex_y = np.meshgrid(*self.floc["ex"][:2], indexing="ij")
+        ez_x, ez_y = np.meshgrid(*self.floc["ez"][:2], indexing="ij")
 
         # cond = list(self.conductor.values())[0]
         for cond in self.conductor.values():
             obj = cond["obj"]
             sig = cond["sigma"]
 
-            # get indices of the grid edges that bound the conductor
+            # get indices of the grid edges that bound the conductor. The mesh ensures that conductor edges fall
+            # on grid edges.
             x0, y0, z0 = self.pos_to_idx(np.min(obj.points, axis=0), mode="edge")
             x1, y1, z1 = self.pos_to_idx(np.max(obj.points, axis=0), mode="edge")
 
-            # coefficients for conductor at conductor layer
-            Ca_ex_c = (2 * self.eps_ex[..., z0] - (sig * self.dt)) / (2 * self.eps_ex[..., z0] + (sig * self.dt))
-            Cb_ex_c = (2 * self.dt) / ((2 * self.eps_ex[..., z0] + (sig * self.dt)))
+            # break the object into slices normal to the z axis and assign conductor coefficients for each ex/ey 
+            # component that is inside the object
+            for z in range(z0, z1+1):
+                # z is the index into the ex/ey component grid. Get the physical location in grid units.
+                z_loc = self.floc["ey"][2][z]
 
-            Ca_ey_c = (2 * self.eps_ey[..., z0] - (sig * self.dt)) / (2 * self.eps_ey[..., z0] + (sig * self.dt))
-            Cb_ey_c = (2 * self.dt) / ((2 * self.eps_ey[..., z0] + (sig * self.dt)))
+                # coefficients for conductor at z layer
+                Ca_ex_c = (2 * self.eps_ex[..., z] - (sig * self.dt)) / (2 * self.eps_ex[..., z] + (sig * self.dt))
+                Cb_ex_c = (2 * self.dt) / ((2 * self.eps_ex[..., z] + (sig * self.dt)))
 
-            # assign ex coefficients if the component is in the conductor object
-            ex_in_object = self.is_point_in_object(ex_x, ex_y, obj)
-            self.Ca["ex_y"][..., z0] = np.where(ex_in_object, Ca_ex_c, self.Ca["ex_y"][..., z0])
-            self.Cb["ex_y"][..., z0] = np.where(ex_in_object, Cb_ex_c, self.Cb["ex_y"][..., z0])
-            self.Ca["ex_z"][..., z0] = np.where(ex_in_object, Ca_ex_c, self.Ca["ex_z"][..., z0])
-            self.Cb["ex_z"][..., z0] = np.where(ex_in_object, Cb_ex_c, self.Cb["ex_z"][..., z0])
+                Ca_ey_c = (2 * self.eps_ey[..., z] - (sig * self.dt)) / (2 * self.eps_ey[..., z] + (sig * self.dt))
+                Cb_ey_c = (2 * self.dt) / ((2 * self.eps_ey[..., z] + (sig * self.dt)))
 
-            # assign ey coefficients in the conductor object
-            ey_in_object = self.is_point_in_object(ey_x, ey_y, obj)
-            self.Ca["ey_z"][..., z0] = np.where(ey_in_object, Ca_ey_c, self.Ca["ey_z"][..., z0])
-            self.Cb["ey_z"][..., z0] = np.where(ey_in_object, Cb_ey_c, self.Cb["ey_z"][..., z0])
-            self.Ca["ey_x"][..., z0] = np.where(ey_in_object, Ca_ey_c, self.Ca["ey_x"][..., z0])
-            self.Cb["ey_x"][..., z0] = np.where(ey_in_object, Cb_ey_c, self.Cb["ey_x"][..., z0])
+                # get a slice of the object at z. If object is a flat face, skip this step since pyvista slice returns
+                # an empty object.
+                if (z1 - z0) > 0:
+                    obj_z = obj.slice(normal=(0, 0, 1), origin=(0, 0, z_loc))
+                else:
+                    obj_z = obj
 
+                # if object is a 2D shape on the xy plane, determine which components are in the shape
+                if np.abs(x1 - x0) > 0 and np.abs(y1 - y0) > 0:
+                    ex_in_object = self.is_point_in_object(ex_x, ex_y, obj_z)
+                    ey_in_object = self.is_point_in_object(ey_x, ey_y, obj_z)
+                # if object is a line on the xy plane, set the components on the edge by indexing
+                else:
+                    ex_in_object = np.zeros_like(ex_x)
+                    ey_in_object = np.zeros_like(ey_x)
+                    # ex is in center of cell along x
+                    ex_in_object[x0: x1, y0: y1+1] = 1
+                    # ey is in center of cell along y
+                    ey_in_object[x0: x1+1, y0: y1] = 1
+
+                # assign ex conductor coefficients for components in the object
+                self.Ca["ex_y"][..., z] = np.where(ex_in_object, Ca_ex_c, self.Ca["ex_y"][..., z])
+                self.Cb["ex_y"][..., z] = np.where(ex_in_object, Cb_ex_c, self.Cb["ex_y"][..., z])
+                self.Ca["ex_z"][..., z] = np.where(ex_in_object, Ca_ex_c, self.Ca["ex_z"][..., z])
+                self.Cb["ex_z"][..., z] = np.where(ex_in_object, Cb_ex_c, self.Cb["ex_z"][..., z])
+
+                # assign ey conductor coefficients for components in the object
+                self.Ca["ey_z"][..., z] = np.where(ey_in_object, Ca_ey_c, self.Ca["ey_z"][..., z])
+                self.Cb["ey_z"][..., z] = np.where(ey_in_object, Cb_ey_c, self.Cb["ey_z"][..., z])
+                self.Ca["ey_x"][..., z] = np.where(ey_in_object, Ca_ey_c, self.Ca["ey_x"][..., z])
+                self.Cb["ey_x"][..., z] = np.where(ey_in_object, Cb_ey_c, self.Cb["ey_x"][..., z])
+
+            # assign ez values at the cell centers. Only iterates over z indices that are bounded on top and bottom
+            # by the conductor ex/ey components. 
+            for z in range(z0, z1):
+                # z is the index into the ez component grid. Get the physical location in grid units.
+                z_loc = self.floc["ez"][2][z]
+
+                # coefficients for conductor at z layer
+                Ca_ez_c = (2 * self.eps_ez[..., z] - (sig * self.dt)) / (2 * self.eps_ez[..., z] + (sig * self.dt))
+                Cb_ez_c = (2 * self.dt) / ((2 * self.eps_ez[..., z] + (sig * self.dt)))
+
+                # if object is a 2D shape on the xy plane, determine which components are in the shape
+                if np.abs(x1 - x0) > 0 and np.abs(y1 - y0) > 0:
+                    # get a slice of the object at z. The object is not a flat face because it must span multiple edges
+                    # along z for ez to be included in the conductor.
+                    obj_z = obj.slice(normal=(0, 0, 1), origin=(0, 0, z_loc))
+                    ez_in_object = self.is_point_in_object(ez_x, ez_y, obj_z)
+                # if object is a line on the xy plane, set the components on the edge by indexing
+                else:
+                    ez_in_object = np.zeros_like(ez_x)
+                    # ez is on edges along both x and y
+                    ez_in_object[x0: x1+1, y0:y1+1] = 1
+
+                # assign ez conductor coefficients for components in the object
+                self.Ca["ez_x"][..., z] = np.where(ez_in_object, Ca_ez_c, self.Ca["ez_x"][..., z])
+                self.Cb["ez_x"][..., z] = np.where(ez_in_object, Cb_ez_c, self.Cb["ez_x"][..., z])
+                self.Ca["ez_y"][..., z] = np.where(ez_in_object, Ca_ez_c, self.Ca["ez_y"][..., z])
+                self.Cb["ez_y"][..., z] = np.where(ez_in_object, Cb_ez_c, self.Cb["ez_y"][..., z])
 
     def _init_conductors_rect(self):
         """
