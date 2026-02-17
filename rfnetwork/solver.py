@@ -175,7 +175,7 @@ class Solver_3D():
     def is_point_in_object(self, x, y, obj, tolerance=0.0005):
         """
         Returns an array the same shape as point with each value set to True if point is inside the object in the xy
-        plane. The z-coordinate of the object is ignored-- object should be sliced first in the xy plane.
+        plane. Object must be sliced first in the xy plane.
         """
         
         x = np.around(np.atleast_1d(x),  decimals=self._places)
@@ -186,7 +186,7 @@ class Solver_3D():
 
         # return all zeros if object mesh is empty
         if not len(vertices):
-            return n_edge_intersections
+            return np.zeros_like(x)
         
         # number of intersections the edges make with lines from the object vertices to the point
         n_edge_intersections = np.zeros((len(vertices),) + x.shape, dtype=np.int64)
@@ -230,7 +230,20 @@ class Solver_3D():
                 # ax.plot(x_int, y_int, marker="o")
 
         # point is in the object if the line from each vertices intersects with an edge 
-        return np.sum(n_edge_intersections, axis=0) == len(vertices)
+        in_shape = np.sum(n_edge_intersections, axis=0) == len(vertices)
+    
+        # if point is far away from the object, lines become nearly parallel and tolerances can lead to false
+        # intersections. Correct points that are wholly outside the object bounding box
+        x0, y0, _ = np.min(obj.points, axis=0)
+        x1, y1, _ = np.max(obj.points, axis=0)
+
+        bbox_in_shape = (
+            ((x - tolerance) <= x1) & ((x + tolerance) >= x0) &
+            ((y - tolerance) <= y1) & ((y + tolerance) >= y0)
+        )
+
+        return np.where(bbox_in_shape, in_shape, 0)
+        
     
 
     def _get_mesh_points(self, d_edge: float):
@@ -516,6 +529,12 @@ class Solver_3D():
             for z in range(z0, z1+1):
                 # z is the index into the ex/ey component grid. Get the physical location in grid units.
                 z_loc = self.floc["ey"][2][z]
+                # if object is sliced at it's endpoints, pyvista returns an empty object. Move the zloc inside the
+                # object slightly by the tolerance
+                if z == z0:
+                    z_loc += self._tol
+                elif z == z1:
+                    z_loc -= self._tol
 
                 # coefficients for conductor at z layer
                 Ca_ex_c = (2 * self.eps_ex[..., z] - (sig * self.dt)) / (2 * self.eps_ex[..., z] + (sig * self.dt))
