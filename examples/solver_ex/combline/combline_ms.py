@@ -270,15 +270,15 @@ s.run([1], [vsrc], n_threads=4)
 self = s
 
 
-# p = s.plot_monitor(
-#     ["mon1"], zoom=1.1, view="xy", el=0, opacity=[0.9, 1], 
-#     linear=False, cmap="jet", style="surface",
-# )
-# # p.camera_position = "xy"
-# p.show(title="EM Solver")
+p = s.plot_monitor(
+    ["mon1"], zoom=1.1, view="xy", el=0, opacity=[0.9, 1], 
+    linear=False, cmap="jet", style="surface",
+)
+# p.camera_position = "xy"
+p.show(title="EM Solver")
 
 
-sdata = s.get_sparameters(frequency, 1, z0=50)
+sdata = s.get_sparameters(frequency, 1)
 S11 = sdata[:, 0]
 S21 = sdata[:, 1]
 

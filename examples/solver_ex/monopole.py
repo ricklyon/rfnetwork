@@ -76,8 +76,8 @@ s.add_field_monitor("mon5", "ex", "x", 0.0, 15)
 
 Db_0 = s.dt / u0
 Cb_0 = s.dt / e0 
-# p = s.plot_coefficients("ez_x", "b", "x", 0, point_size=15, cmap="brg")
-# p.show()
+p = s.plot_coefficients("ey_z", "b", "x", 0, point_size=15, cmap="brg")
+p.show()
 
 f0 = 10e9
 pulse_n = 2800
@@ -99,7 +99,7 @@ S11 = sdata[:, 0]
 
 
 p = s.plot_monitor(["mon4"], el=30, zoom=1.1, az=45, view="xz", opacity=[1, 1, 1], linear=False, cmap="jet", style="surface", vmin=-30, vmax=30)
-
+p.show()
 
 # p.show(title="EM Solver")
 
