@@ -244,7 +244,197 @@ class Solver_3D():
 
         return np.where(bbox_in_shape, in_shape, 0)
         
-    
+    def get_face_edges(self, obj) -> list:
+        """
+        Get the endpoints of the lines that form the edges of the objects. Returns a M-length list for each face in the
+        object, each containing a N-length list of 2x3 arrays. N is the number of edges in the face.
+        Each row is the coordinates of the two endpoints of the edge.
+        """
+        
+        # build list of edge coordinates along each axis
+        n_cells = np.clip(obj.n_cells, 1, None)
+        faces = [list() for n in range(n_cells)]
+
+        # if obj has no faces and is a collection of points, build edges from consecutive points
+        if not len(obj.faces):
+            obj_edges = []
+            for i, p in enumerate(obj.points):
+                end_p = obj.points[i+1] if i < len(obj.points) - 1 else obj.points[0]
+                obj_edges.append((p, end_p))
+            faces[0] = obj_edges
+
+        else:
+            # index of the current face
+            face_idx = -1
+            # decremented counter, starts at the number of points in the face, reaches zero after the last point
+            # in the face and a new face begins.
+            face_point_count = 0
+            # index of first point in a face
+            anchor = None
+            # iterate through the list of faces points
+            for i, p in enumerate(obj.faces):
+                # start a new face
+                if face_point_count == 0:
+                    face_point_count = p
+                    anchor =  obj.faces[i+1]
+                    
+                    if face_idx >= 0:
+                        faces[face_idx] = obj_edges
+                        
+                    face_idx += 1
+                    obj_edges = []
+                # if on the last point in the face, connect back to the first point in the face
+                elif face_point_count == 1:
+                    obj_edges.append((obj.points[p], obj.points[anchor]))
+                    face_point_count -= 1
+                # connect two points in the face
+                else:
+                    obj_edges.append((obj.points[p], obj.points[obj.faces[i+1]]))
+                    face_point_count -= 1
+
+            # finish last face
+            if len(obj_edges):
+                faces[face_idx] = obj_edges
+
+        return faces
+
+    def get_face_vertices(self, obj) -> list:
+        """
+        Get the vertices of each face of the object. Returns a M-length list for each face in the
+        object, each containing a Nx3 array of the vertices coordinates in that face.
+        """
+        # build list of edge coordinates along each axis
+        n_cells = np.clip(obj.n_cells, 1, None)
+        faces = [list() for n in range(n_cells)]
+
+        # if obj has no faces and is a collection of points, build edges from consecutive points
+        if not len(obj.faces):
+            faces[0] = np.array(obj.points)
+
+        else:
+            # index in the the list of faces points
+            face_idx = 0
+            for i in range(n_cells):
+                # number of points in this face
+                n_points = obj.faces[face_idx]
+                
+                for p in range(1, n_points + 1):
+                    faces[i].append(obj.points[obj.faces[face_idx + p]])
+
+        return faces
+
+
+    def is_point_in_surface(self, points, obj, tolerance=0.0005):
+        """
+        Returns an array the same shape as point with each value set to True if point is inside the object in the xy
+        plane. Object must be sliced first in the xy plane.
+        """
+
+        points = np.atleast_2d(points)
+
+        # object bounding box
+        p0 = np.min(obj.points, axis=0)
+        p1 = np.max(obj.points, axis=0)
+
+        # get axis normal to the surface
+        normal_axis = (np.diff([p0, p1], axis=0) == 0)
+        axis = np.argmax(normal_axis)
+
+        if not np.any(np.abs(normal_axis) > self._tol):
+            raise ValueError("Object must be a surface on a cardinal plane.")
+        
+        # if np.abs(p[axis] - obj.points[0][axis]) > self._tol:
+        #     return np.zeros(p.shape[:-1])
+
+        # get the two axis of the component vectors on the surface
+        c1_axis, c2_axis = ((1, 2), (0, 2), (0, 1))[axis]
+
+        # return all zeros if object mesh is empty
+        if not len(obj.points):
+            return np.zeros(points.shape[:-1])
+        
+        vertices = self.get_face_vertices(obj)
+        edges = self.get_face_edges(obj)
+
+
+
+        # fig, ax = plt.subplots(figsize=(8, 8))
+        # for e in np.array(edges[0]):
+        #     ax.plot(e[:, 0], e[:, 1], color="k")
+
+        in_face = np.zeros((len(edges),) + points.shape[:-1], dtype=np.int64)
+        # for each face in the object
+        for f in range(len(edges)):
+
+            face_vertices = vertices[f]
+            face_edges = edges[f]
+
+            # number of intersections the edges make with lines from the object vertices to the point
+            n_edge_intersections = np.zeros((len(face_vertices),) + points.shape[:-1], dtype=np.int64)
+
+            for i, v in enumerate(face_vertices):
+
+                for edge in face_edges:
+
+                    edge = np.array(edge)
+                    
+                    # skip if base point is on either end point of the edge
+                    if np.any(np.sum(np.abs(edge - v[None]), axis=1) < self._tol):
+                        continue
+
+                    # get "x/y" coordinates for vertices
+                    x1, y1 = v[c1_axis], v[c2_axis]
+
+                    # get "x/y" coordinates for test points
+                    x2, y2 = points[..., c1_axis], points[..., c2_axis]
+
+                    with np.errstate(divide='ignore', invalid='ignore'):
+                        # slope of edge line and line from the object vertices to the test point
+                        # m = (y2 - y1) / (x2 - x1)
+                        m1 = (y2 - y1) / (x2 - x1)
+                        m2 = (edge[1, c2_axis] - edge[0, c2_axis]) / (edge[1, c1_axis] - edge[0, c1_axis])
+
+                        # y intercept point
+                        b1 = y1 - m1 * x1
+                        b2 = edge[0, c2_axis] - m2 * edge[0, c1_axis]
+
+                        # intersection coordinate.
+                        # if m1 is infinite, the line is vertical and the x intersection coordinate is just the x
+                        # coordinate of the line.
+                        x_int = np.where(
+                            ~np.isfinite(m1), x1, np.where(~np.isfinite(m2), edge[0, c1_axis], (b2 - b1) / (m1 - m2))
+                        )
+                        # plug x_int into the line equation with a finite slope to get the y intersection point
+                        y_int = np.where(np.isfinite(m1), m1 * x_int + b1, m2 * x_int + b2)
+
+                    # is intersection within the object edge. Count up to one intersection for each vertices (corner 
+                    # intersection count as one).
+                    n_edge_intersections |= (
+                        ((x_int - tolerance) <= np.max(edge[:, c1_axis])) & ((x_int + tolerance) >= np.min(edge[:, c1_axis])) &
+                        ((y_int - tolerance) <= np.max(edge[:, c2_axis])) & ((y_int + tolerance) >= np.min(edge[:, c2_axis]))
+                    )
+                    
+                    # ax.plot(x_int, y_int, marker="o")
+
+            # point is in the face if the line from each vertices intersects with an edge 
+            in_face[f] = (np.sum(n_edge_intersections, axis=0) == len(face_vertices)) & (np.abs(points[..., axis] - obj.points[0, axis]) < self._tol)
+
+            # if point is far away from the object, lines become nearly parallel and tolerances can lead to false
+            # intersections. Correct points that are wholly outside the object bounding box
+            x0, y0 = p0[c1_axis], p0[c2_axis]
+            x1, y1 = p1[c1_axis], p1[c2_axis]
+
+            x, y = points[..., c1_axis], points[..., c2_axis]
+
+            bbox_in_shape = (
+                ((x - tolerance) <= x1) & ((x + tolerance) >= x0) &
+                ((y - tolerance) <= y1) & ((y + tolerance) >= y0)
+            )
+
+            in_face[f] = np.where(bbox_in_shape, in_face[f], 0)
+
+        return (np.sum(in_face, axis=0) > 0)
+
 
     def _get_mesh_points(self, d_edge: float):
         """
@@ -506,6 +696,69 @@ class Solver_3D():
             )
 
     def _init_conductors(self):
+        """
+        Write the coefficient values for the conductors. 
+        """
+
+        # epsilon at each field component
+        e_eps = dict(ex=self.eps_ex, ey=self.eps_ey, ez=self.eps_ez)
+
+        # split component field names
+        e_split = dict(ex=("ex_y", "ex_z"), ey=("ey_z", "ey_x"), ez=("ez_x", "ez_y"))
+
+        # field = "ez"
+        # obj = via
+        # sig = 1e6
+
+        # obj.compute_cell_sizes(volume=True)["Volume"]
+
+        # cond = list(self.conductor.values())[0]
+        for cond in self.conductor.values():
+            obj = cond["obj"]
+            sig = cond["sigma"]
+
+            for field in ["ex", "ey", "ez"]:
+
+                # get indices of the grid edges that bound the conductor. The mesh ensures that conductor edges fall
+                # on grid edges.
+                p0 = list(self.field_pos_to_idx(np.min(obj.points, axis=0), field))
+                p1 = list(self.field_pos_to_idx(np.max(obj.points, axis=0), field))
+
+                is_surface = np.any(np.diff([p0, p1], axis=0) == 0)
+
+                # index for the bounding box of the object
+                bbox_idx = tuple([slice(p0[i], p1[i] + 1) for i in range(3)])
+
+                # get the grid locations that are inside the bounding box of the conductor
+                e_grid_points = np.meshgrid(*[self.floc[field][i][bbox_idx[i]] for i in range(3)], indexing="ij")
+
+                # point cloud of all grid points in the bounding box
+                e_pdata = pv.PolyData(np.transpose(e_grid_points, axes=(1, 2, 3, 0)).reshape(-1, 3))
+
+                if is_surface:
+                    # get an array the same shape as the grid_points with zeros for points outside the object and ones 
+                    # for points inside
+                    points = np.transpose(e_grid_points, axes=(1, 2, 3, 0))
+                    inside_mask = self.is_point_in_surface(points, obj)
+                    # result = e_pdata.select_enclosed_points(obj, check_surface=False, tolerance=0.01)
+                    # inside_mask = result["SelectedPoints"].reshape(e_grid_points[0].shape)
+
+                else:
+                    dist = e_pdata.compute_implicit_distance(obj)
+                    mesh_dist = dist["implicit_distance"].reshape(e_grid_points[0].shape)
+                    inside_mask = (mesh_dist - self._tol) <= 0
+
+                # conductor coefficients
+                eps_bbox = e_eps[field][bbox_idx]
+                Ca_c = (2 * eps_bbox - (sig * self.dt)) / (2 * eps_bbox + (sig * self.dt))
+                Cb_c = (2 * self.dt) / ((2 * eps_bbox + (sig * self.dt)))
+
+                for e_sp in e_split[field]:
+                    self.Ca[e_sp][bbox_idx] = np.where(inside_mask, Ca_c, self.Ca[e_sp][bbox_idx])
+                    self.Cb[e_sp][bbox_idx] = np.where(inside_mask, Cb_c, self.Cb[e_sp][bbox_idx])
+
+
+    def _init_conductors_obsolete(self):
         """
         Write the coefficient values for the conductors. 
         """
