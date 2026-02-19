@@ -409,7 +409,7 @@ class Solver_3D():
 
                     # is intersection within the object edge. Count up to one intersection for each vertices (corner 
                     # intersection count as one).
-                    n_edge_intersections |= (
+                    n_edge_intersections[i] |= (
                         ((x_int - tolerance) <= np.max(edge[:, c1_axis])) & ((x_int + tolerance) >= np.min(edge[:, c1_axis])) &
                         ((y_int - tolerance) <= np.max(edge[:, c2_axis])) & ((y_int + tolerance) >= np.min(edge[:, c2_axis]))
                     )
@@ -2016,12 +2016,12 @@ class Solver_3D():
 
         plotter.add_axes()
         plotter.camera_position = view
-        plotter.camera.elevation += el
         plotter.camera.azimuth += az
+        plotter.camera.elevation += el
         plotter.camera.zoom(zoom)
         
         plotter.add_scalar_bar(
-            title="E [dB]\n" if linear else "E [V/m]\n", vertical=False, label_font_size=11, title_font_size=14
+            title="E [V/m]\n" if linear else "E [dB]\n", vertical=False, label_font_size=11, title_font_size=14
         )
         
         Nt = nframe * n_step
