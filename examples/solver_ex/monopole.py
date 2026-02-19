@@ -50,7 +50,7 @@ port1_face = pv.Rectangle([
 ])
 
 
-s = rfn.Solver_3D(sbox)
+s = rfn.EM_Solver(sbox)
 # s.add_dielectric("sub", substrate, er=1, style=dict(opacity=0.0))
 s.add_conductor("ms1", ms1_trace, style=dict(color="gold"))
 s.add_lumped_port(1, port1_face)
@@ -76,7 +76,7 @@ s.add_field_monitor("mon5", "ex", "x", 0.0, 15)
 
 Db_0 = s.dt / u0
 Cb_0 = s.dt / e0 
-p = s.plot_coefficients("ey_z", "b", "x", 0, point_size=15, cmap="brg")
+p = s.plot_coefficients("ey_x", "b", "x", 0, point_size=15, cmap="brg")
 p.show()
 
 f0 = 10e9

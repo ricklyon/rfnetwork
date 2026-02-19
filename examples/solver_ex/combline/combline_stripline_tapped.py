@@ -150,7 +150,7 @@ sbox_h = b
 substrate = pv.Cube(center=(sbox_w/2, sbox_len/2, 0), x_length=sbox_w, y_length=sbox_len, z_length=sbox_h)
 sbox =      pv.Cube(center=(sbox_w/2, sbox_len/2, 0), x_length=sbox_w, y_length=sbox_len, z_length=sbox_h)
 
-s = rfn.Solver_3D(sbox)
+s = rfn.EM_Solver(sbox)
 s.add_dielectric("sub", substrate, er=er, loss_tan=0.003, f0=1.5e9, style=dict(opacity=0.0))
 
 # add resonators. Skip the first and last line as these are impedance transformers and we're using the tap instead

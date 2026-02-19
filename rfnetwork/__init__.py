@@ -5,7 +5,6 @@ from . core import core
 from . import elements
 from . import plots
 from . tuning import TunerGroup
-from . solver import Solver_3D
-from . solver_pcb import Solver_PCB
+from . solver import EM_Solver
 from . import utils
 from . import math

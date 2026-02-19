@@ -85,7 +85,7 @@ port2_face = pv.Rectangle([
 ])
 
 
-s = rfn.Solver_PCB(sbox)
+s = rfn.EM_Solver(sbox)
 s.add_dielectric("sub", substrate, er=3.66, style=dict(opacity=0.0))
 s.add_conductor("ms0", ms0_trace, style=dict(color="gold"))
 s.add_conductor("ms1", ms1_trace, style=dict(color="gold"))

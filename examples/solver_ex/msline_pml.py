@@ -64,14 +64,14 @@ voltage_line2 = pv.Line(
     [0.25, ms1_y, 0], [0.25, ms1_y, sub_h]
 )
 
-s = rfn.Solver_3D(sbox)
+s = rfn.EM_Solver(sbox)
 s.add_dielectric("sub", substrate, er=3.66, style=dict(opacity=0.0))
 s.add_conductor("ms1", ms1_trace, style=dict(color="gold"))
 s.add_lumped_port(1, port1_face)
 
 self = s
 
-s.assign_PML_boundaries("x+", "y-", "y+", "z+", n_pml=5)
+s.assign_PML_boundaries("x+", n_pml=10)
 
 
 s.generate_mesh(d0 = 0.02, d_edge=0.005)
@@ -96,9 +96,9 @@ plotter.show()
 
 # Db_0 = s.dt / u0
 # Cb_0 = s.dt / e0 
-# p = s.plot_coefficients("hz_y2", "b", "z", sub_h, point_size=15, cmap="brg", normalization=Db_0)
-# p.camera_position = "xy"
-# p.show()
+p = s.plot_coefficients("ez_x", "b", "z", sub_h, point_size=15, cmap="brg")
+p.camera_position = "xy"
+p.show()
 
 f0 = 10e9
 pulse_n = 1600

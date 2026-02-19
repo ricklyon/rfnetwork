@@ -62,6 +62,8 @@ current_face = pv.Rectangle([
     (0, ms1_y + ms_w/2 + 0.001, sub_h - 0.001),
 ])
 
+via = pv.Box(bounds=(ms_x[1], ms_x[1] + 0.02, -0.02, 0.02, 0, sub_h))
+
 
 voltage_line = pv.Line(
     [0, ms1_y, 0], [0, ms1_y, sub_h]
@@ -70,18 +72,20 @@ voltage_line = pv.Line(
 s = rfn.EM_Solver(sbox)
 s.add_dielectric("sub", substrate, er=3.66, style=dict(opacity=0.0))
 s.add_conductor("ms1", ms1_trace, style=dict(color="gold"))
+s.add_conductor("via", via, style=dict(color="gold", opacity=1))
 s.add_lumped_port(1, port1_face)
-s.add_lumped_port(2, port2_face)
+# s.add_lumped_port(2, port2_face)
 
 s.assign_PML_boundaries("z+", "y-", "y+", n_pml=5)
 
 self = s
+obj = via
 # having three cells in the PEC instead of 4 causes the edge correction to fail
 # s.init_mesh(d0 = 0.02, n0 = 3, d_pec = 0.01, n_min_pec=4, d_sub=0.01, n_min_sub=4, blend_pec=False)
 s.generate_mesh(d0 = 0.02, d_edge=0.005, z_bounds = [0.005, 0.02])
 s.edge_correction(ms1_trace)
 
-s.add_field_monitor("mon1", "ez", "z", sub_h, 5)
+s.add_field_monitor("mon1", "ez", "z", sub_h, 20)
 # s.add_field_monitor("mon1", "ez", "z", sub_h - 0.005, 15)
 s.add_field_monitor("mon2", "ez", "y", 0, 5)
 s.add_field_monitor("mon3", "ex", "z", sub_h, 10)
@@ -91,16 +95,24 @@ s.add_line_probe("v1", "ez", voltage_line)
 
 
 plotter = s.render(show_probes=True)
-plotter.camera_position = "yz"
+plotter.camera_position = "xy"
 plotter.show()
-
 
 # Db_0 = s.dt / u0
 # Cb_0 = s.dt / e0 
-# p = s.plot_coefficients("ex_z", "a", "y", 0, point_size=15, cmap="brg")
+# p = s.plot_coefficients("ex_y", "a", "z", sub_h, point_size=15, cmap="brg")
 # p.camera_position = "xy"
 # p.show()
 
+###########################
+
+obj = ms1_trace
+points = (0, 0, 0.02)
+
+    
+
+
+###########################
 f0 = 10e9
 pulse_n = 2800
 # width of half pulse in time
@@ -117,10 +129,10 @@ s.run([1], [vsrc], n_threads=4)
 
 sdata = s.get_sparameters(frequency, downsample=False)
 S11 = sdata[:, 0]
-S21 = sdata[:, 1]
+# S21 = sdata[:, 1]
 
 
-p = s.plot_monitor(["mon1"], el=0, zoom=1.1, az=0, view="xy", opacity=[0.8, 1], linear=False, cmap="jet", style="surface")
+p = s.plot_monitor(["mon1"], el=0, zoom=1.1, az=0, view="xy", vmin=-10, vmax=10, opacity=[0.8, 1], linear=True, cmap="RdBu", style="surface",)
 p.show(title="EM Solver")
 
 # compute line impedance
@@ -162,21 +174,7 @@ ax.set_xlabel("Frequency [GHz]")
 ax.set_ylabel("[dB]")
 ax.legend(["S11", "Ref"])
 
-ax = axes[1,0]
-ax.plot(frequency / 1e9, conv.db20_lin(S21))
-ax.plot(frequency / 1e9, conv.db20_lin(sdata_ref).sel(b=2, a=1))
-mplm.line_marker(x = 10, axes=ax)
-ax.set_xlabel("Frequency [GHz]")
-ax.set_ylabel("[dB]")
-ax.legend(["S21", "Ref"])
 
-ax = axes[1,1]
-ax.plot(frequency / 1e9, np.unwrap(np.angle(S21, deg=True)))
-ax.plot(frequency / 1e9, np.unwrap(np.angle(sdata_ref.sel(b=2, a=1), deg=True)))
-mplm.line_marker(x = 10, axes=ax)
-ax.set_xlabel("Frequency [GHz]")
-ax.set_ylabel("[deg]")
-ax.legend(["S21", "Ref"])
 
 
 fig.tight_layout()

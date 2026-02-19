@@ -1,7 +1,6 @@
 import itertools
 import time
 import numpy as np 
-from scipy import signal
 import pyvista as pv
 from copy import copy
 from np_struct import ldarray
@@ -14,9 +13,9 @@ e0 = const.e0
 c0 = const.c0
 
 
-class Solver_3D():
+class EM_Solver():
     """
-    3D EM Solver for PCB geometries, substrates are normal to the z-axis.
+    3D EM Solver for PCB geometries.
     """
 
     def __init__(self, bounding_box):
@@ -133,122 +132,18 @@ class Solver_3D():
         self._init_conductors()
         self._init_ports()
 
-
-    def get_object_edges(self, obj) -> list:
-        """
-        Get the endpoints of the lines that form the edges of the objects. Returns a N-length list of 2x3 arrays. Each
-        row is the coordinates of the two endpoints of each edge. N is the number of edges.
-        """
-        obj_edges = []
-        # build list of edge coordinates along each axis
-
-        # if obj has no faces and is a collection of points, build edges from consecutive points
-        if not len(obj.faces):
-            for i, p in enumerate(obj.points):
-                end_p = obj.points[i+1] if i < len(obj.points) - 1 else obj.points[0]
-                obj_edges.append((p, end_p))
-
-        else:
-            # decremented counter, starts at the number of points in the face, reaches zero after the last point
-            # in the face and a new face begins.
-            face_n_count = 0
-            # index of first point in a face
-            anchor = None
-            # iterate through the list of faces points
-            for i, p in enumerate(obj.faces):
-                # start a new face
-                if face_n_count == 0:
-                    face_n_count = p
-                    anchor =  obj.faces[i+1]
-                    continue
-                # if on the last point in the face, connect back to the first point in the face
-                elif face_n_count == 1:
-                    obj_edges.append((obj.points[p], obj.points[anchor]))
-                # connect two points in the face
-                else:
-                    obj_edges.append((obj.points[p], obj.points[obj.faces[i+1]]))
-
-                face_n_count -= 1
-
-        return obj_edges
-
-    def is_point_in_object(self, x, y, obj, tolerance=0.0005):
-        """
-        Returns an array the same shape as point with each value set to True if point is inside the object in the xy
-        plane. Object must be sliced first in the xy plane.
-        """
         
-        x = np.around(np.atleast_1d(x),  decimals=self._places)
-        y = np.around(np.atleast_1d(y),  decimals=self._places)
-
-        vertices = np.around(obj.points,  decimals=self._places)
-        edges = np.around(self.get_object_edges(obj), decimals=self._places)
-
-        # return all zeros if object mesh is empty
-        if not len(vertices):
-            return np.zeros_like(x)
-        
-        # number of intersections the edges make with lines from the object vertices to the point
-        n_edge_intersections = np.zeros((len(vertices),) + x.shape, dtype=np.int64)
-
-        # fig, ax = plt.subplots(figsize=(8, 8))
-        # for e in edges:
-        #     ax.plot(e[:, 0], e[:, 1], color="k")
-
-        for i, bp in enumerate(vertices):
-
-            for edge in edges:
-                
-                # skip if base point is on either end point of the edge
-                if np.any(np.sum(np.abs(edge - bp[None]), axis=1) < self._tol):
-                    continue
-
-                with np.errstate(divide='ignore', invalid='ignore'):
-                    # slope of edge line and line from the object vertices to the test point
-                    # m = (y2 - y1) / (x2 - x1)
-                    m1 = (y - bp[1]) / (x - bp[0])
-                    m2 = (edge[1, 1] - edge[0, 1]) / (edge[1, 0] - edge[0, 0])
-
-                    # y intercept point
-                    b1 = y - m1 * x
-                    b2 = edge[0, 1] - m2 * edge[0, 0]
-
-                    # intersection coordinate.
-                    # if m1 is infinite, the line is vertical and the x intersection coordinate is just the x
-                    # coordinate of the line.
-                    x_int = np.where(~np.isfinite(m1), x, np.where(~np.isfinite(m2), edge[0, 0], (b2 - b1) / (m1 - m2)))
-                    # plug x_int into the line equation with a finite slope to get the y intersection point
-                    y_int = np.where(np.isfinite(m1), m1 * x_int + b1, m2 * x_int + b2)
-
-                # is intersection within the object edge. Count up to one intersection for each vertices (corner 
-                # intersection count as one).
-                n_edge_intersections[i] |= (
-                    ((x_int - tolerance) <= np.max(edge[:, 0])) & ((x_int + tolerance) >= np.min(edge[:, 0])) &
-                    ((y_int - tolerance) <= np.max(edge[:, 1])) & ((y_int + tolerance) >= np.min(edge[:, 1]))
-                )
-                
-                # ax.plot(x_int, y_int, marker="o")
-
-        # point is in the object if the line from each vertices intersects with an edge 
-        in_shape = np.sum(n_edge_intersections, axis=0) == len(vertices)
-    
-        # if point is far away from the object, lines become nearly parallel and tolerances can lead to false
-        # intersections. Correct points that are wholly outside the object bounding box
-        x0, y0, _ = np.min(obj.points, axis=0)
-        x1, y1, _ = np.max(obj.points, axis=0)
-
-        bbox_in_shape = (
-            ((x - tolerance) <= x1) & ((x + tolerance) >= x0) &
-            ((y - tolerance) <= y1) & ((y + tolerance) >= y0)
-        )
-
-        return np.where(bbox_in_shape, in_shape, 0)
-        
-    def get_face_edges(self, obj) -> list:
+    def get_object_edges(self, obj, group_faces: bool = True) -> list:
         """
-        Get the endpoints of the lines that form the edges of the objects. Returns a M-length list for each face in the
-        object, each containing a N-length list of 2x3 arrays. N is the number of edges in the face.
+        Get the endpoints of the lines that form the edges of the object faces. Returns a M-length list for each 
+        face in the object, each containing a N-length list of 2x3 arrays. N is the number of edges in the face.
         Each row is the coordinates of the two endpoints of the edge.
+
+        Parameters
+        ----------
+        group_faces: bool, default: True
+            if False, edges from all faces are combined and the returned list is Nx2x3, where N is the 
+            number of edges in the object.
         """
         
         # build list of edge coordinates along each axis
@@ -280,8 +175,10 @@ class Solver_3D():
                     
                     if face_idx >= 0:
                         faces[face_idx] = obj_edges
-                        
-                    face_idx += 1
+                    
+                    if group_faces or face_idx < 0:
+                        face_idx += 1
+
                     obj_edges = []
                 # if on the last point in the face, connect back to the first point in the face
                 elif face_point_count == 1:
@@ -296,12 +193,20 @@ class Solver_3D():
             if len(obj_edges):
                 faces[face_idx] = obj_edges
 
-        return faces
+        return faces if group_faces else faces[0]
 
-    def get_face_vertices(self, obj) -> list:
+    
+
+    def get_object_vertices(self, obj, group_faces: bool = True) -> list:
         """
         Get the vertices of each face of the object. Returns a M-length list for each face in the
         object, each containing a Nx3 array of the vertices coordinates in that face.
+
+        Parameters
+        ----------
+        group_faces: bool, default: True
+            if False, vertices from all faces are combined and the returned list is Nx2x3, where N is the 
+            number of edges in the object.
         """
         # build list of edge coordinates along each axis
         n_cells = np.clip(obj.n_cells, 1, None)
@@ -314,14 +219,19 @@ class Solver_3D():
         else:
             # index in the the list of faces points
             face_idx = 0
+            # index of the face groups
+            face_group_idx = 0
             for i in range(n_cells):
                 # number of points in this face
                 n_points = obj.faces[face_idx]
                 
                 for p in range(1, n_points + 1):
-                    faces[i].append(obj.points[obj.faces[face_idx + p]])
+                    faces[face_group_idx].append(obj.points[obj.faces[face_idx + p]])
+                
+                if group_faces:
+                    face_group_idx += 1
 
-        return faces
+        return faces if group_faces else faces[0]
 
 
     def is_point_in_surface(self, points, obj, tolerance=0.0005):
@@ -343,9 +253,6 @@ class Solver_3D():
         if not np.any(np.abs(normal_axis) > self._tol):
             raise ValueError("Object must be a surface on a cardinal plane.")
         
-        # if np.abs(p[axis] - obj.points[0][axis]) > self._tol:
-        #     return np.zeros(p.shape[:-1])
-
         # get the two axis of the component vectors on the surface
         c1_axis, c2_axis = ((1, 2), (0, 2), (0, 1))[axis]
 
@@ -353,18 +260,17 @@ class Solver_3D():
         if not len(obj.points):
             return np.zeros(points.shape[:-1])
         
-        vertices = self.get_face_vertices(obj)
-        edges = self.get_face_edges(obj)
-
-
+        vertices = self.get_object_vertices(obj)
+        edges = self.get_object_edges(obj)
+        n_faces = len(edges)
 
         # fig, ax = plt.subplots(figsize=(8, 8))
         # for e in np.array(edges[0]):
         #     ax.plot(e[:, 0], e[:, 1], color="k")
 
-        in_face = np.zeros((len(edges),) + points.shape[:-1], dtype=np.int64)
+        in_face = np.zeros((n_faces,) + points.shape[:-1], dtype=np.int64)
         # for each face in the object
-        for f in range(len(edges)):
+        for f in range(n_faces):
 
             face_vertices = vertices[f]
             face_edges = edges[f]
@@ -417,7 +323,10 @@ class Solver_3D():
                     # ax.plot(x_int, y_int, marker="o")
 
             # point is in the face if the line from each vertices intersects with an edge 
-            in_face[f] = (np.sum(n_edge_intersections, axis=0) == len(face_vertices)) & (np.abs(points[..., axis] - obj.points[0, axis]) < self._tol)
+            in_face[f] = (
+                (np.sum(n_edge_intersections, axis=0) == len(face_vertices)) & 
+                (np.abs(points[..., axis] - obj.points[0, axis]) < self._tol)
+            )
 
             # if point is far away from the object, lines become nearly parallel and tolerances can lead to false
             # intersections. Correct points that are wholly outside the object bounding box
@@ -433,6 +342,7 @@ class Solver_3D():
 
             in_face[f] = np.where(bbox_in_shape, in_face[f], 0)
 
+        # return True if point is contained in any face of the surface
         return (np.sum(in_face, axis=0) > 0)
 
 
@@ -449,7 +359,7 @@ class Solver_3D():
 
         obj_edges = []
         for obj in objects:
-            obj_edges += self.get_object_edges(obj)
+            obj_edges += self.get_object_edges(obj, group_faces=False)
 
         obj_edges = np.around(obj_edges, decimals=self._places).astype(np.float32)
 
@@ -1772,7 +1682,7 @@ class Solver_3D():
 
         ###################
         # X Axis Edges
-        ###################S
+        ###################
         # correct H components that use the Ey component in the same plane as the edge that points into the edge.
         # Hz in the same plane as the face. Both Hz and Ey are asymtotic so the correction factor cancels out
         # on all components but the ex integration.
