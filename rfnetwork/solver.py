@@ -5,7 +5,6 @@ import pyvista as pv
 from copy import copy
 from np_struct import ldarray
 
-
 from rfnetwork import const, conv, utils, core
 
 u0 = const.u0
@@ -13,9 +12,9 @@ e0 = const.e0
 c0 = const.c0
 
 
-class EM_Solver():
+class FDTD_Solver():
     """
-    3D EM Solver for PCB geometries.
+    FDTD EM Solver for PCB geometries.
     """
 
     def __init__(self, bounding_box):
@@ -29,6 +28,7 @@ class EM_Solver():
         self.probes=dict()
         self.slider_value = 0
         self.n_pml = None
+        self._auto_name_counter = 0
 
         self.sbox_max = np.max(bounding_box.points, axis=0)
         self.sbox_min = np.min(bounding_box.points, axis=0)
@@ -36,23 +36,42 @@ class EM_Solver():
         self._places = 5 # hundredth of a mil
         self._tol = 1 / (10 ** self._places)
 
-    def add_dielectric(self, name, obj, er: float, loss_tan=0, f0=0, style: dict = dict()):
+
+    def _add_object(self, group, objects, properties, name: str = None):
+        """
+        """
+        # cast as iterable 
+        if not isinstance(objects, (tuple, list, np.ndarray)):
+            objects = [objects]
+
+        # check that name is not used already
+        if name is not None and name in self.conductor.keys():
+            raise ValueError(f"Duplicate conductor name: {name}")
+
+        for i, obj in enumerate(objects):
+            
+            # increment name counter for each object
+            if name is None:
+                obj_name = f"obj_{self._auto_name_counter}"
+                self._auto_name_counter += 1
+            else:
+                obj_name = name + "_{i}" if len(objects) > 1 else name
+
+            group[obj_name] = dict(obj=obj, **properties)
+
+    def add_dielectric(self, objects, er: float, loss_tan=0, f0=0, style: dict = dict(), name: str = None):
         """
         Add rectangular dielectric
         """
-        if obj.n_cells > 6:
-            raise NotImplementedError("Only rectangular dielectrics are supported.")
-        
-        self.dielectric[name] = dict(obj=obj, er=er, loss_tan=loss_tan, f0=f0, style=style)
+        self._add_object(
+            self.dielectric, objects, properties=dict(er=er, loss_tan=loss_tan, f0=f0, style=style), name=name
+        )
 
-    def add_conductor(self, name, obj, sigma=1e16, style: dict = dict()):
+    def add_conductor(self, objects, sigma=1e16, style: dict = dict(), name: str = None):
         """
-        Add rectangular conductor
+        Add conductor
         """
-        if obj.n_cells > 6:
-            raise NotImplementedError("Only rectangular conductors are supported.")
-        
-        self.conductor[name] = dict(obj=obj, sigma=sigma, style=style)
+        self._add_object(self.conductor, objects, properties=dict(sigma=sigma, style=style), name=name)
 
     def add_lumped_port(self, number, face, r0=50):
         """
@@ -81,7 +100,7 @@ class EM_Solver():
         self.pml_boundaries = copy(list(sides))
         self.n_pml = n_pml
 
-    def pos_to_idx(self, p, mode="edge"):
+    def pos_to_idx(self, p, mode: str = "edge"):
         """
         Returns the index of the grid edge or cell center that is directly on or just past (in +x, +y and +z directions) 
         the given position.
@@ -588,6 +607,9 @@ class EM_Solver():
     def _init_dielectrics(self):
 
         for sub in self.dielectric.values():
+            if sub["obj"].n_cells > 6:
+                raise NotImplementedError("Only rectangular dielectrics are supported.")
+        
             x0, y0, z0 = self.pos_to_idx(np.min(sub["obj"].points, axis=0), mode="cell")
             x1, y1, z1 = self.pos_to_idx(np.max(sub["obj"].points, axis=0), mode="cell")
 
@@ -616,13 +638,6 @@ class EM_Solver():
         # split component field names
         e_split = dict(ex=("ex_y", "ex_z"), ey=("ey_z", "ey_x"), ez=("ez_x", "ez_y"))
 
-        # field = "ez"
-        # obj = via
-        # sig = 1e6
-
-        # obj.compute_cell_sizes(volume=True)["Volume"]
-
-        # cond = list(self.conductor.values())[0]
         for cond in self.conductor.values():
             obj = cond["obj"]
             sig = cond["sigma"]
@@ -666,152 +681,6 @@ class EM_Solver():
                 for e_sp in e_split[field]:
                     self.Ca[e_sp][bbox_idx] = np.where(inside_mask, Ca_c, self.Ca[e_sp][bbox_idx])
                     self.Cb[e_sp][bbox_idx] = np.where(inside_mask, Cb_c, self.Cb[e_sp][bbox_idx])
-
-
-    def _init_conductors_obsolete(self):
-        """
-        Write the coefficient values for the conductors. 
-        """
-        # xy coordinates for ex and ey components in the grid.
-        ey_x, ey_y = np.meshgrid(*self.floc["ey"][:2], indexing="ij")
-        ex_x, ex_y = np.meshgrid(*self.floc["ex"][:2], indexing="ij")
-        ez_x, ez_y = np.meshgrid(*self.floc["ez"][:2], indexing="ij")
-
-        # cond = list(self.conductor.values())[0]
-        for cond in self.conductor.values():
-            obj = cond["obj"]
-            sig = cond["sigma"]
-
-            # get indices of the grid edges that bound the conductor. The mesh ensures that conductor edges fall
-            # on grid edges.
-            x0, y0, z0 = self.pos_to_idx(np.min(obj.points, axis=0), mode="edge")
-            x1, y1, z1 = self.pos_to_idx(np.max(obj.points, axis=0), mode="edge")
-
-            # break the object into slices normal to the z axis and assign conductor coefficients for each ex/ey 
-            # component that is inside the object
-            for z in range(z0, z1+1):
-                # z is the index into the ex/ey component grid. Get the physical location in grid units.
-                z_loc = self.floc["ey"][2][z]
-                # if object is sliced at it's endpoints, pyvista returns an empty object. Move the zloc inside the
-                # object slightly by the tolerance
-                if z == z0:
-                    z_loc += self._tol
-                elif z == z1:
-                    z_loc -= self._tol
-
-                # coefficients for conductor at z layer
-                Ca_ex_c = (2 * self.eps_ex[..., z] - (sig * self.dt)) / (2 * self.eps_ex[..., z] + (sig * self.dt))
-                Cb_ex_c = (2 * self.dt) / ((2 * self.eps_ex[..., z] + (sig * self.dt)))
-
-                Ca_ey_c = (2 * self.eps_ey[..., z] - (sig * self.dt)) / (2 * self.eps_ey[..., z] + (sig * self.dt))
-                Cb_ey_c = (2 * self.dt) / ((2 * self.eps_ey[..., z] + (sig * self.dt)))
-
-                # get a slice of the object at z. If object is a flat face, skip this step since pyvista slice returns
-                # an empty object.
-                if (z1 - z0) > 0:
-                    obj_z = obj.slice(normal=(0, 0, 1), origin=(0, 0, z_loc))
-                else:
-                    obj_z = obj
-
-                # if object is a 2D shape on the xy plane, determine which components are in the shape
-                if np.abs(x1 - x0) > 0 and np.abs(y1 - y0) > 0:
-                    ex_in_object = self.is_point_in_object(ex_x, ex_y, obj_z)
-                    ey_in_object = self.is_point_in_object(ey_x, ey_y, obj_z)
-                # if object is a line on the xy plane, set the components on the edge by indexing
-                else:
-                    ex_in_object = np.zeros_like(ex_x)
-                    ey_in_object = np.zeros_like(ey_x)
-                    # ex is in center of cell along x
-                    ex_in_object[x0: x1, y0: y1+1] = 1
-                    # ey is in center of cell along y
-                    ey_in_object[x0: x1+1, y0: y1] = 1
-
-                # assign ex conductor coefficients for components in the object
-                self.Ca["ex_y"][..., z] = np.where(ex_in_object, Ca_ex_c, self.Ca["ex_y"][..., z])
-                self.Cb["ex_y"][..., z] = np.where(ex_in_object, Cb_ex_c, self.Cb["ex_y"][..., z])
-                self.Ca["ex_z"][..., z] = np.where(ex_in_object, Ca_ex_c, self.Ca["ex_z"][..., z])
-                self.Cb["ex_z"][..., z] = np.where(ex_in_object, Cb_ex_c, self.Cb["ex_z"][..., z])
-
-                # assign ey conductor coefficients for components in the object
-                self.Ca["ey_z"][..., z] = np.where(ey_in_object, Ca_ey_c, self.Ca["ey_z"][..., z])
-                self.Cb["ey_z"][..., z] = np.where(ey_in_object, Cb_ey_c, self.Cb["ey_z"][..., z])
-                self.Ca["ey_x"][..., z] = np.where(ey_in_object, Ca_ey_c, self.Ca["ey_x"][..., z])
-                self.Cb["ey_x"][..., z] = np.where(ey_in_object, Cb_ey_c, self.Cb["ey_x"][..., z])
-
-            # assign ez values at the cell centers. Only iterates over z indices that are bounded on top and bottom
-            # by the conductor ex/ey components. 
-            for z in range(z0, z1):
-                # z is the index into the ez component grid. Get the physical location in grid units.
-                z_loc = self.floc["ez"][2][z]
-
-                # coefficients for conductor at z layer
-                Ca_ez_c = (2 * self.eps_ez[..., z] - (sig * self.dt)) / (2 * self.eps_ez[..., z] + (sig * self.dt))
-                Cb_ez_c = (2 * self.dt) / ((2 * self.eps_ez[..., z] + (sig * self.dt)))
-
-                # if object is a 2D shape on the xy plane, determine which components are in the shape
-                if np.abs(x1 - x0) > 0 and np.abs(y1 - y0) > 0:
-                    # get a slice of the object at z. The object is not a flat face because it must span multiple edges
-                    # along z for ez to be included in the conductor.
-                    obj_z = obj.slice(normal=(0, 0, 1), origin=(0, 0, z_loc))
-                    ez_in_object = self.is_point_in_object(ez_x, ez_y, obj_z)
-                # if object is a line on the xy plane, set the components on the edge by indexing
-                else:
-                    ez_in_object = np.zeros_like(ez_x)
-                    # ez is on edges along both x and y
-                    ez_in_object[x0: x1+1, y0:y1+1] = 1
-
-                # assign ez conductor coefficients for components in the object
-                self.Ca["ez_x"][..., z] = np.where(ez_in_object, Ca_ez_c, self.Ca["ez_x"][..., z])
-                self.Cb["ez_x"][..., z] = np.where(ez_in_object, Cb_ez_c, self.Cb["ez_x"][..., z])
-                self.Ca["ez_y"][..., z] = np.where(ez_in_object, Ca_ez_c, self.Ca["ez_y"][..., z])
-                self.Cb["ez_y"][..., z] = np.where(ez_in_object, Cb_ez_c, self.Cb["ez_y"][..., z])
-
-    def _init_conductors_rect(self):
-        """
-        Write the coefficient values for the conductors. 
-        """
-
-        for cond in self.conductor.values():
-
-            obj = cond["obj"]
-            sig = cond["sigma"]
-            
-            # get indices of the grid edges that bound the conductor
-            x0, y0, z0 = self.pos_to_idx(np.min(obj.points, axis=0), mode="edge")
-            x1, y1, z1 = self.pos_to_idx(np.max(obj.points, axis=0), mode="edge")
-
-            # ex components in the conductor. The y component is the middle of the cell and is only included if the
-            # conductor extends to both edges on either side of it.
-            ex_idx = (slice(x0, x1), slice(y0, y1+1), slice(z0, z1+1))
-
-            Ca_ex = (2 * self.eps_ex[ex_idx] - (sig * self.dt)) / (2 * self.eps_ex[ex_idx] + (sig * self.dt))
-            Cb_ex = (2 * self.dt) / ((2 * self.eps_ex[ex_idx] + (sig * self.dt)))
-            self.Ca["ex_y"][ex_idx] = Ca_ex
-            self.Cb["ex_y"][ex_idx] = Cb_ex
-            self.Ca["ex_z"][ex_idx] = Ca_ex
-            self.Cb["ex_z"][ex_idx] = Cb_ex
-            
-            # ey components in the conductor. The y component is the middle of the cell and is only included if the
-            # conductor extends to both edges on either side of it.
-            ey_idx = (slice(x0, x1+1), slice(y0, y1), slice(z0, z1+1))
-
-            Ca_ey = (2 * self.eps_ey[ey_idx] - (sig * self.dt)) / (2 * self.eps_ey[ey_idx] + (sig * self.dt))
-            Cb_ey = (2 * self.dt) / ((2 * self.eps_ey[ey_idx] + (sig * self.dt)))
-            self.Ca["ey_z"][ey_idx] = Ca_ey
-            self.Cb["ey_z"][ey_idx] = Cb_ey
-            self.Ca["ey_x"][ey_idx] = Ca_ey
-            self.Cb["ey_x"][ey_idx] = Cb_ey
-
-            # ez components in the conductor. The z component is the middle of the cell and is only included if the
-            # conductor extends to both edges on either side of it.
-            ez_idx = (slice(x0, x1+1), slice(y0, y1+1), slice(z0, z1))
-
-            Ca_ez = (2 * self.eps_ez[ez_idx] - (sig * self.dt)) / (2 * self.eps_ez[ez_idx] + (sig * self.dt))
-            Cb_ez = (2 * self.dt) / ((2 * self.eps_ez[ez_idx] + (sig * self.dt)))
-            self.Ca["ez_x"][ez_idx] = Ca_ez
-            self.Cb["ez_x"][ez_idx] = Cb_ez
-            self.Ca["ez_y"][ez_idx] = Ca_ez
-            self.Cb["ez_y"][ez_idx] = Cb_ez
 
 
     def _init_coefficients(self):
@@ -1366,12 +1235,15 @@ class EM_Solver():
 
         if face.n_cells > 1 or face.faces[0] != 4:
             raise ValueError("Only rectangular current faces are supported.")
-                
-        # get axis that face is constant over (the normal axis)
-        axis = np.argmin(np.any(np.diff(face.points, axis=0), axis=0))
 
         # minimum and maximum extents of current face
         pmin, pmax = np.min(face.points, axis=0), np.max(face.points, axis=0)
+        # get axis normal to face
+        face_size = pmax - pmin
+        axis = np.argmin(face_size)
+
+        if np.count_nonzero(face_size) != 2:
+            raise ValueError("Port face must be on cartesian grid, and must be 2D.")
 
         if axis == 0: # current is along x-axis
             # all components have the same x-index
@@ -1404,6 +1276,39 @@ class EM_Solver():
                 self.probes[f"{name}_{i}"] = dict(field="hy", index=(x0, y, hy_z0), d=dy_h[y-1])
                 i += 1
                 self.probes[f"{name}_{i}"] = dict(field="hy", index=(x0, y, hy_z1), d=-dy_h[y-1])
+                i += 1
+
+        elif axis == 1: # current is along the y axis
+            # all components have the same y-index
+            y0 = self.field_pos_to_idx(pmin, "hz")[1]
+
+            # hx z-indices on the top and bottom of ampere loop
+            hx_z0 = self.field_pos_to_idx(pmin, "hx")[2] - 1
+            hx_z1 = self.field_pos_to_idx(pmax, "hx")[2]
+            # hz z-indices on the left and right of the loop
+            hz_z = np.arange(hx_z0 + 1, hx_z1 +1)
+
+            # hz x-indices on the sides of the loop
+            hz_x0 = self.field_pos_to_idx(pmin, "hz")[0] - 1
+            hz_x1 = self.field_pos_to_idx(pmax, "hz")[0]
+            # hx x-indices on the top and bottom of the loop
+            hx_x = np.arange(hz_x0 + 1, hz_x1 +1)
+
+            # add left and right probes, save the cell width in meters as the d variable, the sign
+            # indicates which direction the component faces in the ampere loop (defined with the current
+            # moving in the +y direction)
+            i = 0
+            for z in (hz_z):
+                self.probes[f"{name}_{i}"] = dict(field="hz", index=(hz_x0, y0, z), d=dz_h[z-1])
+                i += 1
+                self.probes[f"{name}_{i}"] = dict(field="hz", index=(hz_x1, y0, z), d=-dz_h[z-1])
+                i += 1
+
+            # add top and bottom probes
+            for x in (hx_x):
+                self.probes[f"{name}_{i}"] = dict(field="hx", index=(x, y0, hx_z0), d=dx_h[x-1])
+                i += 1
+                self.probes[f"{name}_{i}"] = dict(field="hx", index=(x, y0, hx_z1), d=-dx_h[x-1])
                 i += 1
 
         elif axis == 2: # current is along z axis

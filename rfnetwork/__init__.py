@@ -5,6 +5,6 @@ from . core import core
 from . import elements
 from . import plots
 from . tuning import TunerGroup
-from . solver import EM_Solver
+from . solver import FDTD_Solver
 from . import utils
 from . import math

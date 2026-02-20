@@ -50,9 +50,9 @@ port1_face = pv.Rectangle([
 ])
 
 
-s = rfn.EM_Solver(sbox)
+s = rfn.FDTD_Solver(sbox)
 # s.add_dielectric("sub", substrate, er=1, style=dict(opacity=0.0))
-s.add_conductor("ms1", ms1_trace, style=dict(color="gold"))
+s.add_conductor(ms1_trace, style=dict(color="gold"))
 s.add_lumped_port(1, port1_face)
 
 s.assign_PML_boundaries("x-", "x+", "y-", "y+", "z+", n_pml=5)

@@ -64,9 +64,9 @@ voltage_line2 = pv.Line(
     [0.25, ms1_y, 0], [0.25, ms1_y, sub_h]
 )
 
-s = rfn.EM_Solver(sbox)
-s.add_dielectric("sub", substrate, er=3.66, style=dict(opacity=0.0))
-s.add_conductor("ms1", ms1_trace, style=dict(color="gold"))
+s = rfn.FDTD_Solver(sbox)
+s.add_dielectric(substrate, er=3.66, style=dict(opacity=0.0))
+s.add_conductor(ms1_trace, style=dict(color="gold"))
 s.add_lumped_port(1, port1_face)
 
 self = s
