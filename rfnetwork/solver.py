@@ -193,9 +193,9 @@ class FDTD_Solver():
                     anchor =  obj.faces[i+1]
                     
                     if face_idx >= 0:
-                        faces[face_idx] = obj_edges
+                        faces[face_idx] += obj_edges
                     
-                    if group_faces or face_idx < 0:
+                    if group_faces or (face_idx < 0):
                         face_idx += 1
 
                     obj_edges = []
@@ -210,7 +210,7 @@ class FDTD_Solver():
 
             # finish last face
             if len(obj_edges):
-                faces[face_idx] = obj_edges
+                faces[face_idx] += obj_edges
 
         return faces if group_faces else faces[0]
 
@@ -236,19 +236,21 @@ class FDTD_Solver():
             faces[0] = np.array(obj.points)
 
         else:
-            # index in the the list of faces points
-            face_idx = 0
+            # index in the list of face points
+            face_point_idx = 0
             # index of the face groups
-            face_group_idx = 0
+            face_idx = 0
             for i in range(n_cells):
                 # number of points in this face
-                n_points = obj.faces[face_idx]
+                n_points = obj.faces[face_point_idx]
                 
                 for p in range(1, n_points + 1):
-                    faces[face_group_idx].append(obj.points[obj.faces[face_idx + p]])
+                    faces[face_idx].append(obj.points[obj.faces[face_point_idx + p]])
                 
+                face_point_idx += (n_points + 1)
+
                 if group_faces:
-                    face_group_idx += 1
+                    face_idx += 1
 
         return faces if group_faces else faces[0]
 
@@ -279,20 +281,24 @@ class FDTD_Solver():
         if not len(obj.points):
             return np.zeros(points.shape[:-1])
         
-        vertices = self.get_object_vertices(obj)
-        edges = self.get_object_edges(obj)
+        vertices = self.get_object_vertices(obj, group_faces=True)
+        edges = self.get_object_edges(obj, group_faces=True)
         n_faces = len(edges)
 
-        # fig, ax = plt.subplots(figsize=(8, 8))
-        # for e in np.array(edges[0]):
-        #     ax.plot(e[:, 0], e[:, 1], color="k")
 
         in_face = np.zeros((n_faces,) + points.shape[:-1], dtype=np.int64)
         # for each face in the object
         for f in range(n_faces):
 
+
             face_vertices = vertices[f]
             face_edges = edges[f]
+
+            # fig, ax = plt.subplots(figsize=(8, 8))
+            # for e in np.array(edges[f]):
+            #     ax.plot(e[:, 0], e[:, 1], color="k")
+
+            # ax.plot(points[0][0], points[0][1], marker="X", markersize=20)
 
             # number of intersections the edges make with lines from the object vertices to the point
             n_edge_intersections = np.zeros((len(face_vertices),) + points.shape[:-1], dtype=np.int64)
@@ -332,31 +338,34 @@ class FDTD_Solver():
                         # plug x_int into the line equation with a finite slope to get the y intersection point
                         y_int = np.where(np.isfinite(m1), m1 * x_int + b1, m2 * x_int + b2)
 
-                    # is intersection within the object edge. Count up to one intersection for each vertices (corner 
-                    # intersection count as one).
-                    n_edge_intersections[i] |= (
+                    # increment if the vertex line and edge intersect
+                    n_edge_intersections[i] += (
                         ((x_int - tolerance) <= np.max(edge[:, c1_axis])) & ((x_int + tolerance) >= np.min(edge[:, c1_axis])) &
                         ((y_int - tolerance) <= np.max(edge[:, c2_axis])) & ((y_int + tolerance) >= np.min(edge[:, c2_axis]))
                     )
                     
                     # ax.plot(x_int, y_int, marker="o")
+                    # ax.set_xlim([p0[0], p1[0]])
+                    # ax.set_ylim([p0[1], p1[1]])
 
             # point is in the face if the line from each vertices intersects with an edge 
             in_face[f] = (
-                (np.sum(n_edge_intersections, axis=0) == len(face_vertices)) & 
+                np.all(n_edge_intersections, axis=0) & 
                 (np.abs(points[..., axis] - obj.points[0, axis]) < self._tol)
             )
 
-            # if point is far away from the object, lines become nearly parallel and tolerances can lead to false
-            # intersections. Correct points that are wholly outside the object bounding box
-            x0, y0 = p0[c1_axis], p0[c2_axis]
-            x1, y1 = p1[c1_axis], p1[c2_axis]
+            # if point is far away from the face, lines become nearly parallel and tolerances can lead to false
+            # intersections. Correct points that are wholly outside the face bounding box
+            f_pmin = np.min(face_vertices, axis=0)
+            f_pmax = np.max(face_vertices, axis=0)
+            x0, y0 = f_pmin[c1_axis], f_pmin[c2_axis]
+            x1, y1 = f_pmax[c1_axis], f_pmax[c2_axis]
 
-            x, y = points[..., c1_axis], points[..., c2_axis]
+            xp, yp = points[..., c1_axis], points[..., c2_axis]
 
             bbox_in_shape = (
-                ((x - tolerance) <= x1) & ((x + tolerance) >= x0) &
-                ((y - tolerance) <= y1) & ((y + tolerance) >= y0)
+                ((xp - tolerance) <= x1) & ((xp + tolerance) >= x0) &
+                ((yp - tolerance) <= y1) & ((yp + tolerance) >= y0)
             )
 
             in_face[f] = np.where(bbox_in_shape, in_face[f], 0)
@@ -676,8 +685,6 @@ class FDTD_Solver():
                     # for points inside
                     points = np.transpose(e_grid_points, axes=(1, 2, 3, 0))
                     inside_mask = self.is_point_in_surface(points, obj)
-                    # result = e_pdata.select_enclosed_points(obj, check_surface=False, tolerance=0.01)
-                    # inside_mask = result["SelectedPoints"].reshape(e_grid_points[0].shape)
 
                 else:
                     dist = e_pdata.compute_implicit_distance(obj)
