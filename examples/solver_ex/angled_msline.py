@@ -85,13 +85,12 @@ port2_face = pv.Rectangle([
 ])
 
 
-s = rfn.EM_Solver(sbox)
-s.add_dielectric("sub", substrate, er=3.66, style=dict(opacity=0.0))
-s.add_conductor("ms0", ms0_trace, style=dict(color="gold"))
-s.add_conductor("ms1", ms1_trace, style=dict(color="gold"))
-s.add_conductor("ms_ang", ms_ang_trace, style=dict(color="gold"))
-s.add_conductor("corner0", corner0, style=dict(color="gold"))
-s.add_conductor("corner1", corner1, style=dict(color="gold"))
+s = rfn.FDTD_Solver(sbox)
+s.add_dielectric(substrate, er=3.66, style=dict(opacity=0.0))
+s.add_conductor(ms0_trace, style=dict(color="gold"))
+s.add_conductor(ms1_trace, style=dict(color="gold"))
+s.add_conductor(ms_ang_trace, style=dict(color="gold"))
+s.add_conductor(corner0, corner1, style=dict(color="gold"))
 s.add_lumped_port(1, port1_face)
 s.add_lumped_port(2, port2_face)
 

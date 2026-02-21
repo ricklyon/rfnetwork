@@ -59,7 +59,7 @@ class FDTD_Solver():
 
             group[obj_name] = dict(obj=obj, **properties)
 
-    def add_dielectric(self, objects, er: float, loss_tan=0, f0=0, style: dict = dict(), name: str = None):
+    def add_dielectric(self, *objects, er: float, loss_tan=0, f0=0, style: dict = dict(), name: str = None):
         """
         Add rectangular dielectric
         """
@@ -67,7 +67,7 @@ class FDTD_Solver():
             self.dielectric, objects, properties=dict(er=er, loss_tan=loss_tan, f0=f0, style=style), name=name
         )
 
-    def add_conductor(self, objects, sigma=1e16, style: dict = dict(), name: str = None):
+    def add_conductor(self, *objects, sigma=1e16, style: dict = dict(), name: str = None):
         """
         Add conductor
         """
@@ -376,6 +376,7 @@ class FDTD_Solver():
         # substrate objects
         sub_objects = [self.bounding_box] + [sub["obj"] for sub in self.dielectric.values()]
 
+        # get a list of 2x3 arrays, coordinates of each endpoint of the edges of the model objects
         obj_edges = []
         for obj in objects:
             obj_edges += self.get_object_edges(obj, group_faces=False)
@@ -396,9 +397,9 @@ class FDTD_Solver():
         # related to d_edge, create soft points along the axis to keep the area below the threshold. 
         edge_area = np.prod(edge_len[:, :2], axis=-1)
 
-        edge = obj_edges[0]
+        # add small edge cells around object transitions to reduce error
         for i, edge in enumerate(obj_edges):
-            if edge_area[i] > d_edge ** 2:
+            if edge_area[i] > (d_edge ** 2):
                 # break angled edges along x and y into sub-cells separated by d_edge
                 nx_ny = np.around(np.abs(edge_len[i][:2]) / d_edge).astype(int)
 
@@ -411,8 +412,17 @@ class FDTD_Solver():
             elif np.abs(edge_area[i]) < self._tol:
                 
                 for axis in range(3):
-                    if edge_len[i][axis] < self._tol:
-                        soft_points[axis] = np.append(soft_points[axis], [edge[0][axis] - d_edge, edge[0][axis] + d_edge])
+                    # if edge is normal to the axis (both endpoints are at the same value), add edge cells on 
+                    # either side. Skip if edge is at the bounding box edge
+                    at_bbox_edge = (
+                        (np.abs(edge[0][axis] - self.sbox_max[axis]) < self._tol) |
+                        (np.abs(edge[0][axis] - self.sbox_min[axis]) < self._tol)
+                    )
+
+                    if (edge_len[i][axis] < self._tol) and not at_bbox_edge:
+                        soft_points[axis] = np.append(
+                            soft_points[axis], [edge[0][axis] - d_edge, edge[0][axis] + d_edge]
+                        )
 
 
         for axis in range(3):
@@ -429,12 +439,13 @@ class FDTD_Solver():
             
             # create a reduced set of mesh points that are spaced no less than d_edge. Walk through all soft points
             # and only add points to the reduced list if they are at least d_edge away from the last point.
-            sp_axis_reduced = [sp_axis[0]]
-            last_p = sp_axis[0]
-            for i, p in enumerate(sp_axis[1:]):
-                if (p - last_p) >= d_edge:
-                    sp_axis_reduced += [p]
-                    last_p = p
+            if len(sp_axis):
+                sp_axis_reduced = [sp_axis[0]]
+                last_p = sp_axis[0]
+                for i, p in enumerate(sp_axis[1:]):
+                    if (p - last_p) >= d_edge:
+                        sp_axis_reduced += [p]
+                        last_p = p
 
             soft_points[axis] = sp_axis_reduced
 
