@@ -1609,72 +1609,140 @@ class FDTD_Solver():
             raise NotImplementedError("Edge correction is only supported for edges along the cartesian axis.")
         
         # cartesian axis parallel to the edge
-        axis = np.argmax(edge_len)
+        e_axis = np.argmax(edge_len)
 
         # axis parallel to fields pointing into the PEC edge
-        e_axis = dict(x=0, y=1, z=2)[integration_axis[0]]
+        f_axis = dict(x=0, y=1, z=2)[integration_axis[0]]
         # direction pointing away from edge
-        e_dir = {"+": 1, "-": 0}[integration_axis[1]]
+        f_dir = {"+": 1, "-": 0}[integration_axis[1]]
 
         # check that integration axis is perpendicular to edge axis
-        if e_axis == axis:
+        if e_axis == f_axis:
             raise ValueError("Integration axis must be perpendicular to the edge.")
 
         # flip points so p2 is at a higher spatial position along the axis
-        if p1[axis] > p2[axis]:
+        if p1[e_axis] > p2[e_axis]:
             p2, p1 = p1, p2
 
         # get e-field component indices at grid edges
-        x0, y0, z0 = self.pos_to_idx(p1, mode="edge")
-        x1, y1, z1 = self.pos_to_idx(p2, mode="edge")
+        p1_i = self.pos_to_idx(p1, mode="edge")
+        p2_i = self.pos_to_idx(p2, mode="edge")
 
-        # edge is along Ex components
-        if axis == 0:
-            # PEC is in the xy plane
-            if e_axis == 1:
-                # index of hz_y along integration line
-                y = y0 if e_dir else y0 - 1
-                # correct Hz components that integrate the Ey component in the same plane as the PEC.
-                # Both Hz and Ey are asymtotic so the correction factor cancels out on all components but the 
-                # ex integration.
-                self.Db["hz_y2"][x0: x1, y, z0] *= 1 / CFe
-                self.Db["hz_y1"][x0: x1, y, z0] *= 1 / CFe
+        # axis normal to surface
+        n_axis = [ax for ax in [0, 1, 2] if ax != e_axis and ax != f_axis][0]
 
-                # hz components integrating Ey on the end points of the edge
-                if x0 > 0:
-                    self.Db["hz_x2"][x0-1, y, z0] *= CFe
-                if x1 < self.Db["hz_x1"].shape[0]:
-                    self.Db["hz_x1"][x1, y, z0] *= CFe
+        # string values for each axis
+        ea, fa, na = [["x", "y", "z"][ax] for ax in [e_axis, f_axis, n_axis]]
 
-                # Correct Hx above and below the PEC plane that integrates Ey 
-                self.Db["hx_z2"][x0: x1+1, y, z0-1] *= CFe
-                self.Db["hx_z1"][x0: x1+1, y, z0] *= CFe
+        def build_idx(edge, field, normal):
+            """ Return a tuple of indices into the edge, field and normal axis. """
+            idx = [slice(None) for i in range(3)]
+            idx[e_axis] = edge
+            idx[f_axis] = field
+            idx[n_axis] = normal
+            return tuple(idx)
+        
+        # indices on edge axis of the components on cell centers
+        e_idx_centers = slice(p1_i[e_axis], p2_i[e_axis])
+        # indices on edge axis of the edge components
+        e_idx_edges = slice(p1_i[e_axis], p2_i[e_axis] + 1)
 
-                for z in [z0-1, z0]:
-                    # Correct Hx on the sides of the Ez component 
-                    self.Db["hx_y2"][x0: x1+1, y0-1, z] *= CFe
-                    self.Db["hx_y1"][x0: x1+1, y0, z] *= CFe
+        # index of closest H component normal to the surface along field axis
+        fh_idx = p1_i[f_axis] if f_dir else p1_i[f_axis] - 1
+        # index of surface plane along the normal axis
+        n_idx = p1_i[n_axis]
 
-                    # correct Hy components that integrate the Ez component below and above the edge 
-                    self.Db["hy_z1"][x0: x1, y0, z] *= 1 / CFe
-                    self.Db["hy_z2"][x0: x1, y0, z] *= 1 / CFe
+        # assign edge correction coefficents.
+        # Comments are for a PEC edge along the x axis, normal to the z-axis, with the field axis along y
+        
+        # correct Hz components that integrate the Ey component in the same plane as the PEC.
+        # Both Hz and Ey are asymtotic so the correction factor cancels out on all components but the 
+        # ex integration.
+        # self.Db["hz_y2"][x0: x1, y, z0] *= 1 / CFe
+        # self.Db["hz_y1"][x0: x1, y, z0] *= 1 / CFe
+        idx = build_idx(e_idx_centers, fh_idx, n_idx)
+        self.Db[f"h{na}_{fa}2"][tuple(idx)] *= 1 / CFe
+        self.Db[f"h{na}_{fa}1"][tuple(idx)] *= 1 / CFe
 
-                    # hy components integrating Ez on the end points of the edge
-                    if x0 > 0:
-                        self.Db["hy_x2"][x0-1, y0, z] *= CFe
-                    if x1 < self.Db["hy_x1"].shape[0]:
-                        self.Db["hy_x1"][x1, y0, z] *= CFe
+        # hz components integrating Ey on the end points of the edge
+        if p1_i[e_axis] > 0:
+            # self.Db["hz_x2"][x0-1, y, z0] *= CFe
+            idx = build_idx(p1_i[e_axis] - 1, fh_idx, n_idx)
+            self.Db[f"h{na}_{ea}2"][idx] *= CFe
+        if p2_i[e_axis] < self.Db[f"h{na}_{ea}1"].shape[e_axis]:
+            # self.Db["hz_x1"][x1, y, z0] *= CFe
+            idx = build_idx(p2_i[e_axis], fh_idx, n_idx)
+            self.Db[f"h{na}_{ea}1"][idx] *= CFe
 
-            # # PEC is in the xz plane
-            # else: # e_axis == 2
-            #     z = z0 if e_dir else z0 - 1
-            #     self.Db["hy_z2"][x0: x1, y0, z] *= 1 / CFe
-            #     self.Db["hy_z1"][x0: x1, y0, z] *= 1 / CFe
-            #     # Hx on either side of the Ez component
-            #     self.Db["hx_y2"][x0: x1+1, y0-1, z] *= CFe
-            #     self.Db["hx_y1"][x0: x1+1, y0, z] *= CFe
+        # Correct Hx above and below the PEC plane that integrates Ey 
+        # self.Db["hx_z2"][x0: x1+1, y, z0-1] *= CFe
+        # self.Db["hx_z1"][x0: x1+1, y, z0] *= CFe
+        self.Db[f"h{ea}_{na}2"][build_idx(e_idx_edges, fh_idx, n_idx-1)] *= CFe
+        self.Db[f"h{ea}_{na}1"][build_idx(e_idx_edges, fh_idx, n_idx)] *= CFe
+
+        for ni in [n_idx-1, n_idx]:
+            # Correct Hx on the sides of the Ez component 
+            # self.Db["hx_y2"][x0: x1+1, y0-1, z] *= CFe
+            # self.Db["hx_y1"][x0: x1+1, y0, z] *= CFe
+            self.Db[f"h{ea}_{fa}2"][build_idx(e_idx_edges, p1_i[f_axis] -1, ni)] *= CFe
+            self.Db[f"h{ea}_{fa}1"][build_idx(e_idx_edges, p1_i[f_axis], ni)] *= CFe
+
+            # correct Hy components that integrate the Ez component below and above the edge 
+            # self.Db["hy_z1"][x0: x1, y0, z] *= 1 / CFe
+            # self.Db["hy_z2"][x0: x1, y0, z] *= 1 / CFe
+            self.Db[f"h{fa}_{na}1"][build_idx(e_idx_centers, p1_i[f_axis], ni)] *= 1 / CFe
+            self.Db[f"h{fa}_{na}2"][build_idx(e_idx_centers, p1_i[f_axis], ni)] *= 1 / CFe
+
+            # hy components integrating Ez on the end points of the edge
+            if p1_i[e_axis] > 0:
+                # self.Db["hy_x2"][x0-1, y0, z] *= CFe
+                idx = build_idx(p1_i[e_axis] - 1, p1_i[f_axis], ni) 
+                self.Db[f"h{fa}_{ea}2"][idx] *= CFe
+            if p2_i[e_axis] < self.Db[f"h{fa}_{ea}1"].shape[e_axis]:
+                # self.Db["hy_x1"][x1, y0, z] *= CFe
+                idx = build_idx(p2_i[e_axis], p1_i[f_axis], ni)
+                self.Db[f"h{fa}_{ea}1"][idx] *= CFe
 
 
+
+
+
+        # # edge is along Ex components
+        # if axis == 0:
+        #     # PEC is in the xy plane
+        #     if e_axis == 1:
+        #         # index of hz_y along integration line
+        #         y = y0 if e_dir else y0 - 1
+        #         # correct Hz components that integrate the Ey component in the same plane as the PEC.
+        #         # Both Hz and Ey are asymtotic so the correction factor cancels out on all components but the 
+        #         # ex integration.
+        #         self.Db["hz_y2"][x0: x1, y, z0] *= 1 / CFe
+        #         self.Db["hz_y1"][x0: x1, y, z0] *= 1 / CFe
+
+        #         # hz components integrating Ey on the end points of the edge
+        #         if x0 > 0:
+        #             self.Db["hz_x2"][x0-1, y, z0] *= CFe
+        #         if x1 < self.Db["hz_x1"].shape[0]:
+        #             self.Db["hz_x1"][x1, y, z0] *= CFe
+
+        #         # Correct Hx above and below the PEC plane that integrates Ey 
+        #         self.Db["hx_z2"][x0: x1+1, y, z0-1] *= CFe
+        #         self.Db["hx_z1"][x0: x1+1, y, z0] *= CFe
+
+        #         for z in [z0-1, z0]:
+        #             # Correct Hx on the sides of the Ez component 
+        #             self.Db["hx_y2"][x0: x1+1, y0-1, z] *= CFe
+        #             self.Db["hx_y1"][x0: x1+1, y0, z] *= CFe
+
+        #             # correct Hy components that integrate the Ez component below and above the edge 
+        #             self.Db["hy_z1"][x0: x1, y0, z] *= 1 / CFe
+        #             self.Db["hy_z2"][x0: x1, y0, z] *= 1 / CFe
+
+        #             # hy components integrating Ez on the end points of the edge
+        #             if x0 > 0:
+        #                 self.Db["hy_x2"][x0-1, y0, z] *= CFe
+        #             if x1 < self.Db["hy_x1"].shape[0]:
+        #                 self.Db["hy_x1"][x1, y0, z] *= CFe
 
 
         ###################
