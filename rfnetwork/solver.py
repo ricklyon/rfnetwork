@@ -1562,7 +1562,7 @@ class FDTD_Solver():
         # and the incident wave V = a + b
         B[:, source_port-1] = V_src - V_applied
 
-        # alternate way to seperate out foward and reverse waves using the voltage and current.
+        # alternate way to separate out foward and reverse waves using the voltage and current.
         # see equation 4.58 in Pozar 4th ed.
         # r_src = self.ports[source_port-1]["r0"]
         # I_src = I_term[source_port-1]
@@ -1582,65 +1582,139 @@ class FDTD_Solver():
         # return a single column of the full s-matrix
         return B / V_applied[..., None]
     
-    def edge_correction(self, pec_face, CFh=None):
+    def edge_correction(self, p1, p2, integration_axis: str, CFe: float = None, CFh: float = 1):
         """
-        Analytic correction factors for singularity correction at PEC edges. Corrects asymptotic Ez, Hy fields 
+        Analytic correction factors for singularities at PEC surface edges. Corrects asymptotic Ez, Hy fields 
         along the z-axis at the face edge, and Ey, Hz fields along the y-axis at the face edge.
-        """
 
-        pec_size = np.max(pec_face.points, axis=0) - np.min(pec_face.points, axis=0)
-
-        if pec_size[2] > 0:
-            raise NotImplementedError("Edge correction is only supported for 2D objects in the xy plane.")
+        Parameters
+        ----------
+        p1 : tuple
+            coordinates of first end point of PEC edge to apply the correction to.
+        p2 : tuple
+            coordinates of second PEC edge end point
+        integration_axis : {"x+", "x-", "y-", "y+", "z-", "z+"}
+            perpendicular direction pointing away from the edge along which the fields vary asymptotically.
+            This should be in the plane of the PEC surface.
         
-        CF = 2 * np.sqrt(1/2)
+        """
+        if CFe is None:
+            CFe = 2 * np.sqrt(1/2)
 
-        # get ex and ey component indices at edges of the face
-        _, y0, z0 = self.field_pos_to_idx(np.min(pec_face.points, axis=0), "ex")
-        _, y1, _ = self.field_pos_to_idx(np.max(pec_face.points, axis=0), "ex")
-        x0, _, _ = self.field_pos_to_idx(np.min(pec_face.points, axis=0), "ey")
-        x1, _, _ = self.field_pos_to_idx(np.max(pec_face.points, axis=0), "ey")
+        # error check that the line between p1 and p2 is along the x/y/z axis
+        p1, p2 = np.array(p1), np.array(p2)
+        edge_len = np.abs(p2 - p1)
 
-        x1_at_edge = (x1 >= len(self.floc["ey"][0]) -1)
+        if np.count_nonzero(edge_len) != 1:
+            raise NotImplementedError("Edge correction is only supported for edges along the cartesian axis.")
+        
+        # cartesian axis parallel to the edge
+        axis = np.argmax(edge_len)
+
+        # axis parallel to fields pointing into the PEC edge
+        e_axis = dict(x=0, y=1, z=2)[integration_axis[0]]
+        # direction pointing away from edge
+        e_dir = {"+": 1, "-": 0}[integration_axis[1]]
+
+        # check that integration axis is perpendicular to edge axis
+        if e_axis == axis:
+            raise ValueError("Integration axis must be perpendicular to the edge.")
+
+        # flip points so p2 is at a higher spatial position along the axis
+        if p1[axis] > p2[axis]:
+            p2, p1 = p1, p2
+
+        # get e-field component indices at grid edges
+        x0, y0, z0 = self.pos_to_idx(p1, mode="edge")
+        x1, y1, z1 = self.pos_to_idx(p2, mode="edge")
+
+        # edge is along Ex components
+        if axis == 0:
+            # PEC is in the xy plane
+            if e_axis == 1:
+                # index of hz_y along integration line
+                y = y0 if e_dir else y0 - 1
+                # correct Hz components that integrate the Ey component in the same plane as the PEC.
+                # Both Hz and Ey are asymtotic so the correction factor cancels out on all components but the 
+                # ex integration.
+                self.Db["hz_y2"][x0: x1, y, z0] *= 1 / CFe
+                self.Db["hz_y1"][x0: x1, y, z0] *= 1 / CFe
+
+                # hz components integrating Ey on the end points of the edge
+                if x0 > 0:
+                    self.Db["hz_x2"][x0-1, y, z0] *= CFe
+                if x1 < self.Db["hz_x1"].shape[0]:
+                    self.Db["hz_x1"][x1, y, z0] *= CFe
+
+                # Correct Hx above and below the PEC plane that integrates Ey 
+                self.Db["hx_z2"][x0: x1+1, y, z0-1] *= CFe
+                self.Db["hx_z1"][x0: x1+1, y, z0] *= CFe
+
+                for z in [z0-1, z0]:
+                    # Correct Hx on the sides of the Ez component 
+                    self.Db["hx_y2"][x0: x1+1, y0-1, z] *= CFe
+                    self.Db["hx_y1"][x0: x1+1, y0, z] *= CFe
+
+                    # correct Hy components that integrate the Ez component below and above the edge 
+                    self.Db["hy_z1"][x0: x1, y0, z] *= 1 / CFe
+                    self.Db["hy_z2"][x0: x1, y0, z] *= 1 / CFe
+
+                    # hy components integrating Ez on the end points of the edge
+                    if x0 > 0:
+                        self.Db["hy_x2"][x0-1, y0, z] *= CFe
+                    if x1 < self.Db["hy_x1"].shape[0]:
+                        self.Db["hy_x1"][x1, y0, z] *= CFe
+
+            # # PEC is in the xz plane
+            # else: # e_axis == 2
+            #     z = z0 if e_dir else z0 - 1
+            #     self.Db["hy_z2"][x0: x1, y0, z] *= 1 / CFe
+            #     self.Db["hy_z1"][x0: x1, y0, z] *= 1 / CFe
+            #     # Hx on either side of the Ez component
+            #     self.Db["hx_y2"][x0: x1+1, y0-1, z] *= CFe
+            #     self.Db["hx_y1"][x0: x1+1, y0, z] *= CFe
+
+
+
 
         ###################
         # X Axis Edges
         ###################
-        # correct H components that use the Ey component in the same plane as the edge that points into the edge.
+        # correct Hz components that use the Ey component in the same plane as the edge that points into the edge.
         # Hz in the same plane as the face. Both Hz and Ey are asymtotic so the correction factor cancels out
         # on all components but the ex integration.
-        for y in [y0-1, y1]:
-            self.Db["hz_y2"][x0: x1, y, z0] *= 1 / CF
-            self.Db["hz_y1"][x0: x1, y, z0] *= 1 / CF
-            # hz components using Ey that are just past the face along the x direction
-            self.Db["hz_x2"][x0-1, y, z0] *= CF
-            if not x1_at_edge:
-                self.Db["hz_x1"][x1, y, z0] *= CF
-            # Hx just below the Ey component
-            self.Db["hx_z2"][x0: x1+1, y, z0-1] *= CF
-            # Hx just above the Ey component
-            self.Db["hx_z1"][x0: x1+1, y, z0] *= CF
+        # for y in [y0-1, y1]:
+        #     self.Db["hz_y2"][x0: x1, y, z0] *= 1 / CF
+        #     self.Db["hz_y1"][x0: x1, y, z0] *= 1 / CF
+        #     # hz components using Ey that are just past the face along the x direction
+        #     self.Db["hz_x2"][x0-1, y, z0] *= CF
+        #     if not x1_at_edge:
+        #         self.Db["hz_x1"][x1, y, z0] *= CF
+        #     # Hx just below the Ey component
+        #     self.Db["hx_z2"][x0: x1+1, y, z0-1] *= CF
+        #     # Hx just above the Ey component
+        #     self.Db["hx_z1"][x0: x1+1, y, z0] *= CF
 
-        # correct Hy components that use the Ez component below and above the edge 
-        # Hy and Ez are both asymptotic and the correction factors cancel out
-        for y in [y0, y1]:
-            self.Db["hy_z1"][x0: x1, y, z0-1] *= 1 / CF
-            self.Db["hy_z2"][x0: x1, y, z0-1] *= 1 / CF
-            self.Db["hy_z1"][x0: x1, y, z0] *= 1 / CF
-            self.Db["hy_z2"][x0: x1, y, z0] *= 1 / CF
-            # hy components just past the face along the x direction
-            self.Db["hy_x2"][x0-1, y, z0-1] *= CF
-            self.Db["hy_x2"][x0-1, y, z0] *= CF
-            if not x1_at_edge:
-                self.Db["hy_x1"][x1, y, z0] *= CF
-                self.Db["hy_x1"][x1, y, z0-1] *= CF
+        # # correct Hy components that use the Ez component below and above the edge 
+        # # Hy and Ez are both asymptotic and the correction factors cancel out
+        # for y in [y0, y1]:
+        #     self.Db["hy_z1"][x0: x1, y, z0-1] *= 1 / CF
+        #     self.Db["hy_z2"][x0: x1, y, z0-1] *= 1 / CF
+        #     self.Db["hy_z1"][x0: x1, y, z0] *= 1 / CF
+        #     self.Db["hy_z2"][x0: x1, y, z0] *= 1 / CF
+        #     # hy components just past the face along the x direction
+        #     self.Db["hy_x2"][x0-1, y, z0-1] *= CF
+        #     self.Db["hy_x2"][x0-1, y, z0] *= CF
+        #     if not x1_at_edge:
+        #         self.Db["hy_x1"][x1, y, z0] *= CF
+        #         self.Db["hy_x1"][x1, y, z0-1] *= CF
 
-        # correct Hx components just past the face in the y direction that use the Ez components under the edge
-        for z in [z0-1, z0]:
-            self.Db["hx_y2"][x0: x1+1, y0-1, z] *= CF
-            self.Db["hx_y1"][x0: x1+1, y0, z] *= CF
-            self.Db["hx_y2"][x0: x1+1, y1-1, z] *= CF
-            self.Db["hx_y1"][x0: x1+1, y1, z] *= CF
+        # # correct Hx components just past the face in the y direction that use the Ez components under the edge
+        # for z in [z0-1, z0]:
+        #     self.Db["hx_y2"][x0: x1+1, y0-1, z] *= CF
+        #     self.Db["hx_y1"][x0: x1+1, y0, z] *= CF
+        #     self.Db["hx_y2"][x0: x1+1, y1-1, z] *= CF
+        #     self.Db["hx_y1"][x0: x1+1, y1, z] *= CF
 
         # correction E components whose integration plane is a half a cell away from the edge, Ez, and Ey
         # if CFh is not None:
@@ -1690,67 +1764,6 @@ class FDTD_Solver():
         #     self.Db["hy_x1"][x1-1, y0: y1+1, z] *= CF
         #     if not x1_at_edge:
         #         self.Db["hy_x1"][x1, y0: y1+1, z] *= CF
-
-    def edge_correction2(self, face):
-
-        x0, y0, z0 = self.field_pos_to_idx(np.min(face.points, axis=0), "ex")
-        x1, y1, z1 = self.field_pos_to_idx(np.max(face.points, axis=0), "ex")
-
-        CF = 2 * np.sqrt(1/2)
-        # hz in the same plane as the trace
-        self.Db["hz_y2"][x0: x1, y0-1, z0] *= 1 / CF
-        self.Db["hz_y1"][x0: x1, y0-1, z0] *= 1 / CF
-
-        # hy directly above and below trace edge
-        self.Db["hy_z1"][x0: x1, y0, z0-1] *= 1 / CF
-        self.Db["hy_z2"][x0: x1, y0, z0-1] *= 1 / CF
-        self.Db["hy_z1"][x0: x1, y0, z0] *= 1 / CF
-        self.Db["hy_z2"][x0: x1, y0, z0] *= 1 / CF
-
-        # hx below the trace, correct ez component on the edge
-        self.Db["hx_y2"][x0+1: x1-1, y0-1, z0-1] *= CF
-        self.Db["hx_y1"][x0+1: x1-1, y0, z0-1] *= CF
-        # hy above the trace, correct the ez component on the edge
-        self.Db["hx_y2"][x0+1: x1-1, y0-1, z0] *= CF
-        self.Db["hx_y1"][x0+1: x1-1, y0, z0] *= CF
-
-        # ez below and above the trace
-        # self.Cb["ez_y"][x0+1: x1-1, y0, z0] *= 1/0.785
-        # self.Cb["ez_y"][x0+1: x1-1, y0, z0-1] *= 1/0.785
-
-        # # # ey in the plane of the trace
-        # self.Cb["ey_z"][x0: x1, y0-1, z0] *= 1/0.785
-
-    
-
-        x0, y0, z0 = self.field_pos_to_idx(np.min(face.points, axis=0), "ex")
-        x1, y1, z1 = self.field_pos_to_idx(np.max(face.points, axis=0), "ex")
-
-        CF = 2 * np.sqrt(1/2)
-
-        # hz in the same plane as the trace
-        self.Db["hz_y1"][x0: x1, y1, z0] *= 1 / CF
-        self.Db["hz_y2"][x0: x1, y1, z0] *= 1 / CF
-
-        # hy directly above and below trace edge
-        self.Db["hy_z1"][x0: x1, y1, z0-1] *= 1 / CF
-        self.Db["hy_z2"][x0: x1, y1, z0-1] *= 1 / CF
-        self.Db["hy_z1"][x0: x1, y1, z0] *= 1 / CF
-        self.Db["hy_z2"][x0: x1, y1, z0] *= 1 / CF
-
-        # hy below the trace, correct ez component on the edge
-        self.Db["hx_y2"][x0+1: x1-1, y1-1, z0-1] *= CF
-        self.Db["hx_y1"][x0+1: x1-1, y1, z0-1] *= CF
-        # hy above the trace, correct the ez component on the edge
-        self.Db["hx_y2"][x0+1: x1-1, y1-1, z0] *= CF
-        self.Db["hx_y1"][x0+1: x1-1, y1, z0] *= CF
-
-        # # ez below and above the trace
-        # self.Cb["ez_y"][x0+1: x1-1, y1, z0-1] *= 1/0.785
-        # self.Cb["ez_y"][x0+1: x1-1, y1, z0] *= 1/0.785
-
-        # # # ey in the plane of the trace
-        # self.Cb["ey_z"][x0: x1, y1, z0] *= 1/0.785
 
     
     def get_monitor_data(self, name):
