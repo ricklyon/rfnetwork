@@ -208,10 +208,10 @@ port4_face = pv.Rectangle([
     (sbox_w-feed_x, feed_y+w0/2, sbox_h/2),
 ])
 
-s.add_lumped_port(1, port1_face, r0=100)
-s.add_lumped_port(2, port2_face, r0=100)
-s.add_lumped_port(3, port3_face, r0=100)
-s.add_lumped_port(4, port4_face, r0=100)
+s.add_lumped_port(1, port1_face, "z-", r0=100)
+s.add_lumped_port(2, port2_face, "z+", r0=100)
+s.add_lumped_port(3, port3_face, "z-", r0=100)
+s.add_lumped_port(4, port4_face, "z+", r0=100)
 
 
 # s.init_mesh(d0 = lam0/20, n0 = 2, d_pec = lam0/20, n_min_pec=4, d_sub=lam0/20, n_min_sub=4, blend_pec=True)
@@ -247,7 +247,7 @@ vsrc = 1e-2 * s.gaussian_source(s.dt * 300, t0= s.dt * 200, t_len = s.dt * pulse
 
 frequency: np.ndarray = np.arange(0.5e9, 3e9, 2e6)
 
-s.run([1, 2], [vsrc, -vsrc], n_threads=4)
+s.run([1, 2], [vsrc, vsrc], n_threads=4)
 self = s
 
 

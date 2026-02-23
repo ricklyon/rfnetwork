@@ -110,12 +110,22 @@ ring = pv.Disc(
 
 ring = ring.clip_box((0, outer_radius + 0.1, -gap/2, gap/2, 0, sub_h)).extract_surface()
 
+resistor = pv.Rectangle([
+    (radius - 0.01, -gap/2, sub_h),
+    (radius - 0.01, gap/2, sub_h),
+    (radius + 0.01, gap/2, sub_h),
+])
+
 s = rfn.FDTD_Solver(sbox)
 s.add_dielectric(substrate, er=3.66, loss_tan=0.002, f0=f0, style=dict(opacity=0.0))
 s.add_conductor(ring, ms1_trace, ms2_trace, ms3_trace, style=dict(color="gold"))
-s.add_lumped_port(1, port1_face)
-s.add_lumped_port(2, port2_face)
-s.add_lumped_port(3, port3_face)
+s.add_lumped_port(1, port1_face, "z-")
+s.add_lumped_port(2, port2_face, "z-")
+s.add_lumped_port(3, port3_face, "z-")
+
+# resistor.plot()
+
+s.add_resistor(resistor, 100, "y+")
 
 
 s.assign_PML_boundaries("z+", n_pml=5)
@@ -126,22 +136,22 @@ self = s
 s.generate_mesh(d0 = 0.02, d_edge=0.005, z_bounds = [0.005, 0.02])
 # s.edge_correction(ms1_trace)
 
-s.add_field_monitor("mon1", "ez", "z", sub_h, 5)
+s.add_field_monitor("mon1", "ez", "z", sub_h, 30)
 # s.add_field_monitor("mon1", "ez", "z", sub_h - 0.005, 15)
 s.add_field_monitor("mon2", "ey", "z", sub_h, 30)
 s.add_field_monitor("mon3", "ex", "z", sub_h, 10)
 
 
-plotter = s.render()
-plotter.camera_position = "xy"
-plotter.show()
+# plotter = s.render()
+# plotter.camera_position = "xy"
+# plotter.show()
 
 
 # Db_0 = s.dt / u0
 # Cb_0 = s.dt / e0 
-p = s.plot_coefficients("ey_z", "a", "z", sub_h, point_size=15, cmap="brg")
-p.camera_position = "xy"
-p.show()
+# p = s.plot_coefficients("ey_z", "a", "z", sub_h, point_size=15, cmap="brg")
+# p.camera_position = "xy"
+# p.show()
 
 pulse_n = 2800
 # width of half pulse in time
@@ -149,15 +159,15 @@ pulse_width = (s.dt * 400)
 # center of the pulse in time
 t0 = (s.dt * 500)
 
-vsrc = 1e-2 * self.gaussian_source(width=100e-12, t0=100e-12, t_len=500e-12)
-# vsrc = 1e-2 * self.gaussian_modulated_source(f0, width=300e-12, t0=100e-12, t_len=300e-12)
-plt.plot(vsrc)
+vsrc = 1e-2 * self.gaussian_source(width=100e-12, t0=100e-12, t_len=800e-12)
+# vsrc = 1e-2 * self.gaussian_modulated_source(f0, width=600e-12, t0=200e-12, t_len=500e-12)
+# plt.plot(vsrc)
 
 frequency: np.ndarray = np.arange(1e9, 10e9, 10e6)
 
-s.run([1], [vsrc], n_threads=4)
+s.run([2], [vsrc], n_threads=4)
 
-sdata = s.get_sparameters(frequency, downsample=False)
+sdata = s.get_sparameters(frequency, source_port=2, downsample=False)
 S11 = sdata[:, 0]
 S21 = sdata[:, 1]
 S31 = sdata[:, 2]
@@ -169,11 +179,11 @@ ax.plot(frequency / 1e9, conv.db20_lin(S31))
 mplm.line_marker(x = f0/1e9, axes=ax, xlabel=True)
 ax.set_xlabel("Frequency [GHz]")
 ax.set_ylabel("[dB]")
-ax.legend(["S11", "S21", "S31"])
+ax.legend(["S12", "S22", "S32"])
 ax.grid(True)
 plt.show()
 
 
-p = s.plot_monitor(["mon2"], el=0, zoom=1.1, az=0, view="xy", opacity=[0.8, 1], linear=False, cmap="jet", style="surface")
+p = s.plot_monitor(["mon2"], el=0, zoom=1.1, az=0, view="xy", vmax=30, vmin=10, opacity=[0.8, 1], linear=False, cmap="jet", style="surface")
 p.show(title="EM Solver")
 

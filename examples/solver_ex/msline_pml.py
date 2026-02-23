@@ -67,7 +67,7 @@ voltage_line2 = pv.Line(
 s = rfn.FDTD_Solver(sbox)
 s.add_dielectric(substrate, er=3.66, style=dict(opacity=0.0))
 s.add_conductor(ms1_trace, style=dict(color="gold"))
-s.add_lumped_port(1, port1_face)
+s.add_lumped_port(1, port1_face, "z-")
 
 self = s
 
@@ -76,9 +76,16 @@ s.assign_PML_boundaries("x+", n_pml=10)
 
 s.generate_mesh(d0 = 0.02, d_edge=0.005)
 
-s.edge_correction(ms1_trace)
+p1 = (ms_x[0], ms1_y + ms_w/2, sub_h)
+p2 = (ms_x[1], ms1_y + ms_w/2, sub_h)
+integration_line = "y+"
 
+s.edge_correction(p1, p2, "y+")
 
+p1 = (ms_x[0], ms1_y - ms_w/2, sub_h)
+p2 = (ms_x[1], ms1_y - ms_w/2, sub_h)
+
+s.edge_correction(p1, p2, "y-")
 
 s.add_field_monitor("mon1", "hz", "z", sub_h, 10)
 s.add_field_monitor("mon2", "ey", "z", sub_h, 10)
@@ -96,7 +103,7 @@ plotter.show()
 
 # Db_0 = s.dt / u0
 # Cb_0 = s.dt / e0 
-p = s.plot_coefficients("ez_x", "b", "z", sub_h, point_size=15, cmap="brg")
+p = s.plot_coefficients("hy_z2", "b", "z", sub_h, point_size=15, cmap="brg")
 p.camera_position = "xy"
 p.show()
 

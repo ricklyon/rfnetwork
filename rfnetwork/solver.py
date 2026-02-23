@@ -18,14 +18,17 @@ class FDTD_Solver():
     """
 
     def __init__(self, bounding_box):
+
+        self.bounding_box = bounding_box
         self.dielectric = dict()
         self.conductor = dict()
+        self.lumped_element = dict()
+
         self.pml_boundaries = []
 
-        self.port_face = []
-        self.bounding_box = bounding_box
         self.monitors=dict()
         self.probes=dict()
+        
         self.slider_value = 0
         self.n_pml = None
         self._auto_name_counter = 0
@@ -73,15 +76,27 @@ class FDTD_Solver():
         """
         self._add_object(self.conductor, objects, properties=dict(sigma=sigma, style=style), name=name)
 
-    def add_lumped_port(self, number, face, r0=50):
+    def add_lumped_port(self, number, face, integration_axis: str, r0: float = 50, name: str = None):
         """
         Attach a lumped port to a face
         """
-        # add new ports to the faces list
-        if len(self.port_face) < number:
-            self.port_face = self.port_face + [None] * (number - len(self.port_face))
+        self._add_object(
+            self.lumped_element, 
+            face, 
+            properties=dict(integration_axis=integration_axis, r=r0, port=number), 
+            name=name
+        )
 
-        self.port_face[number - 1] = dict(face = face, r0=r0)
+    def add_resistor(self, face, value: float, integration_axis: str, name: str = None):
+        """
+        Attach a resistive element to a face
+        """
+        self._add_object(
+            self.lumped_element, 
+            face, 
+            properties=dict(integration_axis=integration_axis, r=value, port=None), 
+            name=name
+        )
 
     def assign_PML_boundaries(self, *sides: str, n_pml: float = 10):
         """
@@ -149,7 +164,7 @@ class FDTD_Solver():
             self._init_PML(pml_side)
 
         self._init_conductors()
-        self._init_ports()
+        self._init_lumped_elements()
 
         
     def get_object_edges(self, obj, group_faces: bool = True) -> list:
@@ -836,96 +851,199 @@ class FDTD_Solver():
         )
 
             
-    def _init_ports(self):
+    def _init_lumped_elements(self):
         """
         
         """
-        self.ports = [None] * len(self.port_face)
+        # get the lumped element faces that are assigned as port terminations
+        port_faces = [element for element in self.lumped_element.values() if element["port"] is not None]
+        self.ports = [None] * len(port_faces)
         
-        dx, dy, dz = [conv.m_in(d) for d in self.d_cells]
-        dx_h, dy_h, dz_h = [conv.m_in(d) for d in self.dh_cells]
+        d_cells = [conv.m_in(d) for d in self.d_cells]
+        dh_cells = [conv.m_in(d) for d in self.dh_cells]
         
-        for i, p in enumerate(self.port_face):
+        # element = self.lumped_element["obj_2"]
+        for name, element in self.lumped_element.items():
 
-            face = p["face"]
-            r0 = p["r0"]
+            face = element["obj"]
+            # total resistance
+            r = element["r"]
+            # voltage integration direction 
+            integration_axis = element["integration_axis"]
+            port = element["port"]
     
             if face.n_cells > 1 or face.faces[0] != 4:
                 raise ValueError("Only rectangular port faces are supported.")
             
-            x0, y0, z0 = self.pos_to_idx(np.min(face.points, axis=0))
-            x1, y1, z1 = self.pos_to_idx(np.max(face.points, axis=0))
-    
-            x0_c, y0_c, z0_c = self.pos_to_idx(np.min(face.points, axis=0), mode="cell")
-            x1_c, y1_c, z1_c = self.pos_to_idx(np.max(face.points, axis=0), mode="cell")
+            p1 = np.array(self.pos_to_idx(np.min(face.points, axis=0), mode="edge"))
+            p2 = np.array(self.pos_to_idx(np.max(face.points, axis=0), mode="edge"))
     
             # get width of pec in cell units
-            idx_d = np.array([x1, y1, z1]) - np.array([x0, y0, z0])
+            idx_d = p2 - p1
     
             if np.count_nonzero(idx_d) != 2:
                 raise ValueError("Port face must be on cartesian grid, and must be 2D.")
             
-            # axis that is normal to the port face. Face will have zero width along the normal axis
-            axis = np.argmin(idx_d)
-                
-            # face is normal to the x-axis or y-axis, Resistor is represented by the Ez components
-            if (axis == 0) or (axis == 1):
+            # normal axis to the port face.
+            n_axis = np.argmin(idx_d)
+            # axis along integration direction
+            f_axis = dict(x=0, y=1, z=2)[integration_axis[0]]
+            # axis along width of port
+            w_axis = [ax for ax in [0, 1, 2] if ax != f_axis and ax != n_axis][0]
+            # direction of integration
+            f_dir = {"+": 1, "-": -1}[integration_axis[1]]
+
+            # check that port faces are at least 2 cells wide. The two end points are not included, requiring
+            # at least one field component in the center of the face
+            if port is not None and idx_d[w_axis] < 2: 
+                raise NotImplementedError("Port faces must span at least 2 grid cells.")
+            
+            # remove endpoints along width if this is a port 
+            if port is not None:
+                p1[w_axis] += 1
+                p2[w_axis] -= 1
+
+            # check that integration axis is perpendicular to normal axis
+            if f_axis == n_axis:
+                raise ValueError("Integration direction must be in the port face.")
+
+            # string values for each axis, normal, width and field (integration)
+            na, wa, fa = [["x", "y", "z"][ax] for ax in [n_axis, w_axis, f_axis]]
+
+            def build_idx(normal, width, field):
+                """ Return a tuple of indices into the normal, width and field axis. """
+                idx = [slice(None) for i in range(3)]
+                idx[w_axis] = width
+                idx[f_axis] = field
+                idx[n_axis] = normal
+                return tuple(idx)
+            
+            # width of electric field components parallel to the integration axis, a
+            dw = dh_cells[w_axis][p1[w_axis] - 1: p2[w_axis]]
+            # width of electric field components parallel to the integration axis, along the normal axis
+            dn = dh_cells[n_axis][p1[n_axis] - 1: p2[n_axis]]
+            # length of field components along the integration axis
+            df = d_cells[f_axis][p1[f_axis]: p2[f_axis]]
+
+            # order the width, normal and integration axis so the result is xyz, and then broadcast the cell
+            # widths across each other to create a meshgrid the same shape as eps_r
+            dn, dw, df = np.meshgrid(*build_idx(dn, dw, df), indexing="ij")
+
+            # epsilon of resistor cells
+            eps_field = [self.eps_ex, self.eps_ey, self.eps_ez][f_axis]
+            # field indices for the resistive components
+            efield_idx = build_idx(
+                slice(p1[n_axis], p2[n_axis] + 1), slice(p1[w_axis], p2[w_axis] + 1), slice(p1[f_axis], p2[f_axis])
+            )
+            eps_r = eps_field[efield_idx]
+
+            # number of components along width. Component is on the edges along the width axis
+            nw = (p2 - p1 + 1)[w_axis]
+            # number of components along integration axis. Component is in the middle of cell along the integration
+            # axis 
+            nf = (p2 - p1)[f_axis]
+            # resistance of each cell is spilt so the combined resistance of all cells equals r
+            r_cell = r * (nw) / nf
+
+            # assign coefficients for resistive element
+            rterm = (r_cell * dn * dw)
+            denom = (eps_r / self.dt) + (df / (2 * rterm))
+
+            self.Ca[f"e{fa}_{wa}"][efield_idx] = ((eps_r / self.dt) - (df / (2 * rterm))) / denom
+            self.Cb[f"e{fa}_{wa}"][efield_idx] = 1 / (denom)
     
-                if (axis == 0):
-                    # don't include y endpoints in port, the edge of the ms traces use a edge correction method
-                    y0 += 1
-                    y1 -= 1
-                else:
-                    # don't include x endpoints in port, the edge of the ms traces use a edge correction method
-                    x0 += 1
-                    x1 -= 1
-
-                # width of resistor cell centered around the ez component, ez is on the x/y edges
-                dx_r = dx_h[x0-1: x1][..., None, None]
-                dy_r = dy_h[y0-1: y1][None, :, None]
-                # z axis is in center of cell
-                dz_r = dz[z0: z1][None, None]
-        
-                # epsilon of resistor cells
-                eps_r = self.eps_ez[x0: x1+1, y0: y1+1, z0: z1]
-
-                # number of components in the xy plane
-                n_xy = (eps_r.shape[0] * eps_r.shape[1])
-                # resistance of each cell is spilt so the combined resistance of all cells equals r0
-                r_cell = r0 * (n_xy) / eps_r.shape[2]
-        
-                rterm = (r_cell * dx_r * dy_r)
-                denom = (eps_r / self.dt) + (dz_r / (2 * rterm))
-
-                ez_idx = tuple([slice(x0, x1+1), slice(y0, y1+1), slice(z0_c, z1_c)])
-                
-                self.Ca["ez_x"][ez_idx] = ((eps_r / self.dt) - (dz_r / (2 * rterm))) / denom
-                self.Cb["ez_x"][ez_idx] = 1 / (denom)
-        
-                self.Ca["ez_y"][ez_idx] = ((eps_r / self.dt) - (dz_r / (2 * rterm))) / denom
-                self.Cb["ez_y"][ez_idx] = 1 / (denom)
-
-                # voltage source coefficient is divided by the number of z components so the total voltage across
-                # the port is Vs
-                self.ports[i] = dict(
-                    idx=ez_idx, Vs_a=-1 / (denom * rterm * eps_r.shape[2]), field="ez", axis=axis, r0=r0
+            self.Ca[f"e{fa}_{na}"][efield_idx] = ((eps_r / self.dt) - (df / (2 * rterm))) / denom
+            self.Cb[f"e{fa}_{na}"][efield_idx] = 1 / (denom)
+            
+            if port is not None:
+                # assign face as a port if specified. resistive element acts as the port termination.
+                # direction indicates the voltage integration direction from higher voltage to lower.
+                self.ports[port - 1] = dict(
+                    idx = efield_idx, 
+                    Vs_a = f_dir / (denom * rterm * nf), 
+                    field = f"e{fa}", 
+                    axis = n_axis, 
+                    r0 = r, 
+                    direction = f_dir
                 )
 
-                # add current probe of current in the termination, normal to the z-axis
-                fx0, fy0, fz0 = np.min(face.points, axis=0)
-                fx1, fy1, fz1 = np.max(face.points, axis=0)
-
-                iface_z = (fz1 + fz0) / 2
+                # add current probe of current around the termination. current face is normal to the 
+                # integration direction
+                fpos1 = np.min(face.points, axis=0)
+                fpos2 = np.max(face.points, axis=0)
+                # position of current surface along integration axis
+                field_loc = self.floc[f"e{fa}"][f_axis]
+                fpos_n = field_loc[int((p2 + p1)[f_axis] / 2)]
+                
+                # make the current face slightly larger than lumped element surface so it encloses the current
                 current_face = pv.Rectangle([
-                    [fx0 - 0.001, fy0 - 0.001, iface_z],
-                    [fx1 + 0.001, fy0 - 0.001, iface_z],
-                    [fx1 + 0.001, fy1 + 0.001, iface_z]
+                    build_idx(fpos1[n_axis] - 0.001, fpos1[w_axis] - 0.001, fpos_n),
+                    build_idx(fpos1[n_axis] - 0.001, fpos2[w_axis] + 0.001, fpos_n),
+                    build_idx(fpos1[n_axis] + 0.001, fpos2[w_axis] + 0.001, fpos_n),
                 ])
 
-                self.add_current_probe(f"port{i+1}", current_face)
+                self.add_current_probe(f"port{port}", current_face)
+
+
+
+            # # face is normal to the x-axis or y-axis, Resistor is represented by the Ez components
+            # if (axis == 0) or (axis == 1):
+    
+            #     if (axis == 0):
+            #         # don't include y endpoints in port, the edge of the ms traces use a edge correction method
+            #         y0 += 1
+            #         y1 -= 1
+            #     else:
+            #         # don't include x endpoints in port, the edge of the ms traces use a edge correction method
+            #         x0 += 1
+            #         x1 -= 1
+
+            #     # width of resistor cell centered around the ez component, ez is on the x/y edges
+            #     dx_r = dx_h[x0-1: x1][..., None, None]
+            #     dy_r = dy_h[y0-1: y1][None, :, None]
+            #     # z axis is in center of cell
+            #     dz_r = dz[z0: z1][None, None]
         
-            else:
-                raise NotImplementedError(f"Port face normal to the z-axis not implemented yet")
+            #     # epsilon of resistor cells
+            #     eps_r = self.eps_ez[x0: x1+1, y0: y1+1, z0: z1]
+
+            #     # number of components in the xy plane
+            #     n_xy = (eps_r.shape[0] * eps_r.shape[1])
+            #     # resistance of each cell is spilt so the combined resistance of all cells equals r0
+            #     r_cell = r0 * (n_xy) / eps_r.shape[2]
+        
+            #     rterm = (r_cell * dx_r * dy_r)
+            #     denom = (eps_r / self.dt) + (dz_r / (2 * rterm))
+
+            #     ez_idx = tuple([slice(x0, x1+1), slice(y0, y1+1), slice(z0_c, z1_c)])
+                
+            #     self.Ca["ez_x"][ez_idx] = ((eps_r / self.dt) - (dz_r / (2 * rterm))) / denom
+            #     self.Cb["ez_x"][ez_idx] = 1 / (denom)
+        
+            #     self.Ca["ez_y"][ez_idx] = ((eps_r / self.dt) - (dz_r / (2 * rterm))) / denom
+            #     self.Cb["ez_y"][ez_idx] = 1 / (denom)
+
+            #     # voltage source coefficient is divided by the number of z components so the total voltage across
+            #     # the port is Vs
+            #     self.ports[i] = dict(
+            #         idx=ez_idx, Vs_a=-1 / (denom * rterm * eps_r.shape[2]), field="ez", axis=axis, r0=r0
+            #     )
+
+            #     # add current probe of current in the termination, normal to the z-axis
+            #     fx0, fy0, fz0 = np.min(face.points, axis=0)
+            #     fx1, fy1, fz1 = np.max(face.points, axis=0)
+
+            #     iface_z = (fz1 + fz0) / 2
+            #     current_face = pv.Rectangle([
+            #         [fx0 - 0.001, fy0 - 0.001, iface_z],
+            #         [fx1 + 0.001, fy0 - 0.001, iface_z],
+            #         [fx1 + 0.001, fy1 + 0.001, iface_z]
+            #     ])
+
+            #     self.add_current_probe(f"port{i+1}", current_face)
+        
+            # else:
+            #     raise NotImplementedError(f"Port face normal to the z-axis not implemented yet")
 
 
     def _init_PML(self, side):
@@ -1423,9 +1541,9 @@ class FDTD_Solver():
         for name, cond in self.conductor.items():
             plotter.add_mesh(cond["obj"], **cond["style"])
 
-        # add ports
-        for p in self.port_face:
-            plotter.add_mesh(p["face"], color="pink", opacity=0.5)
+        # add lumped elements
+        for name, ele in self.lumped_element.items():
+            plotter.add_mesh(ele["obj"], color="pink", opacity=0.5)
 
         if show_probes:
             points = []
@@ -1521,25 +1639,31 @@ class FDTD_Solver():
         nports = len(self.ports)
         nfrequency = len(frequency)
 
-        z_idx = self.ports[source_port-1]["idx"][2]
+        src_port = self.ports[source_port-1]
+
+        field_idx = src_port["idx"]
+        field = src_port["field"]
 
         # source port applied voltage
-        src_applied = self.ports[source_port-1]["src"]
+        src_applied = src_port["src"]
 
+        # integration axis along field components
+        f_axis = dict(x=0, y=1, z=2)[field[1]]
+        # width of each field component along integration line, in meters
+        cell_w = conv.m_in(self.d_cells[f_axis][field_idx[f_axis]])
         # source port voltage at each component, shape is x, y, z, time
-        src_component_v = self.ports[source_port-1]["values"] * (conv.m_in(self.dz[z_idx])[None, None, :, None])
+        # broadcast cell widths across other axis (x,y,z,time)
+        cell_w_b = [None] * 4
+        cell_w_b[f_axis] = slice(None)
+        src_component_v = src_port["values"] * cell_w[tuple(cell_w_b)]
 
-        # add voltage along z
-        src_voltage = -np.sum(src_component_v, axis=2)
-        src_axis = self.ports[source_port-1]["axis"]
-        # number of cells along width of port face
-        src_width = src_component_v.shape[1 if src_axis == 0 else 0]
+        # add voltage along integration axis, remove unitary axis along port face normal
+        direction = src_port["direction"]
+        src_vp = direction * np.sum(src_component_v, axis=f_axis).squeeze()
 
         # average voltage across width of port
-        if src_width > 1:
-            src_vp = np.mean(src_voltage.squeeze(), axis=0)
-        else:
-            src_vp = src_voltage.squeeze()
+        if len(src_vp.shape) > 1:
+            src_vp = np.mean(src_vp, axis=0)
 
         # convert to frequency domain
         V_applied = utils.dtft(src_applied, frequency, 1 / self.dt, downsample)
@@ -1654,7 +1778,7 @@ class FDTD_Solver():
 
         # assign edge correction coefficents.
         # Comments are for a PEC edge along the x axis, normal to the z-axis, with the field axis along y
-        
+
         # correct Hz components that integrate the Ey component in the same plane as the PEC.
         # Both Hz and Ey are asymtotic so the correction factor cancels out on all components but the 
         # ex integration.
@@ -1987,7 +2111,7 @@ class FDTD_Solver():
 
 
         if gif_file:
-            plotter.open_gif(gif_file)
+            plotter.open_gif(gif_file, fps=15)
             for n in range(nframe):
                 for m, f in field_meshes:
                     m.point_data["values"][:] = f[n].flatten(order="F")
