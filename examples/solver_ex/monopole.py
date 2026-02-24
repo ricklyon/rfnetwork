@@ -53,14 +53,14 @@ port1_face = pv.Rectangle([
 s = rfn.FDTD_Solver(sbox)
 # s.add_dielectric("sub", substrate, er=1, style=dict(opacity=0.0))
 s.add_conductor(ms1_trace, style=dict(color="gold"))
-s.add_lumped_port(1, port1_face)
+s.add_lumped_port(1, port1_face, "z-")
 
 s.assign_PML_boundaries("x-", "x+", "y-", "y+", "z+", n_pml=5)
 
 self = s
 # having three cells in the PEC instead of 4 causes the edge correction to fail
 # s.init_mesh(d0 = 0.02, n0 = 3, d_pec = 0.01, n_min_pec=4, d_sub=0.01, n_min_sub=4, blend_pec=False)
-s.generate_mesh(d0 = 0.03, d_edge=0.005, z_bounds = [0.005, 0.03])
+s.generate_mesh(d0 = 0.03, d_edge=0.005)
 
 
 s.add_field_monitor("mon3", "ex", "z", 0.2, 15)

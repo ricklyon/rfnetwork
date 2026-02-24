@@ -215,7 +215,7 @@ s.add_lumped_port(4, port4_face, "z+", r0=100)
 
 
 # s.init_mesh(d0 = lam0/20, n0 = 2, d_pec = lam0/20, n_min_pec=4, d_sub=lam0/20, n_min_sub=4, blend_pec=True)
-s.generate_mesh(d0 = 0.02, d_edge = 0.005, z_bounds=[0.01, 0.01])
+s.generate_mesh(d0 = 0.02, d_edge = 0.005)
 
 
 

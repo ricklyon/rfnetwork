@@ -76,9 +76,8 @@ s.add_lumped_port(2, port2_face, "z-")
 s.assign_PML_boundaries("z+", n_pml=7)
 
 self = s
-# having three cells in the PEC instead of 4 causes the edge correction to fail
-# s.init_mesh(d0 = 0.02, n0 = 3, d_pec = 0.01, n_min_pec=4, d_sub=0.01, n_min_sub=4, blend_pec=False)
-s.generate_mesh(d0 = 0.02, d_edge=0.005, z_bounds = [0.005, 0.02])
+
+s.generate_mesh(d0 = 0.02, d_edge=0.005)
 
 
 s.add_field_monitor("mon1", "ez", "z", sub_h, 5)
