@@ -148,11 +148,11 @@ class FDTD_Solver():
         
         return tuple(idx)
     
-    def generate_mesh(self, d0: float, d_edge: float = None, z_bounds: float = None):
+    def generate_mesh(self, d0: float, d_edge: float = None):
         """
         
         """
-        self._init_grid(d0=d0, d_edge=d_edge, z_bounds=z_bounds)
+        self._init_grid(d0=d0, d_edge=d_edge)
         # init dielectrics sets the cell sigma and er but does not set the coefficients
         self._init_dielectrics()
         # initialize coefficients from the cell sigma and er set by the dielectrics
@@ -489,7 +489,7 @@ class FDTD_Solver():
 
         return all_points
 
-    def _init_grid(self, d0: float, d_edge: float = None, z_bounds: float = None):
+    def _init_grid(self, d0: float, d_edge: float = None):
         
         all_points = self._get_mesh_points(d_edge=d0 if d_edge is None else d_edge)
 
@@ -497,12 +497,6 @@ class FDTD_Solver():
             d0 = [d0] * 3
 
         dtype_ = np.float32
-        d_bounds = [[d0[i], d0[i]] for i in range(3)]
-
-        if z_bounds is not None:
-            d_bounds[2] = z_bounds
-
-        # mesh_cells_d = [np.diff(all_points[axis]) for axis in range(3)]
 
         # build a list of cell widths along each axis
         mesh_cells_d = [[], [], []]
@@ -548,9 +542,10 @@ class FDTD_Solver():
                     dprev = graded_subcells_d[i - 1][-1]
                 elif (i > 0):
                     dprev = np.clip(subcells_d[i - 1], 0, d0[axis] )
-                # If on the edge of the grid, match to the default d0
+                # If on the edge of the grid, match to d0 if the cell width is near d0, otherwise match
+                # to the edge width
                 else:
-                    dprev = d_bounds[axis][0]
+                    dprev = d0[axis] if d >= (d0[axis] * 0.9) else d_edge
 
                 # next cell width
                 if (i < len(subcells_d) - 1) and (graded_subcells_d[i + 1] is not None):
@@ -559,7 +554,7 @@ class FDTD_Solver():
                     dnext = np.clip(subcells_d[i + 1], 0, d0[axis] )
                 # If on the edge of the grid, match to the boundary width
                 else:
-                    dnext = d_bounds[axis][1]
+                    dnext = d0[axis] if d >= (d0[axis] * 0.9) else d_edge
 
                 # if cell is bounded by d0 cells on either side, divide the cell equally 
                 if all([(g / d0[axis] ) > 0.8 for g in [dprev, dnext, d]]):
@@ -925,9 +920,12 @@ class FDTD_Solver():
             # length of field components along the integration axis
             df = d_cells[f_axis][p1[f_axis]: p2[f_axis]]
 
-            # order the width, normal and integration axis so the result is xyz, and then broadcast the cell
-            # widths across each other to create a meshgrid the same shape as eps_r
-            dn, dw, df = np.meshgrid(*build_idx(dn, dw, df), indexing="ij")
+            # order the width, normal and integration axis so the input to np.meshgrid is xyz, and then broadcast 
+            # the cell widths across each other to create a meshgrid the same shape as eps_r.
+            # the order of the returned values is x, y, z since they were input in that order by build_index
+            dx, dy, dz = np.meshgrid(*build_idx(dn, dw, df), indexing="ij")
+            # convert back to dw, dn, df axis notation
+            dn, dw, df = [(dx, dy, dz)[ax] for ax in (n_axis, w_axis, f_axis)]
 
             # epsilon of resistor cells
             eps_field = [self.eps_ex, self.eps_ey, self.eps_ez][f_axis]
@@ -1442,9 +1440,9 @@ class FDTD_Solver():
 
             # add top and bottom probes
             for x in (hx_x):
-                self.probes[f"{name}_{i}"] = dict(field="hx", index=(x, y0, hx_z0), d=dx_h[x-1])
+                self.probes[f"{name}_{i}"] = dict(field="hx", index=(x, y0, hx_z0), d=-dx_h[x-1])
                 i += 1
-                self.probes[f"{name}_{i}"] = dict(field="hx", index=(x, y0, hx_z1), d=-dx_h[x-1])
+                self.probes[f"{name}_{i}"] = dict(field="hx", index=(x, y0, hx_z1), d=dx_h[x-1])
                 i += 1
 
         elif axis == 2: # current is along z axis
