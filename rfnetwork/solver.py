@@ -1299,6 +1299,7 @@ class FDTD_Solver():
             )
 
         if show_progress:
+            sys.stdout.flush()
             print(f"Running solver with {self.Nx * self.Ny * self.Nz / 1e3:.1f}k cells, and {Nt} time steps...")
             update_interval = int(Nt / 20)
             stime = time.time()
@@ -1367,6 +1368,7 @@ class FDTD_Solver():
         self.monitors[name] = dict(
             field=field, axis=axis_i, position=position, index=idx, n_step=n_step, shape=tuple(shape)
         )
+
 
 
     def add_current_probe(self, name: str, face: pv.PolyData):
@@ -1833,51 +1835,6 @@ class FDTD_Solver():
                 idx = build_idx(p2_i[e_axis], p1_i[f_axis], ni)
                 self.Db[f"h{fa}_{ea}1"][idx] *= CFe
 
-
-
-
-
-        # # edge is along Ex components
-        # if axis == 0:
-        #     # PEC is in the xy plane
-        #     if e_axis == 1:
-        #         # index of hz_y along integration line
-        #         y = y0 if e_dir else y0 - 1
-        #         # correct Hz components that integrate the Ey component in the same plane as the PEC.
-        #         # Both Hz and Ey are asymtotic so the correction factor cancels out on all components but the 
-        #         # ex integration.
-        #         self.Db["hz_y2"][x0: x1, y, z0] *= 1 / CFe
-        #         self.Db["hz_y1"][x0: x1, y, z0] *= 1 / CFe
-
-        #         # hz components integrating Ey on the end points of the edge
-        #         if x0 > 0:
-        #             self.Db["hz_x2"][x0-1, y, z0] *= CFe
-        #         if x1 < self.Db["hz_x1"].shape[0]:
-        #             self.Db["hz_x1"][x1, y, z0] *= CFe
-
-        #         # Correct Hx above and below the PEC plane that integrates Ey 
-        #         self.Db["hx_z2"][x0: x1+1, y, z0-1] *= CFe
-        #         self.Db["hx_z1"][x0: x1+1, y, z0] *= CFe
-
-        #         for z in [z0-1, z0]:
-        #             # Correct Hx on the sides of the Ez component 
-        #             self.Db["hx_y2"][x0: x1+1, y0-1, z] *= CFe
-        #             self.Db["hx_y1"][x0: x1+1, y0, z] *= CFe
-
-        #             # correct Hy components that integrate the Ez component below and above the edge 
-        #             self.Db["hy_z1"][x0: x1, y0, z] *= 1 / CFe
-        #             self.Db["hy_z2"][x0: x1, y0, z] *= 1 / CFe
-
-        #             # hy components integrating Ez on the end points of the edge
-        #             if x0 > 0:
-        #                 self.Db["hy_x2"][x0-1, y0, z] *= CFe
-        #             if x1 < self.Db["hy_x1"].shape[0]:
-        #                 self.Db["hy_x1"][x1, y0, z] *= CFe
-
-
-        ###################
-        # X Axis Edges
-        ###################
         # correct Hz components that use the Ey component in the same plane as the edge that points into the edge.
         # Hz in the same plane as the face. Both Hz and Ey are asymtotic so the correction factor cancels out
         # on all components but the ex integration.
@@ -1923,46 +1880,6 @@ class FDTD_Solver():
         #     for y in [y0-1, y1]:
         #         self.Cb["ey_z"][x0+1: x1, y, z0] *= 1 / CFh
 
-        # ###################
-        # # Y Axis Edges
-        # ###################
-        # # correct H components that use the Ex component in the same plane as the edge that points into the edge.
-        # # Hz is in the same plane as the face. Both Hz and Ex are asymtotic so the correction factor cancels out
-        # # on all components but the ex integration.
-        # x_sides = [x0-1, x1] if not x1_at_edge else [x0 - 1]
-        # for x in x_sides:
-        #     self.Db["hz_x2"][x, y0: y1, z0] *= 1 / CF
-        #     self.Db["hz_x1"][x, y0: y1, z0] *= 1 / CF
-        #     # hz components using Ex that are just past the face along the y direction
-        #     self.Db["hz_y2"][x, y0-1, z0] *= CF
-        #     self.Db["hz_y1"][x, y1, z0] *= CF
-        #     # Hy just below the Ex component
-        #     self.Db["hy_z2"][x, y0: y1+1, z0-1] *= CF
-        #     # Hy just above the Ex component
-        #     self.Db["hy_z1"][x, y0: y1+1, z0] *= CF
-
-        # # correct Hx components that use the Ez component below and above the edge 
-        # # Hx and Ez are both asymptotic and the correction factors cancel out
-        # for x in [x0, x1]:
-        #     self.Db["hx_z1"][x, y0: y1, z0-1] *= 1 / CF
-        #     self.Db["hx_z2"][x, y0: y1, z0-1] *= 1 / CF
-        #     self.Db["hx_z1"][x, y0: y1, z0] *= 1 / CF
-        #     self.Db["hx_z2"][x, y0: y1, z0] *= 1 / CF
-        #     # hx components just past the face along the y direction
-        #     self.Db["hx_y2"][x, y0-1, z0-1] *= CF
-        #     self.Db["hx_y2"][x, y0-1, z0] *= CF
-        #     self.Db["hx_y1"][x, y1, z0] *= CF
-        #     self.Db["hx_y1"][x, y1, z0-1] *= CF
-
-        # # correct Hy components just past the face in the x direction that use the Ez components under the edge
-        # for z in [z0-1, z0]:
-        #     self.Db["hy_x2"][x0-1, y0: y1+1, z] *= CF
-        #     self.Db["hy_x1"][x0, y0: y1+1, z] *= CF
-
-        #     self.Db["hy_x1"][x1-1, y0: y1+1, z] *= CF
-        #     if not x1_at_edge:
-        #         self.Db["hy_x1"][x1, y0: y1+1, z] *= CF
-
     
     def get_monitor_data(self, name):
         """
@@ -1970,6 +1887,7 @@ class FDTD_Solver():
         """
         monitor = self.monitors[name]
         values = monitor["values"]
+        field = monitor["field"]
         t_len = len(values) * self.dt * monitor["n_step"]
 
         time_values = np.arange(0, t_len, self.dt * monitor["n_step"], dtype=np.float64)
@@ -1978,7 +1896,7 @@ class FDTD_Solver():
         spatial_axis = [0, 1, 2]
         spatial_dims = ["x", "y", "z"]
         spatial_axis.pop(monitor["axis"])
-        spatial_coords = {spatial_dims[i]: self.floc[name][i] for i in spatial_axis}
+        spatial_coords = {spatial_dims[i]: self.floc[field][i] for i in spatial_axis}
 
         return ldarray(
             monitor["values"], 
