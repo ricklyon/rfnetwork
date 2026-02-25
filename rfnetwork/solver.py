@@ -4,6 +4,7 @@ import numpy as np
 import pyvista as pv
 from copy import copy
 from np_struct import ldarray
+import sys
 
 from rfnetwork import const, conv, utils, core
 
@@ -1153,7 +1154,7 @@ class FDTD_Solver():
         # normalize so amplitude is 1
         return (vsrc / np.max(np.abs(vsrc))).astype(np.float32)
 
-    def run(self, ports, v_waveforms, n_threads=4):
+    def run(self, ports, v_waveforms, n_threads=4, show_progress=True):
 
         if isinstance(ports, int):
             ports = [ports]
@@ -1297,10 +1298,17 @@ class FDTD_Solver():
                 )
             )
 
-        print(f"Running solver with {self.Nx * self.Ny * self.Nz / 1e3:.1f}k cells, and {Nt} time steps.")
-        stime = time.time()
-        core.core_func.solver_run(coefficients, probes, monitors, mem, Nx, Ny, Nz, Nt, n_threads)
-        print(f"Done in {time.time() - stime:.3f}s")
+        if show_progress:
+            print(f"Running solver with {self.Nx * self.Ny * self.Nz / 1e3:.1f}k cells, and {Nt} time steps...")
+            update_interval = int(Nt / 20)
+            stime = time.time()
+        else:
+            update_interval = 0
+
+        core.core_func.solver_run(coefficients, probes, monitors, mem, Nx, Ny, Nz, Nt, n_threads, update_interval)
+
+        if show_progress:
+            sys.stdout.write(f"\rDone in {time.time() - stime:.3f}s" + (" " * 20) + "\n")
 
         # move monitor values back to the class variable
         for i, (k, m) in enumerate(self.monitors.items()):

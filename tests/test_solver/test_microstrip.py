@@ -10,7 +10,7 @@ from parameterized import parameterized
 from itertools import permutations
 
 
-class TestSolverMicroStrip(unittest.TestCase):
+class TestMicroStrip(unittest.TestCase):
 
     @parameterized.expand(*[list(permutations([0, 1, 2], 3))])
     def test_ustrip_axis(self, len_axis, width_axis, normal_axis):
@@ -116,7 +116,7 @@ class TestSolverMicroStrip(unittest.TestCase):
         vsrc = 1e-2 * s.gaussian_source(width=80e-12, t0=80e-12, t_len=300e-12)
         frequency: np.ndarray = np.arange(f0 - 2e9, f0+2e9, 10e6)
 
-        s.run([1], [vsrc], n_threads=4)
+        s.run([1], [vsrc], n_threads=4, show_progress=False)
 
         sdata = s.get_sparameters(frequency, downsample=False)
         S11 = sdata[:, 0]

@@ -164,10 +164,10 @@ int solver_init_sources(PyObject * py_sources, int Nt);
 
 int solver_init_probes(PyObject * py_probes, int Nt);
 
-int solver_run(int Nt, int n_threads);
+int solver_run(int Nt, int n_threads, int update_interval);
 
 void solver_thread(int x_start, int x_stop, int Nt, int thread_idx);
-void solver_controller(int Nt, int n_threads);
+void solver_controller(int Nt, int n_threads, int update_interval);
 
 int solver_update_ex(int x_start, int x_stop);
 int solver_update_ey(int x_start, int x_stop);

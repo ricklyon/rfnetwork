@@ -494,7 +494,7 @@ int solver_init_probes(PyObject * py_probes, int Nt)
     return 0;
 }
 
-int solver_run(int Nt, int n_th)
+int solver_run(int Nt, int n_th, int update_interval)
 {
     n_threads = n_th;
     th_init = 0;
@@ -525,7 +525,7 @@ int solver_run(int Nt, int n_th)
     thread_data[n_threads+1].hz = mbuffer_allocate(Hz.Ny * Hz.Nz);
 
     // start controller thread
-    std::thread control_th = std::thread(solver_controller, Nt, n_threads);
+    std::thread control_th = std::thread(solver_controller, Nt, n_threads, update_interval);
 
     // divide up the x slices into batches for each thread. The slices indicate the cells to compute
     // values for. Components that have an extra index on the x axis (ey, ez, and hx) are not updated on the edges and 
@@ -561,15 +561,36 @@ int solver_run(int Nt, int n_th)
     return 0;
 }
 
+// ensures stdout is flushed so it works in jupyter notebooks
+void print_stdout(std::stringstream& msg) {
+    std::cout << msg.str();
+    std::cout.flush();
+}
 
-// thread responsible for synchronizing field update threads
-void solver_controller(int Nt, int n_threads)
+// send progress bar to stdout
+void print_progress(int n, int Nt)
 {
     std::stringstream msg;
-    // msg.str("");
-    // msg.clear();
-    // msg << "Controller Start... \n";
-    // std::cout << msg.str();
+    int percent_completed = ((n + 1) * 100 / Nt);
+    int n_dots = percent_completed / 5;
+    int n_space = 20 - n_dots;
+
+    msg << "\r|";
+    for (int i = 0; i < n_dots; ++i) {
+        msg << '.';
+    }
+    for (int i = 0; i < n_space; ++i) {
+        msg << ' ';
+    }
+
+    msg << "| " << percent_completed << "%  ";
+    print_stdout(msg);
+}
+
+// thread responsible for synchronizing field update threads
+void solver_controller(int Nt, int n_threads, int update_interval)
+{
+    std::stringstream msg;
 
     // wait until all threads have signaled they are done with memory allocation
     {
@@ -582,11 +603,11 @@ void solver_controller(int Nt, int n_threads)
         cv_th.notify_all();
     }
 
-    // msg.str("");
-    // msg.clear();
-    // msg << "Start Time Stepping... \n";
-    // std::cout << msg.str();
-
+    if (update_interval)
+    {
+        print_progress(0, Nt);
+    }
+    
     for (int n = 0; n < Nt; n++)
     {
         // wait until all threads have signaled they are done with e field updates
@@ -615,6 +636,12 @@ void solver_controller(int Nt, int n_threads)
             cv_th.notify_all();
             cv.wait(lock, [n_threads] { return h_updates.load() == n_threads; });
         }
+
+        // write update
+        if ((update_interval) && ((n % update_interval) == 0))
+        {
+            print_progress(n, Nt);
+        }
     }
 
     // send a final notification that h field updates are complete
@@ -627,21 +654,24 @@ void solver_controller(int Nt, int n_threads)
         cv_th.notify_all();
     }
 
+    if (update_interval > 0) 
+    {
+        print_progress(Nt, Nt);
+    }
+
+
 }
 
 void solver_thread(int x_start, int x_stop, int Nt, int thread_idx)
 {
     // each grid cell contains the ex, ey, hz components in the middle of the x axis of the cell, and the
-    // ey, ez, hx components on the RIGHT side of the cell. The first cell does not update the ey, ez, hx compoennts
+    // ey, ez, hx components on the RIGHT side of the cell. The first cell does not update the ey, ez, hx components
     // on the left
 
     // x_stop is non-inclusive
 
     std::stringstream msg;
-    // msg << "Starting Thread " << thread_idx << " " << x_start << " " << x_stop << "\n";
-    // std::cout << msg.str();
 
-    // long long k = 0;
     int x_offset;
     // number of updated field components
     int Nx = x_stop - x_start;

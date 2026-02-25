@@ -358,9 +358,12 @@ static PyObject* solver_run(PyObject* self, PyObject* args) {
     int Nz;
     int Nt;
     int n_threads;
+    int update_interval;
 
     // Parse arguments: expecting a single Python object
-    if (!PyArg_ParseTuple(args, "OOOOIIIII", &coefficients, &probes, &monitors, &mem, &Nx, &Ny, &Nz, &Nt, &n_threads)) {
+    if (!PyArg_ParseTuple(
+        args, "OOOOIIIIII", &coefficients, &probes, &monitors, &mem, &Nx, &Ny, &Nz, &Nt, &n_threads, &update_interval
+    )) {
         return PyLong_FromLong(1);
     }
 
@@ -383,7 +386,7 @@ static PyObject* solver_run(PyObject* self, PyObject* args) {
     solver_init_monitors(monitors, Nt);
     solver_init_probes(probes, Nt);
 
-    solver_run(Nt, n_threads);
+    solver_run(Nt, n_threads, update_interval);
 
     return PyLong_FromLong(0);
 }
