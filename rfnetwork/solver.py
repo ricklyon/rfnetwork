@@ -984,67 +984,6 @@ class FDTD_Solver():
                 self.add_current_probe(f"port{port}", current_face)
 
 
-
-            # # face is normal to the x-axis or y-axis, Resistor is represented by the Ez components
-            # if (axis == 0) or (axis == 1):
-    
-            #     if (axis == 0):
-            #         # don't include y endpoints in port, the edge of the ms traces use a edge correction method
-            #         y0 += 1
-            #         y1 -= 1
-            #     else:
-            #         # don't include x endpoints in port, the edge of the ms traces use a edge correction method
-            #         x0 += 1
-            #         x1 -= 1
-
-            #     # width of resistor cell centered around the ez component, ez is on the x/y edges
-            #     dx_r = dx_h[x0-1: x1][..., None, None]
-            #     dy_r = dy_h[y0-1: y1][None, :, None]
-            #     # z axis is in center of cell
-            #     dz_r = dz[z0: z1][None, None]
-        
-            #     # epsilon of resistor cells
-            #     eps_r = self.eps_ez[x0: x1+1, y0: y1+1, z0: z1]
-
-            #     # number of components in the xy plane
-            #     n_xy = (eps_r.shape[0] * eps_r.shape[1])
-            #     # resistance of each cell is spilt so the combined resistance of all cells equals r0
-            #     r_cell = r0 * (n_xy) / eps_r.shape[2]
-        
-            #     rterm = (r_cell * dx_r * dy_r)
-            #     denom = (eps_r / self.dt) + (dz_r / (2 * rterm))
-
-            #     ez_idx = tuple([slice(x0, x1+1), slice(y0, y1+1), slice(z0_c, z1_c)])
-                
-            #     self.Ca["ez_x"][ez_idx] = ((eps_r / self.dt) - (dz_r / (2 * rterm))) / denom
-            #     self.Cb["ez_x"][ez_idx] = 1 / (denom)
-        
-            #     self.Ca["ez_y"][ez_idx] = ((eps_r / self.dt) - (dz_r / (2 * rterm))) / denom
-            #     self.Cb["ez_y"][ez_idx] = 1 / (denom)
-
-            #     # voltage source coefficient is divided by the number of z components so the total voltage across
-            #     # the port is Vs
-            #     self.ports[i] = dict(
-            #         idx=ez_idx, Vs_a=-1 / (denom * rterm * eps_r.shape[2]), field="ez", axis=axis, r0=r0
-            #     )
-
-            #     # add current probe of current in the termination, normal to the z-axis
-            #     fx0, fy0, fz0 = np.min(face.points, axis=0)
-            #     fx1, fy1, fz1 = np.max(face.points, axis=0)
-
-            #     iface_z = (fz1 + fz0) / 2
-            #     current_face = pv.Rectangle([
-            #         [fx0 - 0.001, fy0 - 0.001, iface_z],
-            #         [fx1 + 0.001, fy0 - 0.001, iface_z],
-            #         [fx1 + 0.001, fy1 + 0.001, iface_z]
-            #     ])
-
-            #     self.add_current_probe(f"port{i+1}", current_face)
-        
-            # else:
-            #     raise NotImplementedError(f"Port face normal to the z-axis not implemented yet")
-
-
     def _init_PML(self, side):
         """
         Add PML layer to the top face of the solution box.
@@ -1339,7 +1278,7 @@ class FDTD_Solver():
         Parameters
         ----------
         name : str
-        field : {'ex', 'ey', 'ez', 'hx', 'hy', 'hz'}
+        field : {'ex', 'ey', 'ez', 'e_total', 'hx', 'hy', 'hz'}
         axis : {'x', 'y', 'z'}
         position : float
             position on axis of the slice
@@ -1347,27 +1286,38 @@ class FDTD_Solver():
             number of time steps between each capture.
         """
 
-        if field not in self.fshape.keys():
-            raise ValueError(f"Unsupported field: {field}. Expecting one of: {tuple(self.fshape.keys())}")
+        supported_fields = tuple(self.fshape.keys()) + ("e_total",)
+
+        if field not in supported_fields:
+            raise ValueError(f"Unsupported field: {field}. Expecting one of: {supported_fields}")
         if axis not in ('x', 'y', 'z'):
             raise ValueError(f"Unsupported axis: {axis}")
 
         # get the spatial shape of the field slice
         axis_i = dict(x=0, y=1, z=2)[axis]
-        shape = list(self.fshape[field])
-        axis_len = shape.pop(axis_i)
 
-        # convert position to field index
-        full_pos = [0] * 3
-        full_pos[axis_i] = position
-        idx = int(self.field_pos_to_idx(full_pos, field)[axis_i])
+        # create three seperate monitors for each component if monitor is for the total field
+        if field == "e_total":
+            field = ("ex", "ey", "ez")
+            name = ([name + "_" + f for f in ("x", "y", "z")])
+        else:
+            field, name = [field], [name]
 
-        if idx >= (axis_len - 1):
-            raise ValueError("Field position out of bounds")
+        for n, f in zip(name, field):
+            shape = list(self.fshape[f])
+            axis_len = shape.pop(axis_i)
 
-        self.monitors[name] = dict(
-            field=field, axis=axis_i, position=position, index=idx, n_step=n_step, shape=tuple(shape)
-        )
+            # convert position along axis to field index
+            full_pos = [0] * 3
+            full_pos[axis_i] = position
+            idx = int(self.field_pos_to_idx(full_pos, f)[axis_i])
+
+            if idx >= (axis_len - 1):
+                raise ValueError("Field position out of bounds")
+
+            self.monitors[n] = dict(
+                field=f, axis=axis_i, position=position, index=idx, n_step=n_step, shape=tuple(shape)
+            )
 
 
 
@@ -1883,25 +1833,78 @@ class FDTD_Solver():
     
     def get_monitor_data(self, name):
         """
-        
+        Compile field monitor data.
         """
-        monitor = self.monitors[name]
-        values = monitor["values"]
-        field = monitor["field"]
-        t_len = len(values) * self.dt * monitor["n_step"]
+        # component field names
+        c_names = [f"{name}_{a}" for a in ("x", "y", "z")]
+        # is there monitor data for all three rectangular components
+        is_total_field = all([n in self.monitors.keys() for n in c_names])
 
-        time_values = np.arange(0, t_len, self.dt * monitor["n_step"], dtype=np.float64)
-
-        # build coordinates in inches for the two spatial dimensions of the slice
+        monitor = self.monitors[c_names[0]] if is_total_field else self.monitors[name]
+        # get the two component axis on the monitor plane
         spatial_axis = [0, 1, 2]
         spatial_dims = ["x", "y", "z"]
         spatial_axis.pop(monitor["axis"])
-        spatial_coords = {spatial_dims[i]: self.floc[field][i] for i in spatial_axis}
 
-        return ldarray(
-            monitor["values"], 
-            coords=dict(time=time_values, **spatial_coords)
-        )
+        # axis normal to monitor plane
+        axis = monitor["axis"]
+        axis_str = ["x", "y", "z"][axis]
+
+        # time vector
+        t_len = len(monitor["values"]) * self.dt * monitor["n_step"]
+        time_values = np.arange(0, t_len, self.dt * monitor["n_step"], dtype=np.float64)
+        
+        # combine component vectors into a single matrix
+        if is_total_field:
+            e_xyz = [self.monitors[n]["values"] for n in c_names]
+            # order the fields by the components in the surface, followed by the normal component.
+            # a surface on xy will be ordered x, y, z. xz will be ordered x, z, y., yz will be ordered, y, z, x.
+            axis_surf_ordered = spatial_axis + [axis]
+            e1, e2, e3 = [e_xyz[a] for a in axis_surf_ordered]
+
+            # average components on the xy plane to get the fields at the cell corners.
+            # fields at the grid edge are dropped
+            e1 = (e1[:, 1:, 1:-1] + e1[:, :-1, 1:-1]) / 2
+            e2 = (e2[:, 1:-1, 1:] + e2[:, 1:-1, :-1]) / 2
+            e3 = (e3[:, 1:-1, 1:-1])
+
+            # order back to x, y, z
+            e_xyz = [(e1, e2, e3)[a] for a in axis_surf_ordered]
+
+            # if axis_str == "z":
+            #     ex = (ex[:, 1:, 1:-1] + ex[:, :-1, 1:-1]) / 2
+            #     ey = (ey[:, 1:-1, 1:] + ey[:, 1:-1, :-1]) / 2
+            #     ez = (ez[:, 1:-1, 1:-1])
+            # # average components on the xz plane to get the fields on the corners
+            # elif axis_str == "y":
+            #     ex = (ex[:, 1:, 1:-1] + ex[:, :-1, 1:-1]) / 2
+            #     ey = (ey[:, 1:-1, 1:-1])
+            #     ez = (ez[:, 1:-1, 1:] + ez[:, 1:-1, :-1]) / 2
+            # # average components on the yz plane
+            # else: # axis == "x":
+            #     ex = (ex[:, 1:-1, 1:-1])
+            #     ey = (ex[:, 1:, 1:-1] + ex[:, :-1, 1:-1]) / 2
+            #     ez = (ez[:, 1:-1, 1:] + ez[:, 1:-1, :-1]) / 2
+
+            # Assign the spatial coordinates of the grid corners.
+            # Use the coordinates from the component normal to the monitor surface since it lies on the corners.
+            spatial_coords = {spatial_dims[i]: self.floc[f"e{axis_str}"][i][1:-1] for i in spatial_axis}
+
+            return ldarray(
+                e_xyz, 
+                coords=dict(component=("x", "y", "z"), time=time_values, **spatial_coords)
+            )
+
+        # compile a single component field
+        else:
+            field = monitor["field"]
+            # build coordinates in inches for the two spatial dimensions of the slice
+            spatial_coords = {spatial_dims[i]: self.floc[field][i] for i in spatial_axis}
+
+            return ldarray(
+                monitor["values"], 
+                coords=dict(time=time_values, **spatial_coords)
+            )
 
  
     
@@ -1921,60 +1924,131 @@ class FDTD_Solver():
 
         monitor_name = np.atleast_1d(monitor_name)
         plotter = self.render()
-        field_meshes = []
-        field_actors = []
+        field_mesh = []
 
-        for i, m_name in enumerate(monitor_name):
-
-            monitor = self.monitors[m_name]
-            
-            field = monitor["values"]
-            axis = monitor["axis"]
-            
-            n_step = monitor["n_step"]
-
-            slc = [slice(None)] * 3
-            slc[axis] = monitor["index"]
-
-            field = np.where(np.abs(field) < 1e-12, 1e-12, field)
-            if linear:
-                field_v = field
-            else:
-                field_v = 20 * np.log10(np.abs(field))
-
-            if vmax is None:
-                vmax = np.nanmax(field_v)
-            if vmin is None:
-                vmin = -vmax if linear else vmax - 50
-
-            field_v = np.clip(field_v, vmin, vmax).reshape(len(field), -1, order="F")
+        for i, name in enumerate(monitor_name):
         
-            nframe = len(field)
 
-            floc_in = self.floc[monitor["field"]]
+            # component field names
+            c_names = [f"{name}_{a}" for a in ("x", "y", "z")]
+            # is there monitor data for all three rectangular components
+            is_total_field = all([n in self.monitors.keys() for n in c_names])
 
-            # slice each axis of grid locations, forcing integer indices into slices
-            g = [floc_in[i][s] if isinstance(s, slice) else floc_in[i][s: s+1] for i, s in enumerate(slc)]
+            monitor = self.monitors[c_names[0]] if is_total_field else self.monitors[name]
+            axis = monitor["axis"]
+            n_step = monitor["n_step"]
+            axis_pos = monitor["position"]
+
+            field = self.get_monitor_data(name)
+
+            # get the two component axis on the monitor plane
+            surf_axis = [0, 1, 2]
+            surf_axis.pop(monitor["axis"])
+            axis_ordered = surf_axis + [axis]
+
+            if axis == 2: # xy plane
+                floc_in = (field.coords["x"], field.coords["y"], [monitor["position"]])
+            elif axis == 1: # xz plane
+                floc_in = (field.coords["x"], monitor["position"], field.coords["z"])
+            else: # yz plane
+                floc_in = (monitor["position"], field.coords["y"], field.coords["z"])
+
+
+            if is_total_field:
+                
+                # meshgrid of coordinates on the surface
+                surf_coords_m = np.meshgrid(*list(field.coords.values())[-2:], indexing="ij")
+                
+                n_coords_m = np.ones(surf_coords_m[0].size) * axis_pos
+                # all coordinate points
+                coords_xyz = [(*surf_coords_m, n_coords_m)[a] for a in axis_ordered]
+
+                points = np.vstack([a.ravel() for a in coords_xyz]).T
+
+                # flatten spatial dimensions to create a list of vectors the same shape as points
+                field_v = np.where(np.abs(field) < 1e-12, 1e-12, field)
+                vectors = np.reshape(field_v, (*field.shape[0:2], -1 ))
+                # move xyz axis to the end, now shaped time, flattened spatial points, cartesian xyz
+                vectors = np.transpose(vectors, (1, 2, 0))
+
+                vectors_db = conv.db20_lin(vectors)
+
+                mag = np.sqrt(np.sum(vectors**2, axis=-1))
+                mag_db = conv.db20_lin(mag)
+
+                unit_vectors = (vectors) / mag[..., None]
+
+                if vmax is None:
+                    vmax = np.nanmax(mag_db)
+                if vmin is None:
+                    vmin = vmax - 50
+
+                # scale magnitudes so that 0 length is at the minimum db value
+                mag_db_s = np.clip(mag_db, vmin, vmax) - vmin
+                vectors_db = unit_vectors * mag_db_s[..., None]
+
+                # scale to fit on grid
+                vectors_db_grid = vectors_db * 0.01 / np.max(vectors_db)
+
+                # flatten scalar values
+                mag_db = np.clip(mag_db, vmin, vmax).reshape(len(field[0]), -1, order="F")
+
+                mesh = pv.vector_poly_data(points, vectors_db_grid[60])
+                # mesh = pv.PolyData(points)
+                # assign colormap values
+                # mesh.point_data['values'] = np.clip(mag_db[60], vmin, vmax).flatten(order="F")
+                mesh.point_data['values'] = mag_db[60]
+                # # assign vector direction
+                # mesh["vectors"] = vectors_db_grid[0]
+
+                arrows = mesh.glyph(orient='vectors', scale='mag')
+
+                actor = plotter.add_mesh(
+                    arrows, 
+                    scalars="values", 
+                    cmap="jet",
+                    clim=[vmin, vmax], 
+                    show_scalar_bar=False, 
+                )
+
+                field_mesh += [(actor, mesh, mag_db, arrows, vectors_db_grid)]
+                nframe = len(field_v[0])
+
+
+            else:
+                if linear:
+                    field_v = field
+                else:
+                    field = np.where(np.abs(field) < 1e-12, 1e-12, field)
+                    field_v = 20 * np.log10(np.abs(field))
+
+                if vmax is None:
+                    vmax = np.nanmax(field_v)
+                if vmin is None:
+                    vmin = -vmax if linear else vmax - 50
+
+                field_v = np.clip(field_v, vmin, vmax).reshape(len(field), -1, order="F")
             
-            fmesh = pv.RectilinearGrid(*g)
-            fmesh.point_data['values'] = field_v[0]
-            
-            actor = plotter.add_mesh(
-                fmesh, 
-                cmap=cmap, 
-                scalars="values", 
-                clim=[vmin, vmax], 
-                show_scalar_bar=False, 
-                opacity=opacity[i],
-                interpolate_before_map=style == "surface",
-                render_points_as_spheres=True,
-                style=style,
-                lighting=False,
-                point_size=10
-            )
+                fmesh = pv.RectilinearGrid(*floc_in)
+                fmesh.point_data['values'] = field_v[0]
+                
+                actor = plotter.add_mesh(
+                    fmesh, 
+                    cmap=cmap, 
+                    scalars="values", 
+                    clim=[vmin, vmax], 
+                    show_scalar_bar=False, 
+                    opacity=opacity[i],
+                    interpolate_before_map=style == "surface",
+                    render_points_as_spheres=True,
+                    style=style,
+                    lighting=False,
+                    point_size=10
+                )
 
-            field_meshes += [(fmesh, field_v)]
-            field_actors += [actor]
+                field_mesh += [(actor, mesh, field_v, None, None)]
+
+                nframe = len(field_v)
 
         plotter.add_axes()
         plotter.camera_position = view
@@ -1995,8 +2069,25 @@ class FDTD_Solver():
 
             self.slider_value = n
 
-            for m, f in field_meshes:
-                m.point_data["values"][:] = f[n]
+            for (actor, mesh, scalars, arrows, vectors) in field_mesh:
+            
+                if vectors is not None:
+
+                    mag = np.sqrt(np.sum(vectors[n]**2, axis=-1))
+
+                    mesh["vectors"][:] = vectors[n]
+                    mesh["mag"][:] = mag
+                    mesh.point_data["values"][:] = scalars[n]
+
+                    arrows.copy_from(mesh.glyph(orient='vectors', scale='mag'))
+
+                    arrows.set_active_scalars("values")
+                    # arrows["values"][:] = scalars[n]
+
+                else:
+                    mesh.point_data["values"][:] = scalars[n]
+
+
           
         self.slider_value = Nt // 2
 
@@ -2037,8 +2128,24 @@ class FDTD_Solver():
         if gif_file:
             plotter.open_gif(gif_file, fps=15)
             for n in range(nframe):
-                for m, f in field_meshes:
-                    m.point_data["values"][:] = f[n].flatten(order="F")
+
+                for (actor, mesh, scalars, arrows, vectors) in field_mesh:
+                
+                    if vectors is not None:
+
+                        mag = np.sqrt(np.sum(vectors[n]**2, axis=-1))
+
+                        mesh["vectors"][:] = vectors[n]
+                        mesh["mag"][:] = mag
+                        mesh.point_data["values"][:] = scalars[n]
+
+                        arrows.copy_from(mesh.glyph(orient='vectors', scale='mag'))
+
+                        arrows.set_active_scalars("values")
+                        # arrows["values"][:] = scalars[n]
+
+                    else:
+                        mesh.point_data["values"][:] = scalars[n]
                     
                 plotter.add_title(f"n={n * n_step}")
                 # plotter.render()

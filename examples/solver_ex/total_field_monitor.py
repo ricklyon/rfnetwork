@@ -88,85 +88,77 @@ p2 = (ms_x[1], ms1_y - ms_w/2, sub_h)
 s.edge_correction(p1, p2, "y-")
 
 # total field monitor
+self = s
 
-s.add_field_monitor("mon1_ex", "ex", "z", sub_h, 10)
-s.add_field_monitor("mon1_ey", "ey", "z", sub_h, 10)
-s.add_field_monitor("mon1_ez", "ez", "z", sub_h, 10)
+s.add_field_monitor("mon1", "e_total", "z", sub_h, 10)
 
 s.add_current_probe("c1", current_face)
 s.add_line_probe("v1", "ez", voltage_line1)
 s.add_line_probe("v2", "ez", voltage_line2)
 
 
-plotter = s.render(show_probes=True)
-plotter.camera_position = "yz"
-plotter.show()
+# plotter = s.render(show_probes=True)
+# plotter.camera_position = "yz"
+# plotter.show()
 
 f0 = 10e9
-pulse_n = 1600
-# width of half pulse in time
-t_half = (s.dt * 250)
-# center of the pulse in time
-t0 = (s.dt * 500)
 
-t = np.linspace(0, s.dt * pulse_n, pulse_n)
-vsrc = 1e-2 * (np.sin(2* np.pi * f0 * (t)) * np.exp(-((t - t0) / t_half)**2)).astype(np.float32)
-# plt.plot(vsrc)
-
+vsrc = 1e-2 * self.gaussian_modulated_source(f0, width=500e-12, t0=250e-12, t_len=500e-12)
+plt.plot(vsrc)
 frequency: np.ndarray = np.arange(5e9, 15e9, 10e6)
 
 s.run([1], [vsrc], n_threads=4)
 
 self = s
+
 sdata = s.get_sparameters(frequency)
 S11 = sdata[:, 0]
 
-ex = s.get_monitor_data("mon1_ex")
-ey = s.get_monitor_data("mon1_ey")
-ez = s.get_monitor_data("mon1_ez")
+e_tot = s.get_monitor_data("mon1")
 
-t = 60
-ex = (ex[t, 1:, 1:-1] + ex[t, :-1, 1:-1]) / 2
-ey = (ey[t, 1:-1, 1:] + ey[t, 1:-1, :-1]) / 2
-ez = (ez[t, 1:-1, 1:-1])
+monitor_name = "mon1"
 
-z = sub_h
+plotter = self.plot_monitor("mon1", gif_file="fields.gif")
+# plotter.show()
 
 
-
-# total field monitor
-x, y = np.meshgrid(ez.coords["x"], ez.coords["y"], indexing="ij")
-points = np.vstack((x.ravel(), y.ravel(), np.ones(x.size) * sub_h)).T
-u = x / np.sqrt(x**2 + y**2)
-v = y / np.sqrt(x**2 + y**2)
-vectors = np.vstack((ex.ravel(), ey.ravel(), ez.ravel())).T
-
-vectors_db = conv.db20_lin(vectors)
-
-mag = np.sqrt(np.sum(vectors**2, axis=1))
-mag_db = conv.db20_lin(mag)
-
-vectors_unit = (vectors) / mag[:, None]
-# np.sqrt(np.sum(vectors_unit**2, axis=1))
+# z = sub_h
 
 
-rmin = -20
-rmax = 30
-mag_db_s = np.clip(mag_db, rmin, rmax) - rmin
 
-vectors_db = vectors_unit * mag_db_s[:, None]
+# # total field monitor
+# x, y = np.meshgrid(ez.coords["x"], ez.coords["y"], indexing="ij")
+# points = np.vstack((x.ravel(), y.ravel(), np.ones(x.size) * sub_h)).T
+# # u = x / np.sqrt(x**2 + y**2)
+# # v = y / np.sqrt(x**2 + y**2)
+# vectors = np.vstack((ex.ravel(), ey.ravel(), ez.ravel())).T
 
-# scale to fit on grid
-vectors_db_grid = vectors_db * 0.01 / np.max(vectors_db)
+# vectors_db = conv.db20_lin(vectors)
 
-pdata = pv.vector_poly_data(points, vectors_db_grid)
-pdata.point_data['values'] = np.clip(mag_db, rmin, rmax).flatten(order="F")
+# mag = np.sqrt(np.sum(vectors**2, axis=1))
+# mag_db = conv.db20_lin(mag)
 
-plotter = s.render(show_probes=False)
-
-arrows = pdata.glyph(orient='vectors', scale='mag')
+# vectors_unit = (vectors) / mag[:, None]
+# # np.sqrt(np.sum(vectors_unit**2, axis=1))
 
 
-plotter.add_mesh(arrows, scalars="values", cmap="jet")
-plotter.show()
+# rmin = -20
+# rmax = 30
+# mag_db_s = np.clip(mag_db, rmin, rmax) - rmin
+
+# vectors_db = vectors_unit * mag_db_s[:, None]
+
+# # scale to fit on grid
+# vectors_db_grid = vectors_db * 0.01 / np.max(vectors_db)
+
+# pdata = pv.vector_poly_data(points, vectors_db_grid)
+# pdata.point_data['values'] = np.clip(mag_db, rmin, rmax).flatten(order="F")
+
+# plotter = s.render(show_probes=False)
+
+# arrows = pdata.glyph(orient='vectors', scale='mag')
+
+
+# plotter.add_mesh(arrows, scalars="values", cmap="jet")
+# plotter.show()
 
