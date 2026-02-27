@@ -30,7 +30,6 @@ class FDTD_Solver():
         self.monitors=dict()
         self.probes=dict()
         
-        self.slider_value = 0
         self.n_pml = None
         self._auto_name_counter = 0
 
@@ -40,10 +39,33 @@ class FDTD_Solver():
         self._places = 5 # hundredth of a mil
         self._tol = 1 / (10 ** self._places)
 
+        self._meshed = False
+        self._solved = False
+
+    def invalidate_mesh(self):
+        self._meshed = False
+        self.invalidate_solution()
+
+    def invalidate_solution(self):
+        self._solved = False
+
+    def check_mesh(self):
+        """ Raise error if model is not meshed yet. """
+
+        if not self._meshed:
+            raise RuntimeError("Mesh has been invalidated or has not been created yet.")
+        
+    def check_solution(self):
+        """ Raise error if model is not solved yet. """
+        
+        if not self._solved:
+            raise RuntimeError("Solution has been invalidated or model has not been solved yet.")
 
     def _add_object(self, group, objects, properties, name: str = None):
         """
         """
+        self.invalidate_mesh()
+
         # cast as iterable 
         if not isinstance(objects, (tuple, list, np.ndarray)):
             objects = [objects]
@@ -92,6 +114,7 @@ class FDTD_Solver():
         """
         Attach a resistive element to a face
         """
+        
         self._add_object(
             self.lumped_element, 
             face, 
@@ -101,13 +124,16 @@ class FDTD_Solver():
 
     def assign_PML_boundaries(self, *sides: str, n_pml: float = 10):
         """
-        Assign a PML boundary to sides of the solve box.
+        Assign a PML boundary to sides of the solve box. All sides must have the same number of PML cells.
 
         Parameters
         ----------
         sides : list, str
             Valid values are ("x+", "x-", "y+", "y-", "z+", "z-",)
+        n_pml : int, default: 10
+            number of PML cells.
         """
+        self.invalidate_mesh()
 
         valid_sides = ("x+", "x-", "y+", "y-", "z+", "z-")
         if any([s not in valid_sides for s in sides]):
@@ -121,6 +147,7 @@ class FDTD_Solver():
         Returns the index of the grid edge or cell center that is directly on or just past (in +x, +y and +z directions) 
         the given position.
         """
+        self.check_mesh()
         idx = []
         mode = [mode] * 3 if isinstance(mode, str) else mode
         
@@ -138,6 +165,9 @@ class FDTD_Solver():
         Returns the index of the field component that is directly on or just past (in +x, +y and +z directions) 
         the given grid position.
         """
+
+        self.check_mesh()
+        
         floc = self.floc[field]
 
         idx = []
@@ -151,8 +181,19 @@ class FDTD_Solver():
     
     def generate_mesh(self, d0: float, d_edge: float = None):
         """
-        
+        Generate the grid and FDTD for the model geometry.
+
+        Parameters
+        ----------
+        d0 : float
+            nominal cell width, inches. This cell width is used in open regions far from geometry features.
+        d_edge : float, optional
+            cell width 
         """
+
+        self._meshed = True
+        self._solved = False
+
         self._init_grid(d0=d0, d_edge=d_edge)
         # init dielectrics sets the cell sigma and er but does not set the coefficients
         self._init_dielectrics()
@@ -230,7 +271,6 @@ class FDTD_Solver():
 
         return faces if group_faces else faces[0]
 
-    
 
     def get_object_vertices(self, obj, group_faces: bool = True) -> list:
         """
@@ -273,8 +313,7 @@ class FDTD_Solver():
 
     def is_point_in_surface(self, points, obj, tolerance=0.0005):
         """
-        Returns an array the same shape as point with each value set to True if point is inside the object in the xy
-        plane. Object must be sliced first in the xy plane.
+        Returns an array the same shape as point with each value set to True if point is inside the 2D surface
         """
 
         points = np.atleast_2d(points)
@@ -392,7 +431,7 @@ class FDTD_Solver():
 
     def _get_mesh_points(self, d_edge: float):
         """
-        Initialize the spatial grid.
+        Compile all points defined by model geometry, as well as edge cells around geometry features.
         """
 
         # conductor objects
@@ -491,6 +530,10 @@ class FDTD_Solver():
         return all_points
 
     def _init_grid(self, d0: float, d_edge: float = None):
+        """ Create model grid. """
+        
+        if d_edge is not None and d_edge > (d0 / 1.5):
+            raise ValueError("d_edge must be less than d0.")
         
         all_points = self._get_mesh_points(d_edge=d0 if d_edge is None else d_edge)
 
@@ -988,6 +1031,7 @@ class FDTD_Solver():
         """
         Add PML layer to the top face of the solution box.
         """
+
         n_pml = self.n_pml
 
         axis = side[0]
@@ -1094,6 +1138,8 @@ class FDTD_Solver():
         return (vsrc / np.max(np.abs(vsrc))).astype(np.float32)
 
     def run(self, ports, v_waveforms, n_threads=4, show_progress=True):
+
+        self.check_mesh()
 
         if isinstance(ports, int):
             ports = [ports]
@@ -1269,6 +1315,8 @@ class FDTD_Solver():
         # move probe values to the class variable
         for i, (k, p) in enumerate(self.probes.items()):
             self.probes[k]["values"] = probes[i + cur_source]["values"]
+
+        self._solved = True
 
 
     def add_field_monitor(self, name: str, field: str, axis: str, position: float, n_step: int):
@@ -1476,10 +1524,11 @@ class FDTD_Solver():
             self.probes[f"{name}_{i}"] = dict(field=field, index=(idx), d=direction * conv.m_in(cw))
         
         
-    def render(self, show_probes=False, point_size=15) -> pv.Plotter:
+    def render(self, show_probes: bool = False, point_size=15) -> pv.Plotter:
         """
         Plot the model geometry
         """
+        self.check_mesh()
 
         gx, gy, gz = self.g_edges
         gx_h, gy_h, gz_h = self.g_cells
@@ -1528,11 +1577,28 @@ class FDTD_Solver():
         return plotter
 
     def plot_coefficients(
-        self, field, value, axis, position, vmin=None, vmax=None, opacity=1, cmap="jet", point_size=10, normalization=None
+        self, 
+        field, 
+        value, 
+        axis, 
+        position, 
+        vmin=None, 
+        vmax=None, 
+        opacity=1, 
+        cmap="jet", 
+        point_size=10, 
+        normalization=None
     ):
-            
+        """
+        Plot FDTD coefficients.
+
+
+        """
+        self.check_mesh()
+
         plotter = self.render()
 
+        # 
         full_pos = [0] * 3
         axis_i = dict(x=0, y=1, z=2)[axis]
         full_pos[axis_i] = position
@@ -1582,18 +1648,24 @@ class FDTD_Solver():
     
     def line_probe_values(self, name: str):
 
+        self.check_solution()
+
         return np.array([p["values"] for k, p in self.probes.items() if k[:len(name)] == name])
 
     def vi_probe_values(self, name: str):
         """
         Returns time domain current or voltage for the given probe.
         """
+        self.check_solution()
+
         return np.sum([p["values"] * p["d"] for k, p in self.probes.items() if k[:len(name)] == name], axis=0)
 
-    def get_sparameters(self, frequency, source_port=1, downsample=True):
+    def get_sparameters(self, frequency: np.ndarray, source_port: int = 1, downsample: bool = True):
         """
         Returns a column of the s-parameter matrix excited by a single port.
         """
+        self.check_solution()
+
         nports = len(self.ports)
         nfrequency = len(frequency)
 
@@ -1664,7 +1736,7 @@ class FDTD_Solver():
         # return a single column of the full s-matrix
         return B / V_applied[..., None]
     
-    def edge_correction(self, p1, p2, integration_axis: str, CFe: float = None, CFh: float = 1):
+    def edge_correction(self, p1: tuple, p2: tuple, integration_axis: str, CFe: float = None, CFh: float = 1):
         """
         Analytic correction factors for singularities at PEC surface edges. Corrects asymptotic Ez, Hy fields 
         along the z-axis at the face edge, and Ey, Hz fields along the y-axis at the face edge.
@@ -1680,6 +1752,9 @@ class FDTD_Solver():
             This should be in the plane of the PEC surface.
         
         """
+        self.invalidate_solution()
+        self.check_mesh()
+
         if CFe is None:
             CFe = 2 * np.sqrt(1/2)
 
@@ -1831,10 +1906,23 @@ class FDTD_Solver():
         #         self.Cb["ey_z"][x0+1: x1, y, z0] *= 1 / CFh
 
     
-    def get_monitor_data(self, name):
+    def get_monitor_data(self, name: str) -> ldarray:
         """
         Compile field monitor data.
+
+        Parameters
+        ----------
+        name : str
+            name of monitor
+
+        Returns
+        -------
+        ldarray
+            labeled numpy array with time dimension and two spatial dimensions along monitor plane.
+            If monitor is a total field monitor, the first dimension is the three rectangular components.
         """
+        self.check_solution()
+
         # component field names
         c_names = [f"{name}_{a}" for a in ("x", "y", "z")]
         # is there monitor data for all three rectangular components
@@ -1907,7 +1995,6 @@ class FDTD_Solver():
             )
 
  
-    
     def plot_monitor(
         self,
         monitor: list,
@@ -1923,8 +2010,8 @@ class FDTD_Solver():
         zoom: float = 1.0, 
         show_rulers: bool = True,
         colorbar_title: str = None,
+        plotter: pv.Plotter = None,
         gif_setup: dict = None,
-        plotter: pv.Plotter = None
     ) -> pv.Plotter:
         """
         Show a field monitor overlayed on the model geometry. Time step of the fields is controlled with an interactive
@@ -1983,8 +2070,22 @@ class FDTD_Solver():
             pyvista Plotter object. If provided the model geometry is not drawn on the plot and needs to be drawn
             manually with render().
 
+        gif_setup : dict, optional
+            Configuration settings for .gif generation. The required key/value pair is "file", the others are optional.
+            file: file path for .gif file (must end in .gif)
+            fps: frame per second of gif, default: 15
+            loop: number of times to loop gif, default: 0 (infinite loop)
+            start_ps: starting time of simulation to include in gif, in picoseconds. Default: 0
+            end_ps: ending time of simulation to include in gif, in picoseconds. Default: end of simulation
+            step_ps = number of time steps to skip between in each frame, in picoseconds. Default: 1
+
+        Returns
+        -------
+        pv.Plotter
+            pyvista Plotter object. Plotter is closed and cannot be reopened if gif_setup is provided.
         
         """
+        self.check_solution()
 
         # start with the rendered view of the model 
         if plotter is None:
@@ -2142,7 +2243,9 @@ class FDTD_Solver():
 
         # number of time points in the simulation
         Nt = n_frames * n_step
-        self.slider_value = init_frame * n_step
+        # round starting point to nearest ps
+        self.slider_value = int(init_frame * n_step * self.dt * 1e12)
+        self.slider = None
 
         plotter.add_axes()
         plotter.camera_position = camera_position
@@ -2160,12 +2263,21 @@ class FDTD_Solver():
             colorbar_title, vertical=False, label_font_size=11, title_font_size=14
         )
         
-        def callback(frame):
+        def update_fields(time_ps):
             """ function called every time the slider bar is moved. """
-            # get the index into the monitor data
-            # frame = int(nt // n_step)
-            frame = int(frame)
-            self.slider_value = frame
+
+            self.slider_value = time_ps
+            # time step in simulation
+            n = time_ps * 1e-12 / self.dt
+            # frame index
+            frame = int(n / n_step)
+            # skip update if frame is out of bounds
+            if frame >= n_frames:
+                return
+            
+            # force update slider value. This allows the slider to be set programmatically 
+            if self.slider is not None:
+                self.slider.GetRepresentation().SetValue(self.slider_value)
 
             # iterate through monitor plot items
             for p in plot_items:
@@ -2182,51 +2294,59 @@ class FDTD_Solver():
                     p["arrows"].copy_from(mesh.glyph(orient='vectors', scale='mag'))
                     p["arrows"].set_active_scalars("values")
 
+        # add slider widget
+        self.slider = plotter.add_slider_widget(
+            update_fields,
+            [0, Nt * self.dt * 1e12],
+            value=self.slider_value,
+            title="Time [ps]",
+            interaction_event="always",
+            style="modern",
+            fmt="%0.2f"
+        )
 
-        if gif_setup is None:
-            self.slider = plotter.add_slider_widget(
-                callback,
-                [0, n_frames],
-                value=init_frame,
-                title="Frame",
-                interaction_event="always",
-                style="modern",
-                fmt="%0.0f"
-            )
-        else:
+        # generate gif
+        if gif_setup is not None:
             file_ = gif_setup["file"]
             fps = gif_setup.get("fps", 15)
             loop = gif_setup.get("loop", 0)
 
-            plotter.open_gif(file_, fps=fps, loop=loop)
-            for n in range(n_frames):
+            # start and end time in ps of gif
+            start_ps = gif_setup.get("start_ps", 0)
+            end_ps = gif_setup.get("end_ps", Nt * self.dt * 1e12)
+            step_ps = gif_setup.get("step_ps", 1)
 
-                callback(n)
-                    
-                plotter.add_title(f"n={n}")
+            plotter.open_gif(file_, fps=fps, loop=loop, subrectangles=True)
+
+            # step through each frame in the monitor, skipping by frame_step on each iteration
+            for time_ps in np.arange(start_ps, end_ps + step_ps, step_ps):
+
+                # update field overlays
+                update_fields(time_ps)
                 plotter.write_frame()
 
             # Closes and finalizes movie
             plotter.close()
-            return
+            return plotter
 
+        # add checkbox to turn off field visibility
         def set_field_visible(value):
             for p in plot_items:
                 p["actor"].SetVisibility(value)
 
+        plotter.add_checkbox_button_widget(set_field_visible, value=True, position=(10, 10), size=30, border_size=0)
+        plotter.add_text("Field Visibility", position=(45, 15), font_size=9)
+
+        # add key bindings to increment the slider left/right with the arrow keys
         def increment_left():
-            self.slider.GetRepresentation().SetValue(self.slider_value - 1)
-            callback(self.slider_value - 1)
+            # increment down to nearest picosecond
+            update_fields(int(self.slider_value - 1))
             plotter.render()
 
         def increment_right():
-            self.slider.GetRepresentation().SetValue(self.slider_value + 1)
-            callback(self.slider_value + 1)
+            # increment up to nearest picosecond
+            update_fields(int(self.slider_value + 1))
             plotter.render()
-
-        # add checkbox to turn off field visibility
-        plotter.add_checkbox_button_widget(set_field_visible, value=True, position=(10, 10), size=30, border_size=0)
-        plotter.add_text("Field Visibility", position=(45, 15), font_size=9)
 
         plotter.add_key_event("Left", increment_left)
         plotter.add_key_event("Right", increment_right)
