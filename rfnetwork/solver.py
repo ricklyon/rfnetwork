@@ -1912,14 +1912,16 @@ class FDTD_Solver():
         self,
         monitor_name: list,
         view="xz",
-        vmax=None, vmin=None,
+        vmin=None,
+        vmax=None, 
         zoom=1.3, 
         el=10, az=0,
         opacity="linear",
         gif_file=None,
         linear=False, 
         cmap="jet",
-        style="points"
+        style="points",
+        max_vector_len= 0.01
     ):
 
         monitor_name = np.atleast_1d(monitor_name)
@@ -1927,7 +1929,6 @@ class FDTD_Solver():
         field_mesh = []
 
         for i, name in enumerate(monitor_name):
-        
 
             # component field names
             c_names = [f"{name}_{a}" for a in ("x", "y", "z")]
@@ -1952,56 +1953,57 @@ class FDTD_Solver():
                 floc_in = (field.coords["x"], monitor["position"], field.coords["z"])
             else: # yz plane
                 floc_in = (monitor["position"], field.coords["y"], field.coords["z"])
-
-
+            
+            # get magnitude if all component vectors are present, and flatten spatial point dimensions.
+            # field_v has shape time, flattened spatial points
             if is_total_field:
+                field_v = np.sqrt(np.sum(np.abs(field)**2, axis=0)).reshape(len(field[0]), -1)
+            else:
+                field_v = field.reshape(len(field), -1, order="F")
+
+            # convert to db
+            if not linear:
+                # avoid nan values for zero values
+                field_v = np.where(np.abs(field_v) < 1e-12, 1e-12, field_v)
+                field_v = conv.db20_lin(field_v)
+
+            if vmax is None:
+                vmax = np.nanmax(field_v)
+            if vmin is None:
+                vmin = -vmax if linear else vmax - 50
+
+            # initialize vector field
+            if style == "vector":
+
+                if not is_total_field:
+                    raise ValueError("Monitor must contain all field components to plot a vector field.")
+
                 
                 # meshgrid of coordinates on the surface
                 surf_coords_m = np.meshgrid(*list(field.coords.values())[-2:], indexing="ij")
-                
+                # meshgrid of a single value of the axis position of the surface
                 n_coords_m = np.ones(surf_coords_m[0].size) * axis_pos
-                # all coordinate points
+                # all coordinate points, flattened into a the rows, shape is number of points, cartesian xyz
                 coords_xyz = [(*surf_coords_m, n_coords_m)[a] for a in axis_ordered]
-
                 points = np.vstack([a.ravel() for a in coords_xyz]).T
 
-                # flatten spatial dimensions to create a list of vectors the same shape as points
-                field_v = np.where(np.abs(field) < 1e-12, 1e-12, field)
-                vectors = np.reshape(field_v, (*field.shape[0:2], -1 ))
-                # move xyz axis to the end, now shaped time, flattened spatial points, cartesian xyz
+                # flatten spatial dimensions to create a list of vectors
+                vectors = np.reshape(field, (*field.shape[0:2], -1 ))
+                # move xyz axis to the end, shape is time, spatial points, cartesian xyz
                 vectors = np.transpose(vectors, (1, 2, 0))
 
-                vectors_db = conv.db20_lin(vectors)
-
-                mag = np.sqrt(np.sum(vectors**2, axis=-1))
-                mag_db = conv.db20_lin(mag)
-
-                unit_vectors = (vectors) / mag[..., None]
-
-                if vmax is None:
-                    vmax = np.nanmax(mag_db)
-                if vmin is None:
-                    vmin = vmax - 50
-
-                # scale magnitudes so that 0 length is at the minimum db value
-                mag_db_s = np.clip(mag_db, vmin, vmax) - vmin
-                vectors_db = unit_vectors * mag_db_s[..., None]
-
-                # scale to fit on grid
-                vectors_db_grid = vectors_db * 0.01 / np.max(vectors_db)
-
-                # flatten scalar values
-                mag_db = np.clip(mag_db, vmin, vmax).reshape(len(field[0]), -1, order="F")
-
-                mesh = pv.vector_poly_data(points, vectors_db_grid[60])
-                # mesh = pv.PolyData(points)
+                mesh = pv.PolyData(points)
                 # assign colormap values
-                # mesh.point_data['values'] = np.clip(mag_db[60], vmin, vmax).flatten(order="F")
-                mesh.point_data['values'] = mag_db[60]
-                # # assign vector direction
-                # mesh["vectors"] = vectors_db_grid[0]
+                mesh.point_data['values'] = field_v[0]
+                # assign vector direction
+                mesh["vectors"] = vectors[0]
+                # assign vector lengths
+                vector_len = np.clip(field_v, vmin, vmax) - vmin
+                vector_len = max_vector_len * (vector_len / np.max(vector_len))
+                mesh["mag"] = vector_len[0]
 
                 arrows = mesh.glyph(orient='vectors', scale='mag')
+                arrows.set_active_scalars("values")
 
                 actor = plotter.add_mesh(
                     arrows, 
@@ -2011,24 +2013,11 @@ class FDTD_Solver():
                     show_scalar_bar=False, 
                 )
 
-                field_mesh += [(actor, mesh, mag_db, arrows, vectors_db_grid)]
-                nframe = len(field_v[0])
+                field_mesh += [(actor, mesh, field_v, arrows, vectors, vector_len)]
 
 
             else:
-                if linear:
-                    field_v = field
-                else:
-                    field = np.where(np.abs(field) < 1e-12, 1e-12, field)
-                    field_v = 20 * np.log10(np.abs(field))
 
-                if vmax is None:
-                    vmax = np.nanmax(field_v)
-                if vmin is None:
-                    vmin = -vmax if linear else vmax - 50
-
-                field_v = np.clip(field_v, vmin, vmax).reshape(len(field), -1, order="F")
-            
                 fmesh = pv.RectilinearGrid(*floc_in)
                 fmesh.point_data['values'] = field_v[0]
                 
@@ -2039,16 +2028,17 @@ class FDTD_Solver():
                     clim=[vmin, vmax], 
                     show_scalar_bar=False, 
                     opacity=opacity[i],
-                    interpolate_before_map=style == "surface",
+                    interpolate_before_map=(style == "surface"),
                     render_points_as_spheres=True,
                     style=style,
                     lighting=False,
                     point_size=10
                 )
 
-                field_mesh += [(actor, mesh, field_v, None, None)]
+                field_mesh += [(actor, mesh, field_v, None, None, None)]
 
-                nframe = len(field_v)
+        nframe = len(field_v)
+        Nt = nframe * n_step
 
         plotter.add_axes()
         plotter.camera_position = view
@@ -2060,8 +2050,6 @@ class FDTD_Solver():
             title="E [V/m]\n" if linear else "E [dB]\n", vertical=False, label_font_size=11, title_font_size=14
         )
         
-        Nt = nframe * n_step
-
         def callback(nt):
             
             # downsampled index into the field values
@@ -2069,20 +2057,16 @@ class FDTD_Solver():
 
             self.slider_value = n
 
-            for (actor, mesh, scalars, arrows, vectors) in field_mesh:
+            for (actor, mesh, scalars, arrows, vectors, vector_len) in field_mesh:
             
                 if vectors is not None:
-
-                    mag = np.sqrt(np.sum(vectors[n]**2, axis=-1))
-
+                    # print(vectors.shape)
                     mesh["vectors"][:] = vectors[n]
-                    mesh["mag"][:] = mag
+                    mesh["mag"][:] = vector_len[n]
                     mesh.point_data["values"][:] = scalars[n]
 
                     arrows.copy_from(mesh.glyph(orient='vectors', scale='mag'))
-
                     arrows.set_active_scalars("values")
-                    # arrows["values"][:] = scalars[n]
 
                 else:
                     mesh.point_data["values"][:] = scalars[n]
