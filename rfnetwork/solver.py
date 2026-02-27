@@ -6,7 +6,7 @@ from copy import copy
 from np_struct import ldarray
 import sys
 
-from rfnetwork import const, conv, utils, core
+from rfnetwork import const, conv, utils, core, utils_mesh
 
 u0 = const.u0
 e0 = const.e0
@@ -209,225 +209,6 @@ class FDTD_Solver():
         self._init_lumped_elements()
 
         
-    def get_object_edges(self, obj, group_faces: bool = True) -> list:
-        """
-        Get the endpoints of the lines that form the edges of the object faces. Returns a M-length list for each 
-        face in the object, each containing a N-length list of 2x3 arrays. N is the number of edges in the face.
-        Each row is the coordinates of the two endpoints of the edge.
-
-        Parameters
-        ----------
-        group_faces: bool, default: True
-            if False, edges from all faces are combined and the returned list is Nx2x3, where N is the 
-            number of edges in the object.
-        """
-        
-        # build list of edge coordinates along each axis
-        n_cells = np.clip(obj.n_cells, 1, None)
-        faces = [list() for n in range(n_cells)]
-
-        # if obj has no faces and is a collection of points, build edges from consecutive points
-        if not len(obj.faces):
-            obj_edges = []
-            for i, p in enumerate(obj.points):
-                end_p = obj.points[i+1] if i < len(obj.points) - 1 else obj.points[0]
-                obj_edges.append((p, end_p))
-            faces[0] = obj_edges
-
-        else:
-            # index of the current face
-            face_idx = -1
-            # decremented counter, starts at the number of points in the face, reaches zero after the last point
-            # in the face and a new face begins.
-            face_point_count = 0
-            # index of first point in a face
-            anchor = None
-            # iterate through the list of faces points
-            for i, p in enumerate(obj.faces):
-                # start a new face
-                if face_point_count == 0:
-                    face_point_count = p
-                    anchor =  obj.faces[i+1]
-                    
-                    if face_idx >= 0:
-                        faces[face_idx] += obj_edges
-                    
-                    if group_faces or (face_idx < 0):
-                        face_idx += 1
-
-                    obj_edges = []
-                # if on the last point in the face, connect back to the first point in the face
-                elif face_point_count == 1:
-                    obj_edges.append((obj.points[p], obj.points[anchor]))
-                    face_point_count -= 1
-                # connect two points in the face
-                else:
-                    obj_edges.append((obj.points[p], obj.points[obj.faces[i+1]]))
-                    face_point_count -= 1
-
-            # finish last face
-            if len(obj_edges):
-                faces[face_idx] += obj_edges
-
-        return faces if group_faces else faces[0]
-
-
-    def get_object_vertices(self, obj, group_faces: bool = True) -> list:
-        """
-        Get the vertices of each face of the object. Returns a M-length list for each face in the
-        object, each containing a Nx3 array of the vertices coordinates in that face.
-
-        Parameters
-        ----------
-        group_faces: bool, default: True
-            if False, vertices from all faces are combined and the returned list is Nx2x3, where N is the 
-            number of edges in the object.
-        """
-        # build list of edge coordinates along each axis
-        n_cells = np.clip(obj.n_cells, 1, None)
-        faces = [list() for n in range(n_cells)]
-
-        # if obj has no faces and is a collection of points, build edges from consecutive points
-        if not len(obj.faces):
-            faces[0] = np.array(obj.points)
-
-        else:
-            # index in the list of face points
-            face_point_idx = 0
-            # index of the face groups
-            face_idx = 0
-            for i in range(n_cells):
-                # number of points in this face
-                n_points = obj.faces[face_point_idx]
-                
-                for p in range(1, n_points + 1):
-                    faces[face_idx].append(obj.points[obj.faces[face_point_idx + p]])
-                
-                face_point_idx += (n_points + 1)
-
-                if group_faces:
-                    face_idx += 1
-
-        return faces if group_faces else faces[0]
-
-
-    def is_point_in_surface(self, points, obj, tolerance=0.0005):
-        """
-        Returns an array the same shape as point with each value set to True if point is inside the 2D surface
-        """
-
-        points = np.atleast_2d(points)
-
-        # object bounding box
-        p0 = np.min(obj.points, axis=0)
-        p1 = np.max(obj.points, axis=0)
-
-        # get axis normal to the surface
-        normal_axis = (np.diff([p0, p1], axis=0) == 0)
-        axis = np.argmax(normal_axis)
-
-        if not np.any(np.abs(normal_axis) > self._tol):
-            raise ValueError("Object must be a surface on a cardinal plane.")
-        
-        # get the two axis of the component vectors on the surface
-        c1_axis, c2_axis = ((1, 2), (0, 2), (0, 1))[axis]
-
-        # return all zeros if object mesh is empty
-        if not len(obj.points):
-            return np.zeros(points.shape[:-1])
-        
-        vertices = self.get_object_vertices(obj, group_faces=True)
-        edges = self.get_object_edges(obj, group_faces=True)
-        n_faces = len(edges)
-
-
-        in_face = np.zeros((n_faces,) + points.shape[:-1], dtype=np.int64)
-        # for each face in the object
-        for f in range(n_faces):
-
-
-            face_vertices = vertices[f]
-            face_edges = edges[f]
-
-            # fig, ax = plt.subplots(figsize=(8, 8))
-            # for e in np.array(edges[f]):
-            #     ax.plot(e[:, 0], e[:, 1], color="k")
-
-            # ax.plot(points[0][0], points[0][1], marker="X", markersize=20)
-
-            # number of intersections the edges make with lines from the object vertices to the point
-            n_edge_intersections = np.zeros((len(face_vertices),) + points.shape[:-1], dtype=np.int64)
-
-            for i, v in enumerate(face_vertices):
-
-                for edge in face_edges:
-
-                    edge = np.array(edge)
-                    
-                    # skip if base point is on either end point of the edge
-                    if np.any(np.sum(np.abs(edge - v[None]), axis=1) < self._tol):
-                        continue
-
-                    # get "x/y" coordinates for vertices
-                    x1, y1 = v[c1_axis], v[c2_axis]
-
-                    # get "x/y" coordinates for test points
-                    x2, y2 = points[..., c1_axis], points[..., c2_axis]
-
-                    with np.errstate(divide='ignore', invalid='ignore'):
-                        # slope of edge line and line from the object vertices to the test point
-                        # m = (y2 - y1) / (x2 - x1)
-                        m1 = (y2 - y1) / (x2 - x1)
-                        m2 = (edge[1, c2_axis] - edge[0, c2_axis]) / (edge[1, c1_axis] - edge[0, c1_axis])
-
-                        # y intercept point
-                        b1 = y1 - m1 * x1
-                        b2 = edge[0, c2_axis] - m2 * edge[0, c1_axis]
-
-                        # intersection coordinate.
-                        # if m1 is infinite, the line is vertical and the x intersection coordinate is just the x
-                        # coordinate of the line.
-                        x_int = np.where(
-                            ~np.isfinite(m1), x1, np.where(~np.isfinite(m2), edge[0, c1_axis], (b2 - b1) / (m1 - m2))
-                        )
-                        # plug x_int into the line equation with a finite slope to get the y intersection point
-                        y_int = np.where(np.isfinite(m1), m1 * x_int + b1, m2 * x_int + b2)
-
-                    # increment if the vertex line and edge intersect
-                    n_edge_intersections[i] += (
-                        ((x_int - tolerance) <= np.max(edge[:, c1_axis])) & ((x_int + tolerance) >= np.min(edge[:, c1_axis])) &
-                        ((y_int - tolerance) <= np.max(edge[:, c2_axis])) & ((y_int + tolerance) >= np.min(edge[:, c2_axis]))
-                    )
-                    
-                    # ax.plot(x_int, y_int, marker="o")
-                    # ax.set_xlim([p0[0], p1[0]])
-                    # ax.set_ylim([p0[1], p1[1]])
-
-            # point is in the face if the line from each vertices intersects with an edge 
-            in_face[f] = (
-                np.all(n_edge_intersections, axis=0) & 
-                (np.abs(points[..., axis] - obj.points[0, axis]) < self._tol)
-            )
-
-            # if point is far away from the face, lines become nearly parallel and tolerances can lead to false
-            # intersections. Correct points that are wholly outside the face bounding box
-            f_pmin = np.min(face_vertices, axis=0)
-            f_pmax = np.max(face_vertices, axis=0)
-            x0, y0 = f_pmin[c1_axis], f_pmin[c2_axis]
-            x1, y1 = f_pmax[c1_axis], f_pmax[c2_axis]
-
-            xp, yp = points[..., c1_axis], points[..., c2_axis]
-
-            bbox_in_shape = (
-                ((xp - tolerance) <= x1) & ((xp + tolerance) >= x0) &
-                ((yp - tolerance) <= y1) & ((yp + tolerance) >= y0)
-            )
-
-            in_face[f] = np.where(bbox_in_shape, in_face[f], 0)
-
-        # return True if point is contained in any face of the surface
-        return (np.sum(in_face, axis=0) > 0)
-
 
     def _get_mesh_points(self, d_edge: float):
         """
@@ -443,7 +224,7 @@ class FDTD_Solver():
         # get a list of 2x3 arrays, coordinates of each endpoint of the edges of the model objects
         obj_edges = []
         for obj in objects:
-            obj_edges += self.get_object_edges(obj, group_faces=False)
+            obj_edges += utils_mesh.get_object_edges(obj, group_faces=False)
 
         obj_edges = np.around(obj_edges, decimals=self._places).astype(np.float32)
 
@@ -607,7 +388,7 @@ class FDTD_Solver():
                 # create a gradient of cell widths to span the space that minimizes the growth rate. 
                 else:
                     graded_subcells_d[i] = list(
-                        utils.blend_cell_widths(dprev, dnext, d, tol=self._tol)
+                        utils_mesh.blend_cell_widths(dprev, dnext, d, tol=self._tol)
                     )
 
             # flatten list of lists of subcell widths
@@ -738,7 +519,7 @@ class FDTD_Solver():
                     # get an array the same shape as the grid_points with zeros for points outside the object and ones 
                     # for points inside
                     points = np.transpose(e_grid_points, axes=(1, 2, 3, 0))
-                    inside_mask = self.is_point_in_surface(points, obj)
+                    inside_mask = utils_mesh.is_point_in_surface(points, obj)
 
                 else:
                     dist = e_pdata.compute_implicit_distance(obj)
