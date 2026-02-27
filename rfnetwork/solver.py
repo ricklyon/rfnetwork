@@ -29,8 +29,9 @@ class FDTD_Solver():
 
         self.monitors=dict()
         self.probes=dict()
+        self.ports = []
         
-        self.n_pml = None
+        self._n_pml = None
         self._auto_name_counter = 0
 
         self.sbox_max = np.max(bounding_box.points, axis=0)
@@ -140,7 +141,7 @@ class FDTD_Solver():
             raise ValueError(f"PML side not recognized. Expecting one of {valid_sides}")
 
         self.pml_boundaries = copy(list(sides))
-        self.n_pml = n_pml
+        self._n_pml = n_pml
 
     def pos_to_idx(self, p, mode: str = "edge"):
         """
@@ -188,11 +189,10 @@ class FDTD_Solver():
         d0 : float
             nominal cell width, inches. This cell width is used in open regions far from geometry features.
         d_edge : float, optional
-            cell width 
+            cell width around geometry edges, inches. Must be smaller than d0 if provided.
         """
 
         self._meshed = True
-        self._solved = False
 
         self._init_grid(d0=d0, d_edge=d_edge)
         # init dielectrics sets the cell sigma and er but does not set the coefficients
@@ -207,6 +207,7 @@ class FDTD_Solver():
 
         self._init_conductors()
         self._init_lumped_elements()
+        self.invalidate_solution()
 
         
 
@@ -673,7 +674,7 @@ class FDTD_Solver():
             
     def _init_lumped_elements(self):
         """
-        
+        Initialize lumped elements, including lumped ports.
         """
         # get the lumped element faces that are assigned as port terminations
         port_faces = [element for element in self.lumped_element.values() if element["port"] is not None]
@@ -787,7 +788,8 @@ class FDTD_Solver():
                     field = f"e{fa}", 
                     axis = n_axis, 
                     r0 = r, 
-                    direction = f_dir
+                    direction = f_dir,
+                    src = None
                 )
 
                 # add current probe of current around the termination. current face is normal to the 
@@ -808,12 +810,19 @@ class FDTD_Solver():
                 self.add_current_probe(f"port{port}", current_face)
 
 
-    def _init_PML(self, side):
+    def _init_PML(self, side: str):
         """
-        Add PML layer to the top face of the solution box.
-        """
+        Add PML layer to a single side of the grid.
 
-        n_pml = self.n_pml
+        Parameters
+        ----------
+        side : list, str
+            Valid values are ("x+", "x-", "y+", "y-", "z+", "z-",)
+        """
+        n_pml = self._n_pml
+
+        if n_pml is None:
+            return
 
         axis = side[0]
         axis_i = dict(x=0, y=1, z=2)[axis]
@@ -899,7 +908,7 @@ class FDTD_Solver():
         n_len = int(t_len / self.dt)
 
         t = np.linspace(0, self.dt * n_len, n_len)
-        vsrc = np.exp(-((t - t0) / (width / 4)) ** 2) # np.sin(2* np.pi * f0 * t) * 
+        vsrc = np.exp(-((t - t0) / (width / 4)) ** 2)
 
         # normalize so amplitude is 1
         return (vsrc / np.max(np.abs(vsrc))).astype(np.float32)
@@ -917,17 +926,58 @@ class FDTD_Solver():
 
         # normalize so amplitude is 1
         return (vsrc / np.max(np.abs(vsrc))).astype(np.float32)
+    
+    def assign_excitation(self, waveform: np.ndarray, ports: list):
+        """
+        Assign time domain voltage excitation to ports.
 
-    def run(self, ports, v_waveforms, n_threads=4, show_progress=True):
+        Parameters
+        ----------
+        waveform : np.ndarray
+            array of voltage values for each time step (self.dt)
+        ports : list | int
+            port numbers to assign this waveform to.
+        """
 
+        self.invalidate_solution()
         self.check_mesh()
 
-        if isinstance(ports, int):
-            ports = [ports]
+        for p in np.atleast_1d(ports):
+            self.ports[p-1]["src"] = waveform.astype(np.float32)
 
-        v_waveforms = np.atleast_2d(v_waveforms).astype(np.float32)
-            
-        Nt = len(v_waveforms[0])
+    def reset_excitations(self):
+        """ Remove excitations from all ports. """
+        
+        for p in self.ports:
+            p["src"] = None
+
+
+    def solve(self, n_threads: int = 4, show_progress: bool = True):
+        """
+        Run FDTD algorithm. At least one port must have an excitation defined before running. Results will be written
+        to the probes and monitors attached to the model.
+
+        Parameters
+        ----------
+        n_thread : int, default: 4
+            number of parallel threads to run algorithm on. Fully separate threads using MPI is not supported yet.
+            Threads are controlled by the OS and will spread across the available CPU cores. On most systems
+            performance is bottle-necked by shared memory caches between cores.
+        show_progress : bool, default: True
+            print solver progress to stdout.
+        """
+        self.check_mesh()
+
+        # error check source excitations
+        excitations = [p["src"] for p in self.ports if p["src"] is not None]
+
+        if not len(excitations):
+            raise ValueError("No port excitations found.")
+        
+        # check that all excitations are the same length
+        Nt = len(excitations[0])
+        if not all([Nt == len(s) for s in excitations]):
+            raise ValueError("Excitations must have identical lengths.")
 
         # numpy type for the field values
         dtype_ = np.float32
@@ -1013,14 +1063,14 @@ class FDTD_Solver():
 
         mem = np.zeros(temp_mem_size, dtype=dtype_)
 
-        # initialize probes and sources. Sources act like probes, but the values are input to the 
-        # field grid before being replaced by the actual component value.
         probes = []
-        for i, p in enumerate(ports):
-            port = self.ports[p-1]
-            idx, Vs_a, field = port["idx"], port["Vs_a"], port["field"]
+        # initialize sources. Sources act like probes, but the values are input to the 
+        # field grid before being replaced by the actual component value.
+        src_ports = [p for p in self.ports if p["src"] is not None]  # ports with excitations
+        # iterate over all ports with excitations applied
+        for port in src_ports:
 
-            self.ports[p-1]["src"] = v_waveforms[i].copy()
+            idx, Vs_a, field, src = port["idx"], port["Vs_a"], port["field"], port["src"]
 
             # convert slice indices to a list of values
             idx_list = [list(np.arange(v.start, v.stop)) if isinstance(v, slice) else [v] for v in idx]
@@ -1030,7 +1080,7 @@ class FDTD_Solver():
             for j, idx_j in enumerate(itertools.product(*idx_list)):
                 probes.append(
                     dict(
-                        values=np.array(Vs_a_flt[j] * v_waveforms[i], dtype=dtype_, order="C"), 
+                        values=np.array(Vs_a_flt[j] * src, dtype=dtype_, order="C"), 
                         field=int(list(self.fshape.keys()).index(field)),
                         idx=[int(id) for id in idx_j],
                         is_source=int(1)
@@ -1085,12 +1135,12 @@ class FDTD_Solver():
         src_v = [s["values"] for s in probes]
         # move the measured source voltages back to the class variable for the associated port
         cur_source = 0
-        for p in (ports):
+        for port in src_ports:
             # get the number of components associated with this port
-            src_len = self.ports[p-1]["Vs_a"].size
-            src_shape = self.ports[p-1]["Vs_a"].shape
+            src_len = port["Vs_a"].size
+            src_shape = port["Vs_a"].shape
 
-            self.ports[p-1]["values"] = np.array(src_v[cur_source: cur_source + src_len]).reshape(src_shape + (Nt,))
+            port["values"] = np.array(src_v[cur_source: cur_source + src_len]).reshape(src_shape + (Nt,))
             cur_source += src_len
 
         # move probe values to the class variable
@@ -1100,18 +1150,21 @@ class FDTD_Solver():
         self._solved = True
 
 
-    def add_field_monitor(self, name: str, field: str, axis: str, position: float, n_step: int):
+    def add_field_monitor(self, name: str, field: str, axis: str, position: float, n_step: int = 1):
         """
-        Add field monitor along a slice through the 3D volume
+        Add field monitor on a 2D surface.
 
         Parameters
         ----------
         name : str
+            unique name for field monitor
         field : {'ex', 'ey', 'ez', 'e_total', 'hx', 'hy', 'hz'}
+            field quantity. If "e_total" is specified, three monitors are created for each x, y, z field component.
         axis : {'x', 'y', 'z'}
+            normal axis to surface
         position : float
-            position on axis of the slice
-        t_step : int, default: 1
+            position on axis of the monitor surface
+        n_step : int, default: 1
             number of time steps between each capture.
         """
 
@@ -1149,10 +1202,17 @@ class FDTD_Solver():
             )
 
 
-
     def add_current_probe(self, name: str, face: pv.PolyData):
         """
-        
+        Add a probe that collects the current through a 2D surface. Calling vi_probe_values() with name
+        will return the current through this surface.
+
+        Parameters
+        ----------
+        name : str
+            unique name for field monitor
+        face : pv.PolyData
+            PolyData object defining a single 2D face, must be aligned on the cartesian axes.
         """
         dx_h, dy_h, dz_h = [conv.m_in(d) for d in self.dh_cells]
 
@@ -1266,15 +1326,25 @@ class FDTD_Solver():
                 i += 1
 
         else:
-            raise NotImplementedError("Current face not supported in the given direction yet")
+            raise ValueError("Unrecognized axis.")
         
         
-    def add_line_probe(self, name: str, field: str, line: pv.PolyData):
+    def add_voltage_probe(self, name: str, line: pv.PolyData):
         """
-        
+        Add a voltage probe along a line of e-field components. Calling vi_probe_values() with name will return the 
+        voltage across this line.
+
+        Parameters
+        ----------
+        name : str
+            unique name for field monitor
+        line : pv.PolyData
+            PolyData object defining a line. Must be aligned with the cartesian axes.
         """
-        # get axis that face is constant over (the normal axis)
+        # get axis that the line is parallel to
         axis = np.argmax(np.any(np.diff(line.points, axis=0), axis=0))
+        # field component parallel to axis
+        field = ["ex", "ey", "ez"][axis]
         # start and end position of the line, end in inclusive
         line_start, line_end = np.min(line.points, axis=0), np.max(line.points, axis=0)
         # field indices of the line end points
@@ -1308,6 +1378,17 @@ class FDTD_Solver():
     def render(self, show_probes: bool = False, point_size=15) -> pv.Plotter:
         """
         Plot the model geometry
+
+        Parameters
+        ----------
+        show_probes : bool, default: False
+            show dots at the probe locations.
+        point_size : bool, default: 15
+            point size of probe locations
+
+        Returns
+        -------
+        pv.Plotter
         """
         self.check_mesh()
 
@@ -1359,20 +1440,56 @@ class FDTD_Solver():
 
     def plot_coefficients(
         self, 
-        field, 
-        value, 
-        axis, 
-        position, 
-        vmin=None, 
-        vmax=None, 
-        opacity=1, 
-        cmap="jet", 
-        point_size=10, 
-        normalization=None
-    ):
+        field: str, 
+        value: str, 
+        axis: str, 
+        position: float, 
+        normalization: float = True,
+        opacity: float = 1, 
+        cmap: str = "rbg", 
+        vmin: float = None, 
+        vmax: float = None, 
+        point_size: float = 10, 
+    ) -> pv.Plotter:
         """
-        Plot FDTD coefficients.
+        Plot FDTD coefficients overlayed on the model geometry.
 
+        Parameters
+        ----------
+
+        field : str
+            For E-fields, one of "ex_y", "ex_z", "ey_z", "ey_x", "ez_x", "ez_y". Replace e with h for H-fields.
+            The H-field b coefficients are split to support edge correction techniques, and and 1 or 2 must be 
+            appended to the field name: "hx_y1", "hx_y2".
+
+        value : str, {"a", "b"}
+            "a" specifies the Ca or Da coefficients, "b" selects the Cb or Db coefficients.
+
+        axis : str, {"x", "y", "z"}
+            Cartesian axis normal to the surface on which the coefficients will be plotted.
+
+        position : float
+            position along axis of surface where the coefficients will be plotted.
+
+        normalization : bool | float, optional
+            By default, "b" coefficents are divided by dt / e0 (for E) or dt / u0 (for H) to avoid very small values.
+            A float can be passed in to normalize by another value, to turn off normalization set to False.
+
+        opacity : str | list, default: 1
+            Opacity of the coefficent plot.
+        
+        vmin : float, optional
+            minimum coefficient value shown on the colormap
+        
+        vmax : float, optional
+            maximum coefficient value shown on the colormap
+
+        point_size : float, default: 10
+            size of points representing coefficient values
+        
+        Returns
+        -------
+        pv.Plotter
 
         """
         self.check_mesh()
@@ -1392,9 +1509,15 @@ class FDTD_Solver():
         else:
             values = self.Cb[field] if field[0] == "e" else self.Db[field]
 
-        if normalization:
+        # apply default normalization to b coefficients
+        if normalization is True:
+            if value == "b":
+                # divide by dt / e0 (if E) or dt / u0 (if H)
+                values = values / (self.dt / e0) if field[0] == "e" else values / (self.dt / u0) 
+        # apply custom normalization
+        elif not isinstance(normalization, bool):
             values = values / normalization
-            
+
         if vmax is None:
             vmax = np.max(values)
         if vmin is None:
@@ -1427,13 +1550,16 @@ class FDTD_Solver():
         
         return plotter
     
-    def line_probe_values(self, name: str):
+    def line_probe_values(self, name: str) -> np.ndarray:
+        """
+        Get raw probe values from a line probe.
+        """
 
         self.check_solution()
 
         return np.array([p["values"] for k, p in self.probes.items() if k[:len(name)] == name])
 
-    def vi_probe_values(self, name: str):
+    def vi_probe_values(self, name: str) -> np.ndarray:
         """
         Returns time domain current or voltage for the given probe.
         """
@@ -1441,9 +1567,26 @@ class FDTD_Solver():
 
         return np.sum([p["values"] * p["d"] for k, p in self.probes.items() if k[:len(name)] == name], axis=0)
 
-    def get_sparameters(self, frequency: np.ndarray, source_port: int = 1, downsample: bool = True):
+    def get_sparameters(self, frequency: np.ndarray, source_port: int = 1, downsample: bool = True) -> ldarray:
         """
-        Returns a column of the s-parameter matrix excited by a single port.
+        Returns a column of the s-parameter matrix for solutions that have an excitation applied to a single port.
+
+        Parameters
+        ----------
+        frequency : np.ndarray
+            frequency vector in Hz
+        source_port : int, default: 1
+            port number where the excitation was applied in run(), all other ports should have no excitation applied.
+        downsample : bool, default: True
+            Downsample the time domain solution before applying the DTFT. The DTFT is used instead of an FFT because
+            the FFT returns only a few points within the frequency band of interest, the rest are far out of band
+            because the time step is typically very small. The time domain data can usually be downsampled to speed up 
+            the DTFT without impacting the accuracy. 
+        
+        Returns
+        -------
+        ldarray:
+            labeled numpy array with dimensions frequency, b (exiting port wave), a (entering port waves).
         """
         self.check_solution()
 
@@ -1515,7 +1658,11 @@ class FDTD_Solver():
             B[:, i] = -I_term[i] * self.ports[i]["r0"]
         
         # return a single column of the full s-matrix
-        return B / V_applied[..., None]
+        s_column = B / V_applied[..., None]
+
+        return ldarray(
+            s_column[..., None], coords=dict(frequency=frequency, b=np.arange(nports), a=[source_port])
+        )
     
     def edge_correction(self, p1: tuple, p2: tuple, integration_axis: str, CFe: float = None, CFh: float = 1):
         """
@@ -1853,12 +2000,12 @@ class FDTD_Solver():
 
         gif_setup : dict, optional
             Configuration settings for .gif generation. The required key/value pair is "file", the others are optional.
-            file: file path for .gif file (must end in .gif)
-            fps: frame per second of gif, default: 15
-            loop: number of times to loop gif, default: 0 (infinite loop)
-            start_ps: starting time of simulation to include in gif, in picoseconds. Default: 0
-            end_ps: ending time of simulation to include in gif, in picoseconds. Default: end of simulation
-            step_ps = number of time steps to skip between in each frame, in picoseconds. Default: 1
+            - file : file path for .gif file (must end in .gif)
+            - fps : frame per second, default: 15
+            - loop : number of times to loop, default: 0 (infinite loop)
+            - start_ps : starting time of gif, in picoseconds. Default: 0
+            - end_ps : ending time of gif, in picoseconds. Default: end of simulation
+            - step_ps : number of time steps to skip between in each frame, in picoseconds. Default: 1
 
         Returns
         -------
