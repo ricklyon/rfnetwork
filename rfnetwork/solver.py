@@ -18,7 +18,13 @@ class FDTD_Solver():
     FDTD EM Solver for PCB geometries.
     """
 
-    def __init__(self, bounding_box):
+    def __init__(self, bounding_box: pv.PolyData):
+        """
+        Parameters
+        ----------
+        bounding_box: pv.PolyData
+            box enclosing the solution space. 
+        """
 
         self.bounding_box = bounding_box
         self.dielectric = dict()
@@ -1375,16 +1381,17 @@ class FDTD_Solver():
             self.probes[f"{name}_{i}"] = dict(field=field, index=(idx), d=direction * conv.m_in(cw))
         
         
-    def render(self, show_probes: bool = False, point_size=15) -> pv.Plotter:
+    def render(self, show_probes: bool = False, show_rulers: bool = True) -> pv.Plotter:
         """
         Plot the model geometry
 
         Parameters
         ----------
         show_probes : bool, default: False
-            show dots at the probe locations.
-        point_size : bool, default: 15
-            point size of probe locations
+            show probe locations.
+
+        show_rulers : bool, default: True
+            show the model bounding box with rulers
 
         Returns
         -------
@@ -1415,26 +1422,75 @@ class FDTD_Solver():
             plotter.add_mesh(ele["obj"], color="pink", opacity=0.5)
 
         if show_probes:
-            points = []
-            for k, probe in self.probes.items():
-                floc = self.floc[probe["field"]]
-                pos = probe["index"]
-                # get physical position of probe from the grid index
-                points.append([f[p] for f, p in zip(floc, pos)])
+            arrow_pos = np.zeros((len(self.probes), 3))
+            probe_pos = arrow_pos.copy()
+            vectors = arrow_pos.copy()
+            mag = np.ones(len(self.probes)) * 0.02
+            colors = np.zeros_like(mag)
 
+            for i, (k, probe) in enumerate(self.probes.items()):
+                # e or h type
+                field_type = probe["field"][0]
+                floc = self.floc[probe["field"]]
+                pos_idx = probe["index"]
+                # axis of the probe field direction
+                axis_str = probe["field"][1]
+                axis = dict(x=0, y=1, z=2)[axis_str]
+
+                # scale arrow to be smaller than the grid cell, e-probes are in the center of the cell along
+                # the axis the point in, h-cells are on the edges
+                if field_type == "e":
+                    cell_w = self.d_cells[axis][pos_idx[axis]]
+                else:
+                    cell_w = self.dh_cells[axis][pos_idx[axis]-1]
+
+                mag[i] = cell_w * 0.6
+                # assign color based on field type
+                colors[i] = 0 if field_type == "e" else 0.5
+                
+                # orient arrow in direction of field component
+                vectors[i] = [1 if i == axis else 0 for i in range(3)]
+
+                # get physical position of probe from the grid index
+                probe_pos[i] = [f[p] for f, p in zip(floc, pos_idx)]
+                # move the position of the arrow so the middle is at the probe location instead of the tail
+                arrow_pos[i] = probe_pos[i]
+                arrow_pos[i, axis] -= (mag[i] / 2)
+
+            mesh = pv.PolyData(arrow_pos)
+            # assign colormap values
+            mesh.point_data['colors'] = colors
+            # assign vector direction and length
+            mesh["vectors"] = vectors
+            mesh["mag"] = mag
+            # create arrows for each probe
+            arrows = mesh.glyph(orient='vectors', scale='mag')
+            arrows.set_active_scalars("colors")
+
+            # add arrows
+            plotter.add_mesh(
+                arrows, 
+                scalars="colors", 
+                cmap="brg",
+                clim=[0, 1], 
+                show_scalar_bar=False, 
+                lighting=False
+            )
+            
+            # add text labels next to each arrow with the name of the probe
             plotter.add_point_labels(
-                points,
+                probe_pos,
                 list(self.probes.keys()),
-                point_color="red" if probe["field"][0] == "h" else "blue",
-                point_size=point_size,
                 always_visible=True,
-                render_points_as_spheres=True,
                 fill_shape=False,
                 italic=True,
                 margin=1
             )
 
-        plotter.show_grid(font_size=9)
+        if show_rulers:
+            plotter.show_grid(font_size=8)
+
+        plotter.add_axes()
 
         return plotter
 
@@ -2017,7 +2073,7 @@ class FDTD_Solver():
 
         # start with the rendered view of the model 
         if plotter is None:
-            plotter = self.render()
+            plotter = self.render(show_rulers=show_rulers)
 
         monitor = np.atleast_1d(monitor)
         opacity = np.broadcast_to(opacity, len(monitor))

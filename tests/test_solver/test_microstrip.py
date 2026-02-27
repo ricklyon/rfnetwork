@@ -111,12 +111,13 @@ class TestMicroStrip(unittest.TestCase):
         s.add_field_monitor("mon1", e_normal, e_normal[1], sub_h, 5)
 
         s.add_current_probe("c1", current_face)
-        s.add_line_probe("v1", e_normal, voltage_line)
+        s.add_voltage_probe("v1", voltage_line)
 
         vsrc = 1e-2 * s.gaussian_source(width=80e-12, t0=80e-12, t_len=300e-12)
         frequency: np.ndarray = np.arange(f0 - 2e9, f0+2e9, 10e6)
 
-        s.run([1], [vsrc], n_threads=4, show_progress=False)
+        s.assign_excitation(vsrc, 1)
+        s.solve(n_threads=4, show_progress=False)
 
         sdata = s.get_sparameters(frequency, downsample=False)
         S11 = sdata[:, 0]
