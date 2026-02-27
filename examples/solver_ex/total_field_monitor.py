@@ -65,7 +65,7 @@ voltage_line2 = pv.Line(
 )
 
 s = rfn.FDTD_Solver(sbox)
-s.add_dielectric(substrate, er=3.66, style=dict(opacity=0.0))
+s.add_dielectric(substrate, er=3.66, style=dict(opacity=0.2, color="teal"))
 s.add_conductor(ms1_trace, style=dict(color="gold"))
 s.add_lumped_port(1, port1_face, "z-")
 
@@ -116,10 +116,25 @@ S11 = sdata[:, 0]
 
 e_tot = s.get_monitor_data("mon1")
 
-monitor_name = "mon1"
+monitor = "mon1"
+view="xy"
+style="vector"
+linear=False
+name ="mon1"
+vmax = None
+vmin = None
+max_vector_len = 0.02
+opacity = "linear"
 
-plotter = self.plot_monitor("mon1", gif_file="fields.gif")
-# plotter.show()
+cpos = pv.CameraPosition(
+    position=(-0.6, -0.05, 0.05),
+    focal_point=(0, 0, 0),
+    viewup=(0, 0.0, 1.0),
+)
+
+gif_setup = dict(file="vectors.gif", fps=20)
+plotter = self.plot_monitor("mon1", camera_position=cpos, zoom=3, style="vector", show_rulers=False, gif_setup=gif_setup)
+plotter.show()
 
 
 # z = sub_h
