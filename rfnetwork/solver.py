@@ -143,7 +143,7 @@ class FDTD_Solver():
         self.pml_boundaries = copy(list(sides))
         self._n_pml = n_pml
 
-    def pos_to_idx(self, p, mode: str = "edge"):
+    def pos_to_idx(self, position: tuple, mode: str = "edge"):
         """
         Returns the index of the grid edge or cell center that is directly on or just past (in +x, +y and +z directions) 
         the given position.
@@ -154,14 +154,14 @@ class FDTD_Solver():
         
         grid = [self.g_edges[i] if m == "edge" else self.g_cells[i] for i, m in enumerate(mode)]
         for i, g in enumerate(grid):
-            diff = (g - p[i])
+            diff = (g - position[i])
             # if no cell is above the point, return the length of the axis, otherwise return the first cell that is 
             # larger than the point.
             idx += [np.argmax(diff >= -self._tol) if diff[-1] > -self._tol else len(g)]
 
         return tuple(idx)
 
-    def field_pos_to_idx(self, position, field: str):
+    def field_pos_to_idx(self, position: tuple, field: str):
         """
         Returns the index of the field component that is directly on or just past (in +x, +y and +z directions) 
         the given grid position.
@@ -1161,9 +1161,9 @@ class FDTD_Solver():
         field : {'ex', 'ey', 'ez', 'e_total', 'hx', 'hy', 'hz'}
             field quantity. If "e_total" is specified, three monitors are created for each x, y, z field component.
         axis : {'x', 'y', 'z'}
-            normal axis to surface
+            surface normal axis
         position : float
-            position on axis of the monitor surface
+            position on axis of the monitor surface, inches
         n_step : int, default: 1
             number of time steps between each capture.
         """
@@ -1868,7 +1868,7 @@ class FDTD_Solver():
 
         # time vector
         t_len = len(monitor["values"]) * self.dt * monitor["n_step"]
-        time_values = np.arange(0, t_len, self.dt * monitor["n_step"], dtype=np.float64)
+        time_values = np.arange(0, t_len, self.dt * monitor["n_step"], dtype=np.float64)[:len(monitor["values"])]
         
         # combine component vectors into a single matrix
         if is_total_field:
@@ -1884,8 +1884,8 @@ class FDTD_Solver():
             e2 = (e2[:, 1:-1, 1:] + e2[:, 1:-1, :-1]) / 2
             e3 = (e3[:, 1:-1, 1:-1])
 
-            # order back to x, y, z
-            e_xyz = [(e1, e2, e3)[a] for a in axis_surf_ordered]
+            # order back to x, y, z. Look up where each cartesian axis falls in the surface order
+            e_xyz = [(e1, e2, e3)[axis_surf_ordered.index(a)] for a in range(3)]
 
             # if axis_str == "z":
             #     ex = (ex[:, 1:, 1:-1] + ex[:, :-1, 1:-1]) / 2
@@ -1928,7 +1928,7 @@ class FDTD_Solver():
         monitor: list,
         linear: bool = False, 
         cmap: str = "jet",
-        style: str = "points",
+        style: str = "surface",
         opacity: str = "linear",
         init_time: float = None,
         max_vector_len: float = 0.01,
@@ -2020,8 +2020,8 @@ class FDTD_Solver():
             plotter = self.render()
 
         monitor = np.atleast_1d(monitor)
-        opacity = np.atleast_1d(opacity)
-        style = np.atleast_1d(style)
+        opacity = np.broadcast_to(opacity, len(monitor))
+        style = np.broadcast_to(style, len(monitor))
 
         # time step size of monitors
         n_step = None
@@ -2040,6 +2040,9 @@ class FDTD_Solver():
             # is there monitor data for all three rectangular components
             is_total_field = all([n in self.monitors.keys() for n in c_names])
 
+            if not is_total_field and style[i] == "vector":
+                raise ValueError("Monitor must contain all field components to plot a vector field.")
+
             # if total field monitor, use the monitor of the first component to get the axis and axis position
             monitor = self.monitors[c_names[0]] if is_total_field else self.monitors[name]
             axis = monitor["axis"]
@@ -2055,7 +2058,7 @@ class FDTD_Solver():
 
             # check that all monitors have the same time step size
             elif monitor["n_step"] != n_step:
-                raise ValueError("All monitors must have identical time steps.")
+                raise ValueError("Monitors must have identical time steps in order to overlay them on the same plot.")
 
             field = self.get_monitor_data(name)
 
@@ -2068,14 +2071,21 @@ class FDTD_Solver():
             surf_coords_m = np.meshgrid(*list(field.coords.values())[-2:], indexing="ij")
             # meshgrid of a single value of the axis position of the surface
             n_coords_m = np.ones(surf_coords_m[0].size) * axis_pos
-            # all coordinate points, flattened into a the rows, shape is number of points, cartesian xyz
-            coords_xyz = [(*surf_coords_m, n_coords_m)[a] for a in axis_ordered]
+            # coordinate points ordered as surface axis, normal axis
+            coords = (*surf_coords_m, n_coords_m)
+            # order points as xyz
+            coords_xyz = [coords[axis_ordered.index(a)] for a in range(3)]
             points = np.vstack([a.ravel() for a in coords_xyz]).T
             
             # get magnitude if all component vectors are present, and flatten spatial point dimensions.
             # field_v has shape time, flattened spatial points
-            if is_total_field:
-                field_v = np.sqrt(np.sum(np.abs(field)**2, axis=0)).reshape(len(field[0]), -1)
+            if style[i] == "vectors":
+                # PolyData requires that the spatial points be flattened in row-order. Dimensions should be time, 
+                # spatial points
+                field_v = np.sqrt(np.sum(np.abs(field)**2, axis=0)).reshape(len(field[1]), -1)
+            elif is_total_field:
+                # RectilinearGrid requires the spatial points be flattened in column-order
+                field_v = np.sqrt(np.sum(np.abs(field)**2, axis=0)).reshape(len(field[1]), -1, order="F")
             else:
                 field_v = field.reshape(len(field), -1, order="F")
 
@@ -2092,11 +2102,8 @@ class FDTD_Solver():
                 vmin = -vmax if linear else vmax - 50
 
             # initialize vector field
-            if style[i] == "vector":
-
-                if not is_total_field:
-                    raise ValueError("Monitor must contain all field components to plot a vector field.")
-
+            if style[i] == "vectors":
+                
                 # flatten spatial dimensions to create a list of vectors
                 vectors = np.reshape(field, (*field.shape[0:2], -1 ))
                 # move xyz axis to the end, shape is time, spatial points, cartesian xyz
@@ -2141,9 +2148,9 @@ class FDTD_Solver():
                 if axis == 2: # xy plane
                     floc_in = (field.coords["x"], field.coords["y"], [monitor["position"]])
                 elif axis == 1: # xz plane
-                    floc_in = (field.coords["x"], monitor["position"], field.coords["z"])
+                    floc_in = (field.coords["x"], [monitor["position"]], field.coords["z"])
                 else: # yz plane
-                    floc_in = (monitor["position"], field.coords["y"], field.coords["z"])
+                    floc_in = ([monitor["position"]], field.coords["y"], field.coords["z"])
                 
                 # create rectangular grid surface and assign scalar field values as the color
                 mesh = pv.RectilinearGrid(*floc_in)
@@ -2155,7 +2162,7 @@ class FDTD_Solver():
                     scalars="values", 
                     clim=[vmin, vmax], 
                     show_scalar_bar=False, 
-                    interpolate_before_map=bool(style == "surface"),
+                    interpolate_before_map=bool(style[i] == "surface"),
                     render_points_as_spheres=True,
                     style=style[i],
                     opacity=opacity[i],
