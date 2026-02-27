@@ -1910,35 +1910,123 @@ class FDTD_Solver():
     
     def plot_monitor(
         self,
-        monitor_name: list,
-        view="xz",
-        vmin=None,
-        vmax=None, 
-        zoom=1.3, 
-        el=10, az=0,
-        opacity="linear",
-        gif_file=None,
-        linear=False, 
-        cmap="jet",
-        style="points",
-        max_vector_len= 0.01
-    ):
+        monitor: list,
+        linear: bool = False, 
+        cmap: str = "jet",
+        style: str = "points",
+        opacity: str = "linear",
+        init_time: float = None,
+        max_vector_len: float = 0.01,
+        camera_position: str = "xy",
+        vmin: float = None,
+        vmax: float = None, 
+        zoom: float = 1.0, 
+        show_rulers: bool = True,
+        colorbar_title: str = None,
+        gif_setup: dict = None,
+        plotter: pv.Plotter = None
+    ) -> pv.Plotter:
+        """
+        Show a field monitor overlayed on the model geometry. Time step of the fields is controlled with an interactive
+        slider bar.
 
-        monitor_name = np.atleast_1d(monitor_name)
-        plotter = self.render()
-        field_mesh = []
+        Parameters
+        ----------
+        monitor : str | list
+            monitor name(s) assigned with add_field_monitor. 
 
-        for i, name in enumerate(monitor_name):
+        linear : bool, default: False
+            if True, linear field magnitudes are plotted on the overlay. If False, values are converted to db20
+            before plotting.
+
+        cmap : str, default: "jet"
+            matplotlib colormap name
+
+        style : {"surface", "points", "vectors"}, default: "surface"
+            Visualization style of the overlay. If "vectors", monitor must be a total field monitor with three
+            component vectors. Can be a list if multiple monitors are given. Values are interpolated for the "surface"
+            style and shows a continuous overlay. Values are shown as non-interpolated, discrete points on the 
+            Yee grid if "points" is chosen.
+            
+        opacity : str | list, default: linear
+            Opacity of the field overlay. A float value from 0-1 can be provided, or a string can be specified to 
+            map the scalars range to a predefined opacity transfer function (options include: 'linear', 
+            'linear_r', 'geom', 'geom_r'). If multiple monitors are given, this can be a list to specify different
+            opacities to each overlay.
+
+        init_time : float, optional
+            initial time step to use for the field overlays. Default is half of the simulation interval.
+
+        max_vector_len : float, default: 0.01
+            maximum length of vectors in inches, should be chosen so the vectors are smaller than the average grid
+            cell in the overlay to avoid overlapping. Ignored if style is not "surface".
+        
+        camera_position : str | pv.CameraPosition, default: "xy"
+            camera position, passed to pv.Plotter.camera_position
+        
+        vmin : float, optional
+            minimum field value shown on the colormap, must be in dB if linear is false.
+        
+        vmax : float, optional
+            maximum field value shown on the colormap, must be in dB if linear is false.
+        
+        zoom : float, default: 1
+            camera zoom
+
+        show_rulers : bool, default: True
+            show the model bounding box with rulers
+        
+        colorbar_title : str, optional
+            title above the colorbar
+
+        plotter : pv.Plotter, optional
+            pyvista Plotter object. If provided the model geometry is not drawn on the plot and needs to be drawn
+            manually with render().
+
+        
+        """
+
+        # start with the rendered view of the model 
+        if plotter is None:
+            plotter = self.render()
+
+        monitor = np.atleast_1d(monitor)
+        opacity = np.atleast_1d(opacity)
+        style = np.atleast_1d(style)
+
+        # time step size of monitors
+        n_step = None
+        # inital time step frame to start the feild overlays with
+        init_frame = None
+        # number of total frames
+        n_frames = None
+        
+        # keep track of field values and plot actors so they can be updated interactively
+        plot_items = [dict() for i in range(len(monitor))]
+
+        for i, name in enumerate(monitor):
 
             # component field names
             c_names = [f"{name}_{a}" for a in ("x", "y", "z")]
             # is there monitor data for all three rectangular components
             is_total_field = all([n in self.monitors.keys() for n in c_names])
 
+            # if total field monitor, use the monitor of the first component to get the axis and axis position
             monitor = self.monitors[c_names[0]] if is_total_field else self.monitors[name]
             axis = monitor["axis"]
-            n_step = monitor["n_step"]
             axis_pos = monitor["position"]
+
+            # initialize time step values if on the first monitor
+            if n_step is None:
+                n_step = monitor["n_step"]
+                # number of frames in the monitor data, time dimension always preceds the 2 spatial dims of the surface
+                n_frames = monitor["values"].shape[-3]
+                # frame index to the monitor data
+                init_frame = int(init_time / n_step) if init_time is not None else int(n_frames / 2)
+
+            # check that all monitors have the same time step size
+            elif monitor["n_step"] != n_step:
+                raise ValueError("All monitors must have identical time steps.")
 
             field = self.get_monitor_data(name)
 
@@ -1947,12 +2035,13 @@ class FDTD_Solver():
             surf_axis.pop(monitor["axis"])
             axis_ordered = surf_axis + [axis]
 
-            if axis == 2: # xy plane
-                floc_in = (field.coords["x"], field.coords["y"], [monitor["position"]])
-            elif axis == 1: # xz plane
-                floc_in = (field.coords["x"], monitor["position"], field.coords["z"])
-            else: # yz plane
-                floc_in = (monitor["position"], field.coords["y"], field.coords["z"])
+            # meshgrid of coordinates on the surface
+            surf_coords_m = np.meshgrid(*list(field.coords.values())[-2:], indexing="ij")
+            # meshgrid of a single value of the axis position of the surface
+            n_coords_m = np.ones(surf_coords_m[0].size) * axis_pos
+            # all coordinate points, flattened into a the rows, shape is number of points, cartesian xyz
+            coords_xyz = [(*surf_coords_m, n_coords_m)[a] for a in axis_ordered]
+            points = np.vstack([a.ravel() for a in coords_xyz]).T
             
             # get magnitude if all component vectors are present, and flatten spatial point dimensions.
             # field_v has shape time, flattened spatial points
@@ -1967,25 +2056,17 @@ class FDTD_Solver():
                 field_v = np.where(np.abs(field_v) < 1e-12, 1e-12, field_v)
                 field_v = conv.db20_lin(field_v)
 
+            # set min/max bounds automatically if not given
             if vmax is None:
                 vmax = np.nanmax(field_v)
             if vmin is None:
                 vmin = -vmax if linear else vmax - 50
 
             # initialize vector field
-            if style == "vector":
+            if style[i] == "vector":
 
                 if not is_total_field:
                     raise ValueError("Monitor must contain all field components to plot a vector field.")
-
-                
-                # meshgrid of coordinates on the surface
-                surf_coords_m = np.meshgrid(*list(field.coords.values())[-2:], indexing="ij")
-                # meshgrid of a single value of the axis position of the surface
-                n_coords_m = np.ones(surf_coords_m[0].size) * axis_pos
-                # all coordinate points, flattened into a the rows, shape is number of points, cartesian xyz
-                coords_xyz = [(*surf_coords_m, n_coords_m)[a] for a in axis_ordered]
-                points = np.vstack([a.ravel() for a in coords_xyz]).T
 
                 # flatten spatial dimensions to create a list of vectors
                 vectors = np.reshape(field, (*field.shape[0:2], -1 ))
@@ -1994,14 +2075,16 @@ class FDTD_Solver():
 
                 mesh = pv.PolyData(points)
                 # assign colormap values
-                mesh.point_data['values'] = field_v[0]
+                mesh.point_data['values'] = field_v[init_frame]
                 # assign vector direction
-                mesh["vectors"] = vectors[0]
-                # assign vector lengths
+                mesh["vectors"] = vectors[init_frame]
+                # assign vector lengths. Scale so that minimum value gives a length of 0.
                 vector_len = np.clip(field_v, vmin, vmax) - vmin
                 vector_len = max_vector_len * (vector_len / np.max(vector_len))
-                mesh["mag"] = vector_len[0]
+                mesh["mag"] = vector_len[init_frame]
 
+                # create vector field, setting the arrow scaling with the "mag" dataset and direction with the "vector" 
+                # dataset
                 arrows = mesh.glyph(orient='vectors', scale='mag')
                 arrows.set_active_scalars("values")
 
@@ -2011,85 +2094,125 @@ class FDTD_Solver():
                     cmap="jet",
                     clim=[vmin, vmax], 
                     show_scalar_bar=False, 
+                    opacity=opacity[i]
                 )
 
-                field_mesh += [(actor, mesh, field_v, arrows, vectors, vector_len)]
+                plot_items[i] = dict(
+                    actor=actor,
+                    mesh=mesh,
+                    scalars=field_v,
+                    arrows=arrows,
+                    vectors=vectors,
+                    mag=vector_len,
+                )
 
-
+            # initialize colormapped scalar surface
             else:
-
-                fmesh = pv.RectilinearGrid(*floc_in)
-                fmesh.point_data['values'] = field_v[0]
+                # get grid points along each axis
+                if axis == 2: # xy plane
+                    floc_in = (field.coords["x"], field.coords["y"], [monitor["position"]])
+                elif axis == 1: # xz plane
+                    floc_in = (field.coords["x"], monitor["position"], field.coords["z"])
+                else: # yz plane
+                    floc_in = (monitor["position"], field.coords["y"], field.coords["z"])
+                
+                # create rectangular grid surface and assign scalar field values as the color
+                mesh = pv.RectilinearGrid(*floc_in)
+                mesh.point_data['values'] = field_v[init_frame]
                 
                 actor = plotter.add_mesh(
-                    fmesh, 
+                    mesh, 
                     cmap=cmap, 
                     scalars="values", 
                     clim=[vmin, vmax], 
                     show_scalar_bar=False, 
-                    opacity=opacity[i],
-                    interpolate_before_map=(style == "surface"),
+                    interpolate_before_map=bool(style == "surface"),
                     render_points_as_spheres=True,
-                    style=style,
+                    style=style[i],
+                    opacity=opacity[i],
                     lighting=False,
                     point_size=10
                 )
 
-                field_mesh += [(actor, mesh, field_v, None, None, None)]
+                plot_items[i] = dict(
+                    actor=actor,
+                    mesh=mesh,
+                    scalars=field_v,
+                )
 
-        nframe = len(field_v)
-        Nt = nframe * n_step
+        # number of time points in the simulation
+        Nt = n_frames * n_step
+        self.slider_value = init_frame * n_step
 
         plotter.add_axes()
-        plotter.camera_position = view
-        plotter.camera.azimuth += az
-        plotter.camera.elevation += el
+        plotter.camera_position = camera_position
         plotter.camera.zoom(zoom)
+
+        # remove rulers that are on by default
+        if not show_rulers:
+            plotter.remove_bounds_axes()
         
+        # add title over colorbar
+        if colorbar_title is None:
+            colorbar_title="E [V/m]\n" if linear else "E [dB]\n"
+
         plotter.add_scalar_bar(
-            title="E [V/m]\n" if linear else "E [dB]\n", vertical=False, label_font_size=11, title_font_size=14
+            colorbar_title, vertical=False, label_font_size=11, title_font_size=14
         )
         
-        def callback(nt):
-            
-            # downsampled index into the field values
-            n = int(nt // n_step)
+        def callback(frame):
+            """ function called every time the slider bar is moved. """
+            # get the index into the monitor data
+            # frame = int(nt // n_step)
+            frame = int(frame)
+            self.slider_value = frame
 
-            self.slider_value = n
+            # iterate through monitor plot items
+            for p in plot_items:
+                # update scalar colormap values
+                mesh = p["mesh"]
+                mesh.point_data["values"][:] = p["scalars"][frame]
 
-            for (actor, mesh, scalars, arrows, vectors, vector_len) in field_mesh:
-            
-                if vectors is not None:
-                    # print(vectors.shape)
-                    mesh["vectors"][:] = vectors[n]
-                    mesh["mag"][:] = vector_len[n]
-                    mesh.point_data["values"][:] = scalars[n]
+                # update vector direction and magnitude
+                if "arrows" in p.keys():
+                    
+                    for value in ("vectors", "mag"):
+                        mesh[value][:] = p[value][frame]
 
-                    arrows.copy_from(mesh.glyph(orient='vectors', scale='mag'))
-                    arrows.set_active_scalars("values")
-
-                else:
-                    mesh.point_data["values"][:] = scalars[n]
+                    p["arrows"].copy_from(mesh.glyph(orient='vectors', scale='mag'))
+                    p["arrows"].set_active_scalars("values")
 
 
-          
-        self.slider_value = Nt // 2
-
-        if gif_file is None:
+        if gif_setup is None:
             self.slider = plotter.add_slider_widget(
                 callback,
-                [0, Nt-2],
-                value=Nt // 2,
-                title="Time [ps]",
+                [0, n_frames],
+                value=init_frame,
+                title="Frame",
                 interaction_event="always",
                 style="modern",
                 fmt="%0.0f"
             )
+        else:
+            file_ = gif_setup["file"]
+            fps = gif_setup.get("fps", 15)
+            loop = gif_setup.get("loop", 0)
+
+            plotter.open_gif(file_, fps=fps, loop=loop)
+            for n in range(n_frames):
+
+                callback(n)
+                    
+                plotter.add_title(f"n={n}")
+                plotter.write_frame()
+
+            # Closes and finalizes movie
+            plotter.close()
+            return
 
         def set_field_visible(value):
-            for m in field_actors:
-                m.SetVisibility(value)
-
+            for p in plot_items:
+                p["actor"].SetVisibility(value)
 
         def increment_left():
             self.slider.GetRepresentation().SetValue(self.slider_value - 1)
@@ -2107,36 +2230,6 @@ class FDTD_Solver():
 
         plotter.add_key_event("Left", increment_left)
         plotter.add_key_event("Right", increment_right)
-
-
-        if gif_file:
-            plotter.open_gif(gif_file, fps=15)
-            for n in range(nframe):
-
-                for (actor, mesh, scalars, arrows, vectors) in field_mesh:
-                
-                    if vectors is not None:
-
-                        mag = np.sqrt(np.sum(vectors[n]**2, axis=-1))
-
-                        mesh["vectors"][:] = vectors[n]
-                        mesh["mag"][:] = mag
-                        mesh.point_data["values"][:] = scalars[n]
-
-                        arrows.copy_from(mesh.glyph(orient='vectors', scale='mag'))
-
-                        arrows.set_active_scalars("values")
-                        # arrows["values"][:] = scalars[n]
-
-                    else:
-                        mesh.point_data["values"][:] = scalars[n]
-                    
-                plotter.add_title(f"n={n * n_step}")
-                # plotter.render()
-                plotter.write_frame()
-
-            # Closes and finalizes movie
-            plotter.close()
         
         return plotter
     
