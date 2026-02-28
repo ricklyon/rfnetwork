@@ -1,10 +1,10 @@
 import re
 from pathlib import Path
 import numpy as np
-from scipy.optimize import fsolve
 from scipy.special import ellipk
 from scipy import signal
 from .core.units import const
+
 
 def dtft(xn: np.ndarray, frequency: np.ndarray, fs: float, downsample: bool = False) -> np.ndarray:
     """
@@ -110,6 +110,7 @@ def ms_z_to_width(z: float, er: float, d: float) -> float:
     else:
         return wd12 * d
 
+
 def coupled_sline_impedance(w: float, s: float, b: float, er: float):
     """
     Odd and even mode impedance for coupled stripline. Units of w, s and b are arbitrary.
@@ -169,6 +170,99 @@ def coupled_sline_fringing_cap(w: float, s: float, b: float, er: float):
     # return unnormalized capacitance in farads
     eps = er * const.e0
     return Cf_o * eps, Cf_e * eps
+
+
+def ustrip_impedance(w: float, h: float, er: float):
+    """
+    Microstrip impedance and effective permittivity for thin microstrip lines
+    """
+
+    if (w / h) < 1:
+        er_eff = ((er + 1) / 2) + ((er - 1) / 2) * ((1 + 12 * (h / w))**(-0.5) + 0.04 * (1 - (w / h)**2))
+        zc = (const.eta0 / (2 * np.pi * np.sqrt(er_eff))) * np.log((8 * h / w) + 0.25 * (w / h))
+    else:
+        er_eff = ((er + 1) / 2) + ((er - 1) / 2) * ((1 + 12 * (h / w))**(-0.5))
+        zc = (const.eta0 / (np.sqrt(er_eff))) * ((w / h) + 1.393  + 0.677 * np.log((w / h) + 1.444))**(-1)
+
+    return zc, er_eff
+
+
+def ustrip_fringing_cap(w, h, er):
+    """
+    Fringing capacitance from edge of uncoupled microstrip line, per unit length [m].
+    This is a weak function of the width of the line.
+    """
+    # characteristic impedance and effective epsilon
+    zc, er_eff  = ustrip_impedance(w, h, er)
+
+    # parallel plate capacitance
+    Cp = er * const.e0 * (w / h)
+    # uncoupled fringe capacitance
+    Cf = ((np.sqrt(er_eff) / (const.c0 * zc)) - Cp) / 2
+
+    # fringing capacitance seems to be a bit high, reduced empirically 
+    return Cf * 0.9
+
+
+def coupled_ustrip_fringing_cap(w: float, s: float, h: float, er: float):
+    """
+    Odd and even mode fringing capacitance for edge coupled microstrip line, per unit length [m].
+    See microstrip_coupled_capacitance.pdf in docs/solver
+
+    Assumes that thickness is zero.
+    """
+    # uncoupled fringing capacitance
+    Cf = ustrip_fringing_cap(w, h, er)
+
+    # fringing capacitance in even mode
+    A = np.exp(-0.1 * np.exp(2.33 - 2.53 * (w / h)))
+    Cf_e = Cf / (1 + A * (h / s) * np.tanh(8 * s / h))
+
+    # odd mode fringing capacitance through the dielectric
+    coth = lambda x : np.cosh(x) / np.sinh(x)
+    C_gd = (const.e0 * er / np.pi) * np.log(coth((np.pi / 4) * (s / h))) + 0.65 * Cf * (
+        ((0.02 * np.sqrt(er)) / (s / h)) + 1 - (1 / (er **2 ))
+    )
+    # odd mode fringing capacitance through the air
+    k = (s / h) / ((s / h) + 2 * (w / h))
+    kp = np.sqrt(1 - (k**2))
+    C_ga = const.e0 * ellipk(kp) / ellipk(k)
+
+    # return unnormalized capacitance in farads, odd, even
+    return (C_gd + C_ga), Cf_e
+
+
+def coupled_ustrip_cap(w: float, s: float, h: float, er: float):
+    """ Total odd and even mode capacitance per unit length """
+    Cf = ustrip_fringing_cap(w, s, er)
+
+    Cfo, Cfe = coupled_ustrip_fringing_cap(w, s, h, er)
+
+    Cp = er * const.e0 * w / h
+
+    # total odd and even mode capacitances
+    Co = Cp + Cf + Cfo
+    Ce = Cp + Cf + Cfe
+
+    return Co, Ce
+
+
+def coupled_ustrip_impedance(w: float, s: float, h: float, er: float):
+    """
+    Odd and even mode total capacitance for edge coupled microstrip line, per unit length [m].
+    See microstrip_coupled_capacitance.pdf in docs/solver
+    """
+
+    # total even and odd mode coupled capacitance
+    Co, Ce = coupled_ustrip_cap(w, s, h, er)
+    # coupled capacitance in air
+    Co_a, Ce_a = coupled_ustrip_cap(w, s, h, 1)
+
+    Zo = 1 / (const.c0 * np.sqrt(Co * Co_a))
+    Ze = 1 / (const.c0 * np.sqrt(Ce * Ce_a))
+
+    return Zo, Ze
+
 
 def lp_filter_prototype(n: int, ripple: float = 0.5):
     """
