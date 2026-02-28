@@ -5,6 +5,7 @@ import pyvista as pv
 from copy import copy
 from np_struct import ldarray
 import sys
+from matplotlib.axes import Axes
 
 from rfnetwork import const, conv, utils, core, utils_mesh
 
@@ -976,7 +977,9 @@ class FDTD_Solver():
         vsrc = np.exp(-((t - t0) / (width / 4)) ** 2)
 
         # normalize so amplitude is 1
-        return (vsrc / np.max(np.abs(vsrc))).astype(np.float32)
+        return ldarray(
+            vsrc / np.max(np.abs(vsrc)), coords = dict(time=t)
+        )
     
     def gaussian_modulated_source(self, f0: float, width: float, t0: float, t_len: float):
         """
@@ -990,7 +993,9 @@ class FDTD_Solver():
         vsrc = np.exp(-((t - t0) / (width / 4)) ** 2) * np.sin(2* np.pi * f0 * t)
 
         # normalize so amplitude is 1
-        return (vsrc / np.max(np.abs(vsrc))).astype(np.float32)
+        return ldarray(
+            vsrc / np.max(np.abs(vsrc)), coords = dict(time=t)
+        )
     
     def assign_excitation(self, waveform: np.ndarray, ports: list):
         """
@@ -1406,12 +1411,23 @@ class FDTD_Solver():
         line : pv.PolyData
             PolyData object defining a line. Must be aligned with the cartesian axes.
         """
+        line_length = np.diff(line.points, axis=0)
+
+        if np.count_nonzero(line_length) != 1:
+            raise ValueError("Voltage probe must be parallel to the caresian axes.")
+        
         # get axis that the line is parallel to
-        axis = np.argmax(np.any(np.diff(line.points, axis=0), axis=0))
+        axis = np.argmax(np.any(line_length, axis=0))
         # field component parallel to axis
         field = ["ex", "ey", "ez"][axis]
-        # start and end position of the line, end in inclusive
+
+        if len(line.points) != 2:
+            raise ValueError("Voltage probe must be a line.")
+        
+        # start and end position of the line, end in inclusive. Starts from the point with the smallest distance
+        # from the axis.
         line_start, line_end = np.min(line.points, axis=0), np.max(line.points, axis=0)
+
         # field indices of the line end points
         ijk_start = list(self.field_pos_to_idx(line_start, field))
         ijk_end = list(self.field_pos_to_idx(line_end, field))
@@ -1432,7 +1448,8 @@ class FDTD_Solver():
         fcell_w = self.fcell_w[field]
 
         # direction of line, +1 if oriented along positive axis direction, -1 if along negative direction
-        direction = 1 if line_end[axis] > line_start[axis] else -1
+        p0, p1 = line.points
+        direction = 1 if p1[axis] > p0[axis] else -1
 
         for i, idx in enumerate(ijk_probes):
             # get cell width along the given axis
@@ -1440,7 +1457,13 @@ class FDTD_Solver():
             self.probes[f"{name}_{i}"] = dict(field=field, index=(idx), d=direction * conv.m_in(cw))
         
         
-    def render(self, show_probes: bool = False, show_rulers: bool = True) -> pv.Plotter:
+    def render(
+        self, 
+        show_probes: bool = False, 
+        show_rulers: bool = True, 
+        show_mesh: bool = True,
+        plotter: pv.Plotter = None
+    ) -> pv.Plotter:
         """
         Plot the model geometry
 
@@ -1451,6 +1474,12 @@ class FDTD_Solver():
 
         show_rulers : bool, default: True
             show the model bounding box with rulers
+
+        show_mesh : bool, default: True
+            show the grid mesh. Paralllel projection is turned on if the mesh is shown.
+
+        plotter : pv.Plotter, optional
+            pyvista Plotter object
 
         Returns
         -------
@@ -1463,10 +1492,18 @@ class FDTD_Solver():
         
         grid = pv.RectilinearGrid(gx, gy, gz)
         
-        plotter = pv.Plotter()
-        plotter.enable_parallel_projection()
+        if plotter is None:
+            plotter = pv.Plotter()
+        
         # add grid
-        plotter.add_mesh(grid, style="wireframe", line_width=0.05, color="k", opacity=0.05)
+        if show_mesh:
+            # mesh is not easily viewed unless the parallel projection is used. This makes all the grid lines
+            # along an axis line up if the camera is aligned with a cardinal plane.
+            plotter.enable_parallel_projection()
+            plotter.add_mesh(grid, style="wireframe", line_width=0.05, color="k", opacity=0.05)
+
+        # add solve box
+        plotter.add_mesh(self.bounding_box, style="wireframe")
 
         # add substrates
         for name, (sub) in self.dielectric.items():
@@ -1478,7 +1515,7 @@ class FDTD_Solver():
 
         # add lumped elements
         for name, ele in self.lumped_element.items():
-            plotter.add_mesh(ele["obj"], color="pink", opacity=0.5)
+            plotter.add_mesh(ele["obj"], color="pink", opacity=0.3)
 
         if show_probes:
             arrow_pos = np.zeros((len(self.probes), 3))
@@ -1547,7 +1584,7 @@ class FDTD_Solver():
             )
 
         if show_rulers:
-            plotter.show_grid(font_size=8)
+            plotter.show_bounds(font_size=8, fmt="%0.2f", ticks="outside")
 
         plotter.add_axes()
 
@@ -1776,7 +1813,7 @@ class FDTD_Solver():
         s_column = B / V_applied[..., None]
 
         return ldarray(
-            s_column[..., None], coords=dict(frequency=frequency, b=np.arange(nports), a=[source_port])
+            s_column[..., None], coords=dict(frequency=frequency, b=np.arange(1, nports + 1), a=[source_port])
         )
     
     def edge_correction(self, p1: tuple, p2: tuple, integration_axis: str, CFe: float = None, CFh: float = 1):
@@ -2047,14 +2084,17 @@ class FDTD_Solver():
         opacity: str = "linear",
         init_time: float = None,
         max_vector_len: float = 0.01,
+        scale_vectors: bool = True,
         camera_position: str = "xy",
         vmin: float = None,
         vmax: float = None, 
         zoom: float = 1.0, 
         show_rulers: bool = True,
+        show_mesh: bool = True,
         colorbar_title: str = None,
         plotter: pv.Plotter = None,
         gif_setup: dict = None,
+        axes: Axes = None
     ) -> pv.Plotter:
         """
         Show a field monitor overlayed on the model geometry. Time step of the fields is controlled with an interactive
@@ -2078,18 +2118,21 @@ class FDTD_Solver():
             style and shows a continuous overlay. Values are shown as non-interpolated, discrete points on the 
             Yee grid if "points" is chosen.
             
-        opacity : str | list, default: linear
+        opacity : str | list, default: "linear"
             Opacity of the field overlay. A float value from 0-1 can be provided, or a string can be specified to 
             map the scalars range to a predefined opacity transfer function (options include: 'linear', 
             'linear_r', 'geom', 'geom_r'). If multiple monitors are given, this can be a list to specify different
             opacities to each overlay.
 
-        init_time : float, optional
-            initial time step to use for the field overlays. Default is half of the simulation interval.
+        init_time_ps : float, optional
+            initial time in picosecond to use for the field overlays. Default is half of the simulation interval.
 
         max_vector_len : float, default: 0.01
             maximum length of vectors in inches, should be chosen so the vectors are smaller than the average grid
             cell in the overlay to avoid overlapping. Ignored if style is not "surface".
+
+        scale_vectors : bool, default: True
+            scale the length of the vectors by the field magnitude. Ignored if style is not "surface".
         
         camera_position : str | pv.CameraPosition, default: "xy"
             camera position, passed to pv.Plotter.camera_position
@@ -2105,6 +2148,9 @@ class FDTD_Solver():
 
         show_rulers : bool, default: True
             show the model bounding box with rulers
+
+        show_mesh : bool, default: True
+            show the grid mesh
         
         colorbar_title : str, optional
             title above the colorbar
@@ -2122,6 +2168,10 @@ class FDTD_Solver():
             - end_ps : ending time of gif, in picoseconds. Default: end of simulation
             - step_ps : number of time steps to skip between in each frame, in picoseconds. Default: 1
 
+        axes : matplotlib.axes.Axes
+            matplotlib axes object. If provided, a screenshot is taken of the rendered image at init_time_ps and 
+            drawn in the the axes. 
+
         Returns
         -------
         pv.Plotter
@@ -2132,7 +2182,8 @@ class FDTD_Solver():
 
         # start with the rendered view of the model 
         if plotter is None:
-            plotter = self.render(show_rulers=show_rulers)
+            plotter = pv.Plotter(off_screen=bool(axes is not None))
+            self.render(show_rulers=show_rulers, show_mesh=show_mesh, plotter=plotter)
 
         monitor = np.atleast_1d(monitor)
         opacity = np.broadcast_to(opacity, len(monitor))
@@ -2169,7 +2220,13 @@ class FDTD_Solver():
                 # number of frames in the monitor data, time dimension always preceds the 2 spatial dims of the surface
                 n_frames = monitor["values"].shape[-3]
                 # frame index to the monitor data
-                init_frame = int(init_time / n_step) if init_time is not None else int(n_frames / 2)
+                if init_time is not None:
+                    # time step in simulation
+                    n = init_time * 1e-12 / self.dt
+                    # frame index
+                    init_frame = int(n / n_step)
+                else:
+                    init_frame = int(n_frames / 2)
 
             # check that all monitors have the same time step size
             elif monitor["n_step"] != n_step:
@@ -2212,9 +2269,9 @@ class FDTD_Solver():
 
             # set min/max bounds automatically if not given
             if vmax is None:
-                vmax = np.nanmax(field_v)
+                vmax = utils.round_to_multiple(np.nanmax(field_v), 5)
             if vmin is None:
-                vmin = -vmax if linear else vmax - 50
+                vmin = np.nanmin(field_v) if linear else vmax - 40
 
             # initialize vector field
             if style[i] == "vectors":
@@ -2232,6 +2289,10 @@ class FDTD_Solver():
                 # assign vector lengths. Scale so that minimum value gives a length of 0.
                 vector_len = np.clip(field_v, vmin, vmax) - vmin
                 vector_len = max_vector_len * (vector_len / np.max(vector_len))
+
+                if not scale_vectors:
+                    vector_len[:] = max_vector_len
+
                 mesh["mag"] = vector_len[init_frame]
 
                 # create vector field, setting the arrow scaling with the "mag" dataset and direction with the "vector" 
@@ -2378,30 +2439,37 @@ class FDTD_Solver():
             # Closes and finalizes movie
             plotter.close()
             return plotter
+        # take screenshot and add image to matplotlib axes
+        elif axes is not None:
+            img = plotter.screenshot()
+            axes.imshow(img)
+            axes.set_axis_off()
+            return plotter
+        # setup interactive window
+        else:
+            # add checkbox to turn off field visibility
+            def set_field_visible(value):
+                for p in plot_items:
+                    p["actor"].SetVisibility(value)
 
-        # add checkbox to turn off field visibility
-        def set_field_visible(value):
-            for p in plot_items:
-                p["actor"].SetVisibility(value)
+            plotter.add_checkbox_button_widget(set_field_visible, value=True, position=(10, 10), size=30, border_size=0)
+            plotter.add_text("Field Visibility", position=(45, 15), font_size=9)
 
-        plotter.add_checkbox_button_widget(set_field_visible, value=True, position=(10, 10), size=30, border_size=0)
-        plotter.add_text("Field Visibility", position=(45, 15), font_size=9)
+            # add key bindings to increment the slider left/right with the arrow keys
+            def increment_left():
+                # increment down to nearest picosecond
+                update_fields(int(self.slider_value - 1))
+                plotter.render()
 
-        # add key bindings to increment the slider left/right with the arrow keys
-        def increment_left():
-            # increment down to nearest picosecond
-            update_fields(int(self.slider_value - 1))
-            plotter.render()
+            def increment_right():
+                # increment up to nearest picosecond
+                update_fields(int(self.slider_value + 1))
+                plotter.render()
 
-        def increment_right():
-            # increment up to nearest picosecond
-            update_fields(int(self.slider_value + 1))
-            plotter.render()
-
-        plotter.add_key_event("Left", increment_left)
-        plotter.add_key_event("Right", increment_right)
-        
-        return plotter
+            plotter.add_key_event("Left", increment_left)
+            plotter.add_key_event("Right", increment_right)
+            
+            return plotter
     
 
 
