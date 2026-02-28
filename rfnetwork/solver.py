@@ -92,23 +92,73 @@ class FDTD_Solver():
 
             group[obj_name] = dict(obj=obj, **properties)
 
-    def add_dielectric(self, *objects, er: float, loss_tan=0, f0=0, style: dict = dict(), name: str = None):
+    def add_dielectric(\
+        self,
+        *objects: pv.PolyData, 
+        er: float, 
+        loss_tan: float = 0, 
+        f0: float = 0, 
+        style: dict = dict(), 
+        name: str = None):
         """
         Add rectangular dielectric
+
+        Parameters
+        ----------
+        *objects : pv.PolyData
+            pyvista PolyData objects of dielectric geometry. Only rectangular objects are supported
+        er : float
+            relative permittivity of all objects
+        loss_tan : float, optional
+            non-dispersive loss tangent of all objects.
+        f0 : float, optional
+            frequency in Hz to compute the conductive losses at. Loss is non-dispersive. 
+            Required if loss_tan is provided. 
+        style : dict, optional
+            rendering style arguments passed into pv.Plotter.add_mesh()
+
         """
         self._add_object(
             self.dielectric, objects, properties=dict(er=er, loss_tan=loss_tan, f0=f0, style=style), name=name
         )
 
-    def add_conductor(self, *objects, sigma=1e16, style: dict = dict(), name: str = None):
+    def add_conductor(self, *objects: pv.PolyData, sigma: float = 1e16, style: dict = dict(), name: str = None):
         """
         Add conductor
+
+        Parameters
+        ----------
+        *objects : pv.PolyData
+            pyvista PolyData objects of conductor geometry.
+        sigma : float, default: 1e16
+            conductivity of all objects
+        style : dict, optional
+            rendering style arguments passed into pv.Plotter.add_mesh()
+
         """
         self._add_object(self.conductor, objects, properties=dict(sigma=sigma, style=style), name=name)
 
-    def add_lumped_port(self, number, face, integration_axis: str, r0: float = 50, name: str = None):
+    def add_lumped_port(
+        self, 
+        number: int, 
+        face: pv.PolyData, 
+        integration_axis: str, 
+        r0: float = 50, 
+        name: str = None
+    ):
         """
-        Attach a lumped port to a face
+        Attach a lumped port to a face.
+
+        Parameters
+        ----------
+        number : int
+            port number
+        face : pv.PolyData
+            pyvista PolyData object of 2D face. Must be aligned with the cartesian axis
+        integration_axis : str, {"x+", "x-", "y+", "y-", "z+", "z-"}
+            axis that the port voltage is evaluated across.
+        r0 : float, default: 50
+            port impedance
         """
         self._add_object(
             self.lumped_element, 
@@ -117,9 +167,18 @@ class FDTD_Solver():
             name=name
         )
 
-    def add_resistor(self, face, value: float, integration_axis: str, name: str = None):
+    def add_resistor(self, face: pv.PolyData, value: float, integration_axis: str, name: str = None):
         """
-        Attach a resistive element to a face
+        Attach a resistive element to a face.
+
+        Parameters
+        ----------
+        face : pv.PolyData
+            pyvista PolyData object of 2D face
+        value : pv.PolyData
+            resistance in Ohms
+        integration_axis : str, {"x+", "x-", "y+", "y-", "z+", "z-"}
+            axis and direction that the port voltage is evaluated along.
         """
         
         self._add_object(
@@ -188,7 +247,7 @@ class FDTD_Solver():
     
     def generate_mesh(self, d0: float, d_edge: float = None):
         """
-        Generate the grid and FDTD for the model geometry.
+        Generate the grid and FDTD coefficients for the model geometry.
 
         Parameters
         ----------
