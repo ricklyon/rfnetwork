@@ -296,14 +296,8 @@ class FDTD_Solver():
 
         obj_edges = np.around(obj_edges, decimals=self._places).astype(np.float32)
 
-        # object vertices
-        hard_points = [np.unique(obj_edges[..., i].flatten()) for i in range(3)]
-
         # array of angled edges broken up into sections, and edge cells that aren't on a geometry boundary
         soft_points = [np.array([]), np.array([]), np.array([])]
-        
-        # object vertices and points for the mesh around angled sections
-        all_points = [np.array([]), np.array([]), np.array([])]
 
         edge_len = np.abs(np.diff(obj_edges, axis=1).squeeze())
         # compute the area of a box bound by this edge and the cardinal axis. If area is above a certain threshold
@@ -337,29 +331,34 @@ class FDTD_Solver():
                             soft_points[axis], [edge[0][axis] - d_edge, edge[0][axis] + d_edge]
                         )
 
-        for axis in range(3):
+        # object vertices and points for the mesh around angled sections
+        all_points = [np.array([]), np.array([]), np.array([])]
 
-            # remove any conductor points that are less than d_edge/2 away from other conductor points
-            for i, p in enumerate(hard_points[axis]):
-                if not np.isfinite(p):
-                    continue
-                
-                hard_points[axis] = np.where(np.abs(p - hard_points[axis]) < (d_edge * 0.5), np.nan, hard_points[axis])
+        for axis in range(3):
             
-            # clean up removed values
-            hard_points[axis] = hard_points[axis][np.isfinite(hard_points[axis])]
+            # object vertices
+            hard_points = np.unique(obj_edges[..., axis].flatten())
+            # round points to tolerance
+            # hard_points[axis] = 
+            # remove any conductor points that are less than d_edge away from other conductor points
+            for i in range(len(hard_points)):
+                # remove by setting other values that are very close to this one equal. 
+                p = hard_points[i]
+                hard_points = np.where(np.abs(p - hard_points) < (d_edge * 0.8), p, hard_points)
 
             # add points for substrates, bounding box, lumped elements
             for obj in (sub_objects + lumped_ele_objects):
-                hard_points[axis] = np.concatenate([hard_points[axis], obj.points[:, axis]])
+                hard_points = np.concatenate([hard_points, obj.points[:, axis]])
+
+            # remove redundant values
+            hard_points = np.sort(np.unique(np.around(hard_points, decimals=self._places)))
 
             # remove any soft points that are less than d_edge away from an object point
-            for p in np.unique(hard_points[axis]):
+            for p in hard_points:
                 soft_points[axis] = np.where(np.abs(p - soft_points[axis]) < (d_edge * 0.8), np.nan, soft_points[axis])
             
             # clean up and sort soft mesh points
             sp_axis = np.sort(np.unique(np.around(soft_points[axis], decimals=self._places)))
-            
             # create a reduced set of mesh points that are spaced no less than d_edge. Walk through all soft points
             # and only add points to the reduced list if they are at least d_edge away from the last point.
             if len(sp_axis):
@@ -374,10 +373,10 @@ class FDTD_Solver():
 
             # clip points outside of the sbox limits
             soft_points[axis] = np.clip(soft_points[axis], self.sbox_min[axis], self.sbox_max[axis])
-            hard_points[axis] = np.clip(hard_points[axis], self.sbox_min[axis], self.sbox_max[axis])
+            hard_points = np.clip(hard_points, self.sbox_min[axis], self.sbox_max[axis])
 
             # combine object points with soft points
-            all_points[axis] = np.concatenate([hard_points[axis], soft_points[axis]])
+            all_points[axis] = np.concatenate([hard_points, soft_points[axis]])
             # round to tolerance
             all_points[axis] = np.around(all_points[axis], decimals=self._places)
             # remove repeated values and sort

@@ -177,7 +177,7 @@ def get_object_vertices(obj, group_faces: bool = True) -> list:
     return faces if group_faces else faces[0]
 
 
-def is_point_in_surface(points, obj, tolerance=0.0005):
+def is_point_in_surface(points, obj, tolerance=0.001):
     """
     Returns an array the same shape as point with each value set to True if point is inside the 2D surface.
 
