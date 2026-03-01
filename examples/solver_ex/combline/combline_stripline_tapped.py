@@ -161,7 +161,7 @@ for i in range(1, K-1):
         (x1_k[i], y1_k[i], 0),
     ])
 
-    s.add_conductor(line, style=dict(color="gold"))
+    s.add_conductor(line, style=dict(color="gold", opacity=0.3))
 
 # add feed lines
 rfn.elements.Stripline(w=0.035, b=b, er=er).get_properties(f0)
@@ -227,7 +227,11 @@ plotter.show()
 print(s.Nx * s.Ny * s.Nz / 1e3, "kcells")
 
 
-s.add_field_monitor("mon1", "ez", "z", 0, 100)
+p = s.plot_coefficients("ey_z", "a", "z", 0, point_size=15, cmap="brg")
+p.camera_position = "xy"
+p.show()
+
+s.add_field_monitor("mon1", "e_total", "z", 0, 100)
 # s.add_field_monitor("mon1", "ey", "z", sub_h, 5)
 # s.add_field_monitor("mon2", "ey", "z", sub_h, 15)
 # s.add_field_monitor("mon3", "ex", "z", sub_h, 10)
@@ -238,23 +242,22 @@ pulse_n = 100000
 # # center of the pulse in time
 # t0 = (s.dt * 400)
 
-vsrc = 1e-2 * s.gaussian_source(s.dt * 300, t0= s.dt * 200, t_len = s.dt * pulse_n)
-# vsrc = 1e-2 * s.gaussian_modulated_source(f0, width=s.dt * 10000, t0=s.dt * 5000, t_len = pulse_n * s.dt)
+# vsrc = 1e-2 * s.gaussian_source(s.dt * 300, t0= s.dt * 200, t_len = s.dt * pulse_n)
+vsrc = 1e-2 * s.gaussian_modulated_source(f0, width=s.dt * 10000, t0=s.dt * 5000, t_len = pulse_n * s.dt)
 
 # t = np.linspace(0, s.dt * pulse_n, pulse_n)
 # vsrc = 1e-2 * (np.sin(2* np.pi * f0 * (t)) * np.exp(-((t - t0) / t_half)**2)).astype(np.float32)
-# plt.plot(vsrc)
+plt.plot(vsrc)
 
 frequency: np.ndarray = np.arange(0.5e9, 3e9, 2e6)
 
-s.run([1, 2], [vsrc, vsrc], n_threads=4)
+s.assign_excitation(vsrc, (1, 2))
+s.solve(n_threads=4)
 self = s
 
 
-# p = s.plot_monitor(
-#     ["mon1"], zoom=1.5, view="yz", el=30, opacity=[0.9, 1], az=-70,
-#     linear=False, cmap="jet", style="surface",  gif_file=dir_ / "combline.gif"
-# )
+p = s.plot_monitor(["mon1"], camera_position="xy", opacity=0.8, gif_setup=None)
+p.show(title="EM Solver")
 # # p.camera_position = "xy"
 # p.show(title="EM Solver")
 
