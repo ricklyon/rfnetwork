@@ -10,7 +10,12 @@
 rfnetwork
 =========
 
-Efficient linear circuit solver for networks of RF components.
+Linear circuit solver for networks of RF components.
+
+.. |github| image:: https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png
+   :height: 20px
+
+|github| `Github Repository <https://github.com/ricklyon/rfnetwork>`_
 
 Installation
 ============
