@@ -282,15 +282,16 @@ class FDTD_Solver():
         Compile all points defined by model geometry, as well as edge cells around geometry features.
         """
 
-        # conductor objects
-        objects = [cond["obj"] for cond in self.conductor.values()]
+        # conductor objects and lumped ports
+        cond_objects = [cond["obj"] for cond in self.conductor.values()] 
+        lumped_ele_objects = [ele["obj"] for ele in self.lumped_element.values()]
 
         # substrate objects
         sub_objects = [self.bounding_box] + [sub["obj"] for sub in self.dielectric.values()]
 
         # get a list of 2x3 arrays, coordinates of each endpoint of the edges of the model objects
         obj_edges = []
-        for obj in objects:
+        for obj in cond_objects:
             obj_edges += utils_mesh.get_object_edges(obj, group_faces=False)
 
         obj_edges = np.around(obj_edges, decimals=self._places).astype(np.float32)
@@ -298,7 +299,7 @@ class FDTD_Solver():
         # object vertices
         hard_points = [np.unique(obj_edges[..., i].flatten()) for i in range(3)]
 
-        # break angled edges up into sections
+        # array of angled edges broken up into sections, and edge cells that aren't on a geometry boundary
         soft_points = [np.array([]), np.array([]), np.array([])]
         
         # object vertices and points for the mesh around angled sections
@@ -336,12 +337,22 @@ class FDTD_Solver():
                             soft_points[axis], [edge[0][axis] - d_edge, edge[0][axis] + d_edge]
                         )
 
-
         for axis in range(3):
-            # add points for substrates and bounding box
-            for obj in sub_objects:
+
+            # remove any conductor points that are less than d_edge/2 away from other conductor points
+            for i, p in enumerate(hard_points[axis]):
+                if not np.isfinite(p):
+                    continue
+                
+                hard_points[axis] = np.where(np.abs(p - hard_points[axis]) < (d_edge * 0.5), np.nan, hard_points[axis])
+            
+            # clean up removed values
+            hard_points[axis] = hard_points[axis][np.isfinite(hard_points[axis])]
+
+            # add points for substrates, bounding box, lumped elements
+            for obj in (sub_objects + lumped_ele_objects):
                 hard_points[axis] = np.concatenate([hard_points[axis], obj.points[:, axis]])
-        
+
             # remove any soft points that are less than d_edge away from an object point
             for p in np.unique(hard_points[axis]):
                 soft_points[axis] = np.where(np.abs(p - soft_points[axis]) < (d_edge * 0.8), np.nan, soft_points[axis])
@@ -1462,7 +1473,10 @@ class FDTD_Solver():
         show_probes: bool = False, 
         show_rulers: bool = True, 
         show_mesh: bool = True,
-        plotter: pv.Plotter = None
+        plotter: pv.Plotter = None,
+        camera_position: str = None,
+        zoom: float = 1.0, 
+        axes: Axes = None
     ) -> pv.Plotter:
         """
         Plot the model geometry
@@ -1481,6 +1495,16 @@ class FDTD_Solver():
         plotter : pv.Plotter, optional
             pyvista Plotter object
 
+        camera_position : str | pv.CameraPosition, optional
+            camera position, passed to pv.Plotter.camera_position
+        
+        zoom : float, default: 1
+            camera zoom
+
+        axes : matplotlib.axes.Axes
+            matplotlib axes object. If provided, a screenshot is taken of the rendered image at init_time_ps and 
+            drawn in the the axes. 
+
         Returns
         -------
         pv.Plotter
@@ -1493,7 +1517,7 @@ class FDTD_Solver():
         grid = pv.RectilinearGrid(gx, gy, gz)
         
         if plotter is None:
-            plotter = pv.Plotter()
+            plotter = pv.Plotter(off_screen=bool(axes is not None))
         
         # add grid
         if show_mesh:
@@ -1587,7 +1611,14 @@ class FDTD_Solver():
             plotter.show_bounds(font_size=8, fmt="%0.2f", ticks="outside")
 
         plotter.add_axes()
+        plotter.camera_position = camera_position
+        plotter.camera.zoom(zoom)
 
+        if axes is not None:
+            img = plotter.screenshot()
+            axes.imshow(img)
+            axes.set_axis_off()
+    
         return plotter
 
     def plot_coefficients(
@@ -1598,7 +1629,7 @@ class FDTD_Solver():
         position: float, 
         normalization: float = True,
         opacity: float = 1, 
-        cmap: str = "rbg", 
+        cmap: str = "brg", 
         vmin: float = None, 
         vmax: float = None, 
         point_size: float = 10, 
@@ -1813,7 +1844,7 @@ class FDTD_Solver():
         s_column = B / V_applied[..., None]
 
         return ldarray(
-            s_column[..., None], coords=dict(frequency=frequency, b=np.arange(1, nports + 1), a=[source_port])
+            s_column, coords=dict(frequency=frequency, b=np.arange(1, nports + 1))
         )
     
     def edge_correction(self, p1: tuple, p2: tuple, integration_axis: str, CFe: float = None, CFh: float = 1):
@@ -2182,7 +2213,7 @@ class FDTD_Solver():
 
         # start with the rendered view of the model 
         if plotter is None:
-            plotter = pv.Plotter(off_screen=bool(axes is not None))
+            plotter = pv.Plotter(off_screen=bool(axes is not None or gif_setup is not None))
             self.render(show_rulers=show_rulers, show_mesh=show_mesh, plotter=plotter)
 
         monitor = np.atleast_1d(monitor)

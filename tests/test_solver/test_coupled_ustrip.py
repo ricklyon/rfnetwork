@@ -107,8 +107,8 @@ class TestCoupledUStrip(unittest.TestCase):
         S_odd = s.get_sparameters(frequency)
 
         # compute even/odd impedances
-        z_odd = conv.z_gamma(S_odd.sel(b=1, a=1, frequency=f0)).real
-        z_even = conv.z_gamma(S_even.sel(b=1, a=1, frequency=f0)).real
+        z_odd = conv.z_gamma(S_odd.sel(b=1, frequency=f0)).real
+        z_even = conv.z_gamma(S_even.sel(b=1, frequency=f0)).real
         
         # fig, ax = plt.subplots()
         # ax.plot(frequency / 1e9, conv.z_gamma(S_odd.sel(b=1, a=1)).real)
