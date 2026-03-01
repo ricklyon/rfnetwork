@@ -2,9 +2,9 @@
 Network Probes
 ==============
 
-This examples demonstrates how internal probes can be used to tune an amplifier. The amplifier used is a 8W UHF FET 
-manufactured by STM. 
+This examples demonstrates how internal probes can be used to tune an amplifier. 
 
+The amplifier used is a 8W UHF FET manufactured by STM. 
 Network probes allow the reflection coefficients at the amplifier, :math:`\Gamma_{in}` and :math:`\Gamma_{out}`, 
 to be plotted while the amplifier is connected to matching networks. For the purposes of this example, the amplifier is 
 conjugately matched at the output rather than being matched for optimal output power.
