@@ -14,8 +14,6 @@
 
 #include "Eigen/Dense"
 
-#define MAX_THREADS 20
-
 using Eigen::MatrixXd;
 
 #define MAX_THREADS 20
