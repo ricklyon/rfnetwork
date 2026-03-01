@@ -63,10 +63,7 @@ self = s
 s.generate_mesh(d0 = 0.03, d_edge=0.005)
 
 
-s.add_field_monitor("mon3", "ex", "z", 0.2, 15)
-s.add_field_monitor("mon4", "ex", "y", 0, 15)
-s.add_field_monitor("mon5", "ex", "x", 0.0, 15)
-
+s.add_field_monitor("mon1", "e_total", "z", 0.15, 10)
 
 
 # plotter = s.render(show_probes=True)
@@ -74,10 +71,10 @@ s.add_field_monitor("mon5", "ex", "x", 0.0, 15)
 # plotter.show()
 
 
-Db_0 = s.dt / u0
-Cb_0 = s.dt / e0 
-p = s.plot_coefficients("ey_x", "b", "x", 0, point_size=15, cmap="brg")
-p.show()
+# Db_0 = s.dt / u0
+# Cb_0 = s.dt / e0 
+# p = s.plot_coefficients("ey_x", "b", "x", 0, point_size=15, cmap="brg")
+# p.show()
 
 f0 = 10e9
 pulse_n = 2800
@@ -86,20 +83,39 @@ pulse_width = (s.dt * 400)
 # center of the pulse in time
 t0 = (s.dt * 500)
 
-vsrc = 1e-2 * self.gaussian_modulated_source(f0, width=400e-12, t0=220e-12, t_len=800e-12)
+vsrc = 1e-2 * self.gaussian_modulated_source(f0, width=600e-12, t0=220e-12, t_len=800e-12)
 # plt.plot(vsrc)
 
 frequency: np.ndarray = np.arange(5e9, 15e9, 10e6)
 
-s.run([1], [vsrc], n_threads=4)
+s.assign_excitation(vsrc, 1)
+s.solve(n_threads=4)
 
 sdata = s.get_sparameters(frequency)
 S11 = sdata[:, 0]
 
 
+gif_setup = dict(file="vectors.gif", fps=20)
 
-p = s.plot_monitor(["mon4"], el=30, zoom=1.1, az=45, view="xz", opacity=[1, 1, 1], linear=False, cmap="jet", style="surface", vmin=-30, vmax=30)
-p.show()
+monitor = "mon1"
+view="yz"
+style="vectors"
+linear=False
+name ="mon1"
+vmax = None
+vmin = None
+init_time = None
+
+init_time = None
+opacity = "linear"
+
+# fields = s.get_monitor_data("mon1_z")
+
+# fields.sel(time=100e-12, y=0, z=0.15)
+
+
+plotter = self.plot_monitor(["mon1", "mon1"], camera_position="xy", zoom=1, style=["vectors", "surface"], opacity=0.8, max_vector_len=0.03, show_rulers=False, gif_setup=None)
+plotter.show()
 
 # p.show(title="EM Solver")
 
