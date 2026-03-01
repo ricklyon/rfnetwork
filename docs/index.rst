@@ -17,12 +17,12 @@ Installation
 Features
 ========
 
-* Quickly connect RF/microwave components into larger networks. 
+* Connect RF/microwave components into larger networks. 
 * Manage complex RF systems with hierarchical building blocks.
 * Compute noise figure of multi-port networks using noise-wave analysis.
-* Easily change variable components within a network (e.g. switches, phase shifters). 
+* Tune variable components within a network (e.g. switches, phase shifters, capacitor values). 
 * Probe internal voltage waves inside a network. 
-* Interactive tuning.
+* Full wave FDTD solver for analyzing coupled lines and simple PCB geometry.
 
 .. toctree::
    :maxdepth: 2

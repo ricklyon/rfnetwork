@@ -14,9 +14,9 @@
 
 #include "Eigen/Dense"
 
-#define MAX_THREADS 20
-
 using Eigen::MatrixXd;
+
+#define MAX_THREADS 20
 
 typedef Eigen::Map<Eigen::Matrix<std::complex<double>, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> MatrixType;
 
@@ -54,7 +54,7 @@ int connect_other(
     int c1_size = (s1_a * s1_a * itemsize);
     int c2_size = (s2_a * s2_a * itemsize);
 
-    int p1, p2;
+    // int p1, p2;
 
     MatrixIntType ROW_ORDER ((int *) row_order, 1, n_row);
 
@@ -134,7 +134,6 @@ int connect_other(
         f_idx += f_blen;
     }
 
-    int err = 0;
     // wait for all threads to complete
     for (int t = 0; t < n_threads; t++)
     {
@@ -241,7 +240,7 @@ int connect_other_th(
 
         CAS_SDATA = P * M1 * M2;
 
-        int m_b = s1_a + s2_a;
+        // int m_b = s1_a + s2_a;
 
         if (cas_n != NULL)
         {
@@ -371,7 +370,6 @@ int connect_self(
         f_idx += f_blen;
     }
 
-    int err = 0;
     // wait for all threads to complete
     for (int t = 0; t < n_threads; t++)
     {
@@ -566,12 +564,12 @@ int cascaded_row_order(
     int n_row, int s1_b, int s1_a, int s2_b, int s2_a, int n_connections
 )
 {
-    int m_b = s1_b + s2_b;
+    // int m_b = s1_b + s2_b;
     int m2_a = s1_a + s2_a - (2 * n_connections);
 
     // number of existing probes on component data
-    int s1_probe_n = s1_b - s1_a;
-    int s2_probe_n = s2_b - s2_a;
+    // int s1_probe_n = s1_b - s1_a;
+    // int s2_probe_n = s2_b - s2_a;
 
     int p1, p2;
 
@@ -673,11 +671,11 @@ int self_cascaded_row_order(
     int n_row, int s1_b, int s1_a, int n_connections
 )
 {
-    int m_b = s1_b;
+    // int m_b = s1_b;
     int m2_a = s1_a - (2 * n_connections);
 
     // number of existing probes on component data
-    int s1_probe_n = s1_b - s1_a;
+    // int s1_probe_n = s1_b - s1_a;
 
     int p1, p2;
 

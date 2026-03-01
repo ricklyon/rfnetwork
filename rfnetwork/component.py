@@ -15,7 +15,7 @@ import sys
 
 from matplotlib.lines import Line2D
 
-from . import touchstone, utils
+from . import touchstone, utils, math
 from . core import core
 from . import plots
 from . tuning import TunerGroup
@@ -53,6 +53,7 @@ class Component(object):
         self._n_ports = n_ports
         self._state = {k: None for k in state.keys()}
         self._tune = dict(frequency=None, args=[], axes=[])
+        self._port_extensions = dict(er = [1] * n_ports, d = [0] * n_ports)
 
         self.set_state(**state)
 
@@ -354,7 +355,25 @@ class Component(object):
         # blit the axes
         for ax in self._tune["axes"]:
             mplm.draw_all(ax)
-    
+
+    def port_extension(self, port: int, distance: float, er : float = 1):
+        """
+        Move the s-parameter reference plane at one port of the Component.
+
+        Parameters
+        ----------
+        port : int
+            port number to apply extension to
+        distance : list
+            distance in inches the reference plane will be moved by[meters]. Positive values move the reference 
+            plane away from the component port (adds phase delay). Negative values move the plane towards the port.
+        er : list
+            relative permittivity of the transmission line that the reference plane is moved through.
+
+        """
+        self._port_extensions["d"][port-1] = core.conv.m_in(distance)
+        self._port_extensions["er"][port-1] = er
+
     def evaluate(self, frequency: np.ndarray = None, noise: bool = False) -> dict:
         """
         Computes the component s-matrix and (optionally) the noise correlation matrix.
@@ -415,6 +434,10 @@ class Component(object):
 
         if not isinstance(sdata, ldarray):
             sdata = ldarray(sdata, coords=dict(frequency=frequency, b=port_a, a=port_a))
+
+        # apply port extensions
+        if any(self._port_extensions["d"]):
+            sdata = math.shift_reference_plane(sdata, self._port_extensions["d"], self._port_extensions["er"])
 
         ret_data["s"] = sdata
 
@@ -609,8 +632,7 @@ class Component_Data(Component):
     def __init__(self, data: ldarray, state: dict = dict()):
 
         self._sdata = data
-        nports = data.shape[-2]
-        super().__init__(nports, passive=False, state=state)
+        super().__init__(n_ports=data.shape[-2], passive=False, state=state)
 
     @property
     def frequency(self):

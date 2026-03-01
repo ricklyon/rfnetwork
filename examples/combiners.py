@@ -46,9 +46,9 @@ design_fhz = 5e9
 frequency = np.arange(1e9, 9e9, 10e6)
 
 ## get quarter wavelength at the design frequency
-len_qw_50 = msline50.get_wavelength(design_fhz) / 4
-len_qw_70p7 = msline70p7.get_wavelength(design_fhz) / 4
-len_qw_35 = msline35.get_wavelength(design_fhz) / 4
+len_qw_50 = msline50.get_wavelength(design_fhz).item() / 4
+len_qw_70p7 = msline70p7.get_wavelength(design_fhz).item() / 4
+len_qw_35 = msline35.get_wavelength(design_fhz).item() / 4
 
 
 # %%

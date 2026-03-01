@@ -8,10 +8,13 @@
 __pycache__/
 /tests/.figures
 /docs/scripts
-archive/
+*archive/
 *.so
 build/
 *.gz
 _autosummary/
 auto_examples/
 docs/sg_execution_times.rst
+examples/data/
+*.ipynb_checkpoints
+

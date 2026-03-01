@@ -4,6 +4,7 @@
 #include <numpy/arrayobject.h>
 
 #include "connect.h"
+#include "solver.h"
 
 #include <stdio.h>
 #include <cstdint>
@@ -15,7 +16,6 @@
 
 #define DATA_NDIM 3
 
-#define COMPLEX_DOUBLE_TYPE 15
 
 void array_data_shape(PyArrayObject* array, int * shape) 
 {
@@ -27,7 +27,7 @@ void array_data_shape(PyArrayObject* array, int * shape)
         throw std::runtime_error("Invalid data array. Wrong number of dimensions.");
     }
 
-    if (PyArray_TYPE(array) != COMPLEX_DOUBLE_TYPE)
+    if (PyArray_TYPE(array) != NPY_CDOUBLE)
     {
         throw std::runtime_error("Invalid data array. Must be complex double type.");
     }
@@ -40,7 +40,6 @@ void array_data_shape(PyArrayObject* array, int * shape)
     for (int i = 0; i < DATA_NDIM; ++i) {
         shape[i] = (int) npy_shape[i];
     }
-
 }
 
 static PyObject * connect_other_bind(PyObject *self, PyObject *args)
@@ -96,8 +95,8 @@ static PyObject * connect_other_bind(PyObject *self, PyObject *args)
     int s2_b = s2_shape[1];
     int s2_a = s2_shape[2];
 
-    int b_len = s1_b + s2_b;
-    int a_len = s1_a + s2_a;
+    // int b_len = s1_b + s2_b;
+    // int a_len = s1_a + s2_a;
 
     // noise data
     char * c1_data = NULL;
@@ -347,12 +346,57 @@ static PyObject * cascade_self_ndata_bind(PyObject *self, PyObject *args)
     return PyLong_FromLong(0);
 }
 
+static PyObject* solver_run(PyObject* self, PyObject* args) {
+
+    PyObject *coefficients;
+    PyObject *probes;
+    PyObject *monitors;
+    PyObject *mem;
+    
+    int Nx;
+    int Ny;
+    int Nz;
+    int Nt;
+    int n_threads;
+    int update_interval;
+
+    // Parse arguments: expecting a single Python object
+    if (!PyArg_ParseTuple(
+        args, "OOOOIIIIII", &coefficients, &probes, &monitors, &mem, &Nx, &Ny, &Nz, &Nt, &n_threads, &update_interval
+    )) {
+        return PyLong_FromLong(1);
+    }
+
+    if (!PyDict_Check(coefficients)) {
+        PyErr_SetString(PyExc_TypeError, "Expected a coefficients dictionary");
+        return PyLong_FromLong(1);
+    }
+
+    if (!PyList_Check(monitors)) {
+        PyErr_SetString(PyExc_TypeError, "Expected a monitors list");
+        return PyLong_FromLong(1);
+    }
+
+    if (!PyList_Check(probes)) {
+        PyErr_SetString(PyExc_TypeError, "Expected a probes list");
+        return PyLong_FromLong(1);
+    }
+
+    solver_init_fields(mem, coefficients, Nx, Ny, Nz);
+    solver_init_monitors(monitors, Nt);
+    solver_init_probes(probes, Nt);
+
+    solver_run(Nt, n_threads, update_interval);
+
+    return PyLong_FromLong(0);
+}
 
 static PyMethodDef moduleMethods[] = {
     {"connect_other",  connect_other_bind, METH_VARARGS, ""},
     {"connect_self",  connect_self_bind, METH_VARARGS, ""},
     {"cascade_ndata",  cascade_ndata_bind, METH_VARARGS, ""},
     {"cascade_self_ndata",  cascade_self_ndata_bind, METH_VARARGS, ""},
+    {"solver_run",  solver_run, METH_VARARGS, ""},
     {NULL, NULL, 0, NULL}        /* Sentinel */
 };
 
@@ -367,6 +411,7 @@ static struct PyModuleDef module = {
 
 PyMODINIT_FUNC PyInit_core_func(void)
 {
+    import_array();  
     Py_Initialize();
     return PyModule_Create(&module);
 }
