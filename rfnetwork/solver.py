@@ -916,7 +916,7 @@ class FDTD_Solver():
         # broadcast across other dimensions that are not the PML direction
         i_pml_b = [None] * 3
         i_pml_b[axis_i] = slice(None)
-        i_pml = i_pml_axis[*i_pml_b]
+        i_pml = i_pml_axis[tuple(i_pml_b)]
     
         # sigma on the cell edges. Components on the edge of the PML have a sigma of 0.
         sigma_e_n = sigma_max * ((i_pml) / (n_pml))**m_pml
