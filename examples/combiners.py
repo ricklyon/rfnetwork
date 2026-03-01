@@ -66,8 +66,8 @@ class Wilkinson(rfn.Network):
                  --- lower ----- port 3
     """
     # create line instances with specific length in inches
-    upper = msline70p7(len_qw_70p7)
-    lower = msline70p7(len_qw_70p7)
+    upper = msline70p7(len_qw_70p7.item())
+    lower = msline70p7(len_qw_70p7.item())
     
     r1 = rfn.elements.Resistor(100)
 
