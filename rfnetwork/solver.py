@@ -1502,7 +1502,7 @@ class FDTD_Solver():
             camera zoom
 
         axes : matplotlib.axes.Axes
-            matplotlib axes object. If provided, a screenshot is taken of the rendered image at init_time_ps and 
+            matplotlib axes object. If provided, a screenshot is taken of the rendered image and 
             drawn in the the axes. 
 
         Returns

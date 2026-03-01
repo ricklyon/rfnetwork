@@ -17,7 +17,7 @@ frequency = np.arange(5e9, 15e9, 10e6)
 # %%
 # Design Parameters 
 # ------------------------
-# # sphinx_gallery_thumbnail_number = -2
+# sphinx_gallery_thumbnail_number = -2
 
 ms_w = 0.03  # trace width
 ms_sp = 0.005  # trace spacing
@@ -36,6 +36,11 @@ ms2_y = (ms_w / 2) + (ms_sp / 2)
 # end locations of lines along x axis, lines terminate in PML region 
 ms_x = (-sbox_len/2 + 0.1, sbox_len/2)
 
+# %%
+# Create 3D Model
+# ------------------------
+#
+
 # substrate geometry
 substrate = pv.Cube(
     center=(0, 0, sub_h/2), x_length=sbox_len, y_length=sbox_w, z_length=sub_h
@@ -46,10 +51,6 @@ sbox = pv.Cube(
     center=(0, 0, sbox_h/2), x_length=sbox_len, y_length=sbox_w, z_length=sbox_h
 )
 
-# %%
-# Create 3D Model
-# ------------------------
-#
 s = rfn.FDTD_Solver(sbox)
 s.add_dielectric(substrate, er=er, style=dict(opacity=0.2))
 
@@ -90,7 +91,7 @@ for i, ms_y in enumerate((ms1_y, ms2_y)):
     s.edge_correction(p1, p2, integration_axis="y-")
 
 # add 2D field monitor normal to the x-axis at the center of the grid
-s.add_field_monitor("mon1", "e_total", axis="x", position=0)
+s.add_field_monitor("mon1", "e_total", axis="x", position=0, n_step=10)
 
 # %%
 # Setup Excitations
@@ -108,7 +109,7 @@ ax.set_ylabel("Voltage [mV]")
 fig.tight_layout()
 
 # %%
-# Run Even Mode 
+# Solve Even Mode 
 # ------------------------
 
 fig, (ax1) = plt.subplots()
@@ -144,7 +145,7 @@ s.plot_monitor(**plot_mon_kwargs, axes=ax1)
 fig.tight_layout(pad=0)
 
 # %%
-# Run Odd Mode 
+# Solve Odd Mode 
 # ------------------------
 
 fig, (ax2) = plt.subplots()
@@ -172,8 +173,8 @@ ref_even_z = 101.847
 ref_odd_z = 45.0888
 
 fig, ax = plt.subplots()
-ax.plot(frequency / 1e9, conv.z_gamma(S_odd.sel(b=1, a=1)).real)
-ax.plot(frequency / 1e9, conv.z_gamma(S_even.sel(b=1, a=1)).real)
+ax.plot(frequency / 1e9, conv.z_gamma(S_odd.sel(b=1)).real)
+ax.plot(frequency / 1e9, conv.z_gamma(S_even.sel(b=1)).real)
 
 plt.ylim([0, 110])
 plt.axhline(y=ref_odd_z, linestyle=":", color="tab:blue")
