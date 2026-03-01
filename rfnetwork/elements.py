@@ -509,7 +509,7 @@ class Line(Component):
 
         return sdata
 
-    def get_properties(self, frequency: float | np.ndarray) -> ldarray:
+    def get_properties(self, frequency: np.ndarray) -> ldarray:
         """
         Returns characteristic impedance and dielectric constant over frequency.
 
@@ -813,7 +813,7 @@ class Stripline(Line):
         state = dict(w=w, b=b, t=t, df=df)
         super().__init__(z0=0, er=er, loss=loss, frequency=frequency, length=length, state=state, shunt=shunt)
 
-    def get_properties(self, frequency: float | np.ndarray) -> ldarray:
+    def get_properties(self, frequency: np.ndarray) -> ldarray:
         """
         Returns characteristic impedance and dielectric constant over frequency.
         See section 3.8 in [1].

@@ -66,7 +66,7 @@ def dtft(xn: np.ndarray, frequency: np.ndarray, fs: float, downsample: bool = Fa
 
     return Xw
 
-def n_ports_from_snp(path: str | Path) -> int:
+def n_ports_from_snp(path: str) -> int:
     """
     Get the number of ports from a .snp file extension.
     """
