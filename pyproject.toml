@@ -14,9 +14,16 @@ classifiers = [
     "Programming Language :: Python",
     "Programming Language :: Python :: 3",
 ]
-keywords = ["rf", "microwave", "network", "noise"]
+keywords = ["rf", "microwave", "network", "fdtd"]
 dependencies = [
-    "numpy>=2.0.0", "matplotlib", "scipy", "np-struct>=0.0.2", "mpl-markers", "pyside6", "pyvista"
+    "numpy>=2.0.0", 
+    "matplotlib", 
+    "scipy", 
+    "np-struct>=0.0.2", 
+    "mpl-markers", 
+    "pyside6", 
+    "pyvista",
+    "imageio"
 ]
 requires-python = ">=3.9"
 
@@ -26,7 +33,6 @@ dev = [
     "pytest", 
     "parameterized", 
     "ipykernel", 
-    "schemdraw",
 ]
 
 docs = [
