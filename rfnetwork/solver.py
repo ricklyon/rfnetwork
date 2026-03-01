@@ -953,26 +953,26 @@ class FDTD_Solver():
             # and not updated.
             # sigma / eps must be constant across y and z, page 291 in taflove
             # scale sigma by eps so that sigma / eps is constant
-            eps = field_eps[e][*e_idx]
+            eps = field_eps[e][tuple(e_idx)]
             sigma_e = np.broadcast_to(sigma_e_n, eps.shape).copy()
             sigma_e *= (eps / e0)
             
-            self.Ca[f"{e}_{axis}"][*e_idx] = (2 * eps - (sigma_e * dt)) / (2 * eps + (sigma_e * dt))
-            self.Cb[f"{e}_{axis}"][*e_idx] = (2 * dt) / ((2 * eps + (sigma_e * dt)))
+            self.Ca[f"{e}_{axis}"][tuple(e_idx)] = (2 * eps - (sigma_e * dt)) / (2 * eps + (sigma_e * dt))
+            self.Cb[f"{e}_{axis}"][tuple(e_idx)] = (2 * dt) / ((2 * eps + (sigma_e * dt)))
 
         # grade the h-field components along axis
         for h in pml_hfields:
             # h components are in the middle of the PML cells, use half cell indices
-            eps = field_eps[h][*h_idx]
+            eps = field_eps[h][tuple(h_idx)]
             # electrical conductivity
             simga_e = np.broadcast_to(sigma_e_np5, eps.shape).copy()
             simga_e *= (eps / e0)
             # magnetic conductivity
             sigma_m = simga_e * u0 / eps
 
-            self.Da[f"{h}_{axis}"][*h_idx] = (2 * u0 - (sigma_m * dt)) / (2 * u0 + (sigma_m * dt))
-            self.Db[f"{h}_{axis}1"][*h_idx] = (2 * dt) / ((2 * u0 + (sigma_m * dt))) 
-            self.Db[f"{h}_{axis}2"][*h_idx] = (2 * dt) / ((2 * u0 + (sigma_m * dt))) 
+            self.Da[f"{h}_{axis}"][tuple(h_idx)] = (2 * u0 - (sigma_m * dt)) / (2 * u0 + (sigma_m * dt))
+            self.Db[f"{h}_{axis}1"][tuple(h_idx)] = (2 * dt) / ((2 * u0 + (sigma_m * dt))) 
+            self.Db[f"{h}_{axis}2"][tuple(h_idx)] = (2 * dt) / ((2 * u0 + (sigma_m * dt))) 
 
 
     def gaussian_source(self, width: float, t0: float, t_len: float):
@@ -1710,7 +1710,7 @@ class FDTD_Solver():
         g = [floc[i] if isinstance(s, slice) else floc[i][s: s+1] for i, s in enumerate(idx)]
 
         fmesh = pv.RectilinearGrid(*g)
-        fmesh.point_data['values'] = np.clip(values[*idx], vmin, vmax).flatten(order="F")
+        fmesh.point_data['values'] = np.clip(values[tuple(idx)], vmin, vmax).flatten(order="F")
         
         plotter.add_mesh(
             fmesh,
