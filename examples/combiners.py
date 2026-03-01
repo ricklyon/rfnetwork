@@ -46,9 +46,9 @@ design_fhz = 5e9
 frequency = np.arange(1e9, 9e9, 10e6)
 
 ## get quarter wavelength at the design frequency
-len_qw_50 = msline50.get_wavelength(design_fhz) / 4
-len_qw_70p7 = msline70p7.get_wavelength(design_fhz) / 4
-len_qw_35 = msline35.get_wavelength(design_fhz) / 4
+len_qw_50 = msline50.get_wavelength(design_fhz).item() / 4
+len_qw_70p7 = msline70p7.get_wavelength(design_fhz).item() / 4
+len_qw_35 = msline35.get_wavelength(design_fhz).item() / 4
 
 
 # %%
@@ -66,8 +66,8 @@ class Wilkinson(rfn.Network):
                  --- lower ----- port 3
     """
     # create line instances with specific length in inches
-    upper = msline70p7(len_qw_70p7.item())
-    lower = msline70p7(len_qw_70p7.item())
+    upper = msline70p7(len_qw_70p7)
+    lower = msline70p7(len_qw_70p7)
     
     r1 = rfn.elements.Resistor(100)
 
