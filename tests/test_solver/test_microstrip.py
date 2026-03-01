@@ -123,7 +123,7 @@ class TestMicroStrip(unittest.TestCase):
         S11 = sdata[:, 0]
 
         # compute line impedance
-        IP = utils.dtft(-s.vi_probe_values("c1"), frequency, 1 / s.dt)
+        IP = utils.dtft(s.vi_probe_values("c1"), frequency, 1 / s.dt)
         VP = utils.dtft(s.vi_probe_values("v1"), frequency, 1 / s.dt)
         ZP = VP / IP
 
