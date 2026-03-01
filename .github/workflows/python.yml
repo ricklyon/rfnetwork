@@ -3,7 +3,7 @@ name: Python package
 
 on:
   push:
-    branches: ["main"]
+    branches: ["main", "dev-pipeline"]
 
 jobs:
   build:
@@ -22,6 +22,8 @@ jobs:
         python-version: ${{ matrix.python-version }}
     - name: Install dependencies
       run: |
+        sudo apt install libegl1
+        sudo apt install libegl-mesa0
         python -m pip install --upgrade pip
         git submodule update --init
         pip install -r requirements.txt
