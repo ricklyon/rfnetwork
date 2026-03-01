@@ -25,6 +25,7 @@ dir_ = Path().cwd()
 # ------------------------
 # sphinx_gallery_thumbnail_number = 1
 
+# values are in inches
 ms_w = 0.043  # 50 ohms trace width
 ms_70w = 0.023  # 70 ohm trace width
 sub_h = 0.02  # substrate height
@@ -37,7 +38,6 @@ frequency = np.arange(1e9, 5e9, 10e6)
 # %%
 # Build Model
 # ------------------------
-# values are in inches
 
 # y axis positions of the three port traces
 ms1_y = 0
