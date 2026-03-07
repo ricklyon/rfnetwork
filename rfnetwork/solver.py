@@ -1184,15 +1184,28 @@ class FDTD_Solver():
 
             n_m = int(Nt / m["n_step"]) + 1
 
-            monitors.append(
-                dict(
-                    values=np.zeros(((n_m,) + m["shape"]), dtype=dtype_, order="C"), 
-                    axis=int(m["axis"]),
-                    position=int(m["index"]),
-                    field=list(self.fshape.keys()).index(m["field"]),
-                    n_step=int(m["n_step"])
-                )
+            mon_config = dict(
+                axis=int(m["axis"]),
+                position=int(m["index"]),
+                field=list(self.fshape.keys()).index(m["field"]),
+                n_step=int(m["n_step"]),
             )
+
+            if m["frequency"] is not None:
+                # initialize monitor for frequency domain phasor captures.
+                # DTFT is computed with a running sum in the time stepping equations
+                frequency = float(m["frequency"])
+                fs = (1 / (self.dt *  m["n_step"]))
+                fn = frequency / fs
+                omega = 2 * np.pi * fn
+                # phase terms of the DTFT at a single frequency for each time step
+                mon_config["values"] = np.zeros(m["shape"], dtype=np.complex128, order="C")
+                mon_config["dtft_phase"] = np.exp(-1j * omega * np.arange(n_m), dtype=np.complex128) 
+            else:
+                # initialize monitor for time domain captures
+                mon_config["values"] = np.zeros(((n_m,) + m["shape"]), dtype=dtype_, order="C")
+
+            monitors.append(mon_config)
 
         if show_progress:
             sys.stdout.flush()
@@ -1230,7 +1243,15 @@ class FDTD_Solver():
         self._solved = True
 
 
-    def add_field_monitor(self, name: str, field: str, axis: str, position: float, n_step: int = 1):
+    def add_field_monitor(
+        self, 
+        name: str, 
+        field: str, 
+        axis: str, 
+        position: float, 
+        n_step: int = 1,
+        frequency: float = None
+    ):
         """
         Add field monitor on a 2D surface.
 
@@ -1246,6 +1267,9 @@ class FDTD_Solver():
             position on axis of the monitor surface, inches
         n_step : int, default: 1
             number of time steps between each capture.
+        frequency : float, optional
+            if provided, monitor values will be phasors at the specified frequency in Hz.
+
         """
 
         supported_fields = tuple(self.fshape.keys()) + ("e_total",)
@@ -1258,7 +1282,7 @@ class FDTD_Solver():
         # get the spatial shape of the field slice
         axis_i = dict(x=0, y=1, z=2)[axis]
 
-        # create three seperate monitors for each component if monitor is for the total field
+        # create three separate monitors for each component if monitor is for the total field
         if field == "e_total":
             field = ("ex", "ey", "ez")
             name = ([name + "_" + f for f in ("x", "y", "z")])
@@ -1278,7 +1302,13 @@ class FDTD_Solver():
                 raise ValueError("Field position out of bounds")
 
             self.monitors[n] = dict(
-                field=f, axis=axis_i, position=position, index=idx, n_step=n_step, shape=tuple(shape)
+                field=f, 
+                axis=axis_i, 
+                position=position, 
+                index=idx, 
+                n_step=n_step, 
+                shape=tuple(shape),
+                frequency=frequency
             )
 
 

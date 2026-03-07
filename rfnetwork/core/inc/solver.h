@@ -4,6 +4,7 @@
 #include <string>
 #include <vector>
 #include <thread>
+#include <complex>
 
 #define N_FIELDS 18
 #define N_COEFF 24
@@ -122,7 +123,9 @@ struct Coeff_Hz {
 };
 
 struct Monitor {
-    float * values;
+    char * values;
+    std::complex<double> * dtft_phase;
+    bool is_phasor;
     int field_type;
     int axis;
     int position;
