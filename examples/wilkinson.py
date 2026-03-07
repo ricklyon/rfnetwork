@@ -158,13 +158,14 @@ sdata = ldarray(
 )
 
 # solve each of the 3 ports
-for p in range(1, 4):
-    print(f"Solving Port {p}")
+for port in range(1, 4):
+    print(f"Solving Port {port}")
     s.reset_excitations()
-    s.assign_excitation(vsrc, p)
+    s.assign_excitation(vsrc, port)
     s.solve()
 
-    sdata[dict(b=p)] = s.get_sparameters(frequency, source_port=p, downsample=False)
+    # populate the column of the s-matrix with this port as the input wave 
+    sdata[dict(a=port)] = s.get_sparameters(frequency, source_port=port, downsample=False)
 
 
 # plot s-parameter results
