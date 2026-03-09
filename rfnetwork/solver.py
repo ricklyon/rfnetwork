@@ -2078,12 +2078,19 @@ class FDTD_Solver():
         axis = monitor["axis"]
         axis_str = ["x", "y", "z"][axis]
 
+        # is monitor a phasor at a single frequency
+        mon_frequency = monitor["frequency"]
+
         # time vector
         t_len = len(monitor["values"]) * self.dt * monitor["n_step"]
         time_values = np.arange(0, t_len, self.dt * monitor["n_step"], dtype=np.float64)[:len(monitor["values"])]
-        
+    
         # combine component vectors into a single matrix
         if is_total_field:
+
+            if mon_frequency is not None:
+                raise NotImplementedError("Phasor monitors not implemented yet for total fields.")
+            
             e_xyz = [self.monitors[n]["values"] for n in c_names]
             # order the fields by the components in the surface, followed by the normal component.
             # a surface on xy will be ordered x, y, z. xz will be ordered x, z, y., yz will be ordered, y, z, x.
@@ -2098,21 +2105,6 @@ class FDTD_Solver():
 
             # order back to x, y, z. Look up where each cartesian axis falls in the surface order
             e_xyz = [(e1, e2, e3)[axis_surf_ordered.index(a)] for a in range(3)]
-
-            # if axis_str == "z":
-            #     ex = (ex[:, 1:, 1:-1] + ex[:, :-1, 1:-1]) / 2
-            #     ey = (ey[:, 1:-1, 1:] + ey[:, 1:-1, :-1]) / 2
-            #     ez = (ez[:, 1:-1, 1:-1])
-            # # average components on the xz plane to get the fields on the corners
-            # elif axis_str == "y":
-            #     ex = (ex[:, 1:, 1:-1] + ex[:, :-1, 1:-1]) / 2
-            #     ey = (ey[:, 1:-1, 1:-1])
-            #     ez = (ez[:, 1:-1, 1:] + ez[:, 1:-1, :-1]) / 2
-            # # average components on the yz plane
-            # else: # axis == "x":
-            #     ex = (ex[:, 1:-1, 1:-1])
-            #     ey = (ex[:, 1:, 1:-1] + ex[:, :-1, 1:-1]) / 2
-            #     ez = (ez[:, 1:-1, 1:] + ez[:, 1:-1, :-1]) / 2
 
             # Assign the spatial coordinates of the grid corners.
             # Use the coordinates from the component normal to the monitor surface since it lies on the corners.
@@ -2129,10 +2121,10 @@ class FDTD_Solver():
             # build coordinates in inches for the two spatial dimensions of the slice
             spatial_coords = {spatial_dims[i]: self.floc[field][i] for i in spatial_axis}
 
-            return ldarray(
-                monitor["values"], 
-                coords=dict(time=time_values, **spatial_coords)
-            )
+            if mon_frequency is not None:
+                return ldarray(monitor["values"], coords=dict(**spatial_coords))
+            else:
+                return ldarray(monitor["values"], coords=dict(time=time_values, **spatial_coords))
 
  
     def plot_monitor(
@@ -2274,8 +2266,10 @@ class FDTD_Solver():
             axis = monitor["axis"]
             axis_pos = monitor["position"]
 
+            is_phasor = monitor["frequency"] is not None
+
             # initialize time step values if on the first monitor
-            if n_step is None:
+            if n_step is None and not is_phasor:
                 n_step = monitor["n_step"]
                 # number of frames in the monitor data, time dimension always preceds the 2 spatial dims of the surface
                 n_frames = monitor["values"].shape[-3]
@@ -2287,6 +2281,12 @@ class FDTD_Solver():
                     init_frame = int(n / n_step)
                 else:
                     init_frame = int(n_frames / 2)
+
+            elif is_phasor:
+                # setup frames for phase in 1 degree steps
+                n_step = 1
+                n_frames = 360
+                init_frame = 180
 
             # check that all monitors have the same time step size
             elif monitor["n_step"] != n_step:
@@ -2318,20 +2318,26 @@ class FDTD_Solver():
             elif is_total_field:
                 # RectilinearGrid requires the spatial points be flattened in column-order
                 field_v = np.sqrt(np.sum(np.abs(field)**2, axis=0)).reshape(len(field[1]), -1, order="F")
+            elif is_phasor:
+                # vary phase around the unit circle
+                phs_deg = np.linspace(-180, 180, n_frames)
+                phs_complex = np.exp(1j * np.deg2rad(phs_deg))
+                phs_b = np.broadcast_to(phs_complex[..., None, None], (n_frames,) + field.shape)
+                field_v = np.reshape(phs_b * field[None], (n_frames, -1), order="F")
             else:
                 field_v = field.reshape(len(field), -1, order="F")
 
             # convert to db
             if not linear:
                 # avoid nan values for zero values
-                field_v = np.where(np.abs(field_v) < 1e-12, 1e-12, field_v)
+                field_v = np.where(np.abs(field_v.real) < 1e-12, 1e-12, field_v.real)
                 field_v = conv.db20_lin(field_v)
 
             # set min/max bounds automatically if not given
             if vmax is None:
-                vmax = utils.round_to_multiple(np.nanmax(field_v), 5)
+                vmax = utils.round_to_multiple(np.nanmax(field_v.real), 5)
             if vmin is None:
-                vmin = np.nanmin(field_v) if linear else vmax - 40
+                vmin = np.nanmin(field_v.real) if linear else vmax - 40
 
             # initialize vector field
             if style[i] == "vectors":
@@ -2390,6 +2396,7 @@ class FDTD_Solver():
                 
                 # create rectangular grid surface and assign scalar field values as the color
                 mesh = pv.RectilinearGrid(*floc_in)
+
                 mesh.point_data['values'] = field_v[init_frame]
                 
                 actor = plotter.add_mesh(
@@ -2412,10 +2419,6 @@ class FDTD_Solver():
                     scalars=field_v,
                 )
 
-        # number of time points in the simulation
-        Nt = n_frames * n_step
-        # round starting point to nearest ps
-        self.slider_value = int(init_frame * n_step * self.dt * 1e12)
         self.slider = None
 
         plotter.add_axes()
@@ -2465,16 +2468,58 @@ class FDTD_Solver():
                     p["arrows"].copy_from(mesh.glyph(orient='vectors', scale='mag'))
                     p["arrows"].set_active_scalars("values")
 
+        def update_phase(deg):
+            """ function called every time the slider bar is moved. """
+
+            # wrap phase
+            deg = (deg + 180) % 360 - 180
+
+            self.slider_value = deg
+            frame = int(deg + 180)
+
+            if frame > (n_frames - 1):
+                return
+
+            # force update slider value. This allows the slider to be set programmatically 
+            if self.slider is not None:
+                self.slider.GetRepresentation().SetValue(self.slider_value)
+
+            # iterate through monitor plot items
+            for p in plot_items:
+                # update scalar colormap values
+                mesh = p["mesh"]
+                mesh.point_data["values"][:] = p["scalars"][frame]
+
         # add slider widget
-        self.slider = plotter.add_slider_widget(
-            update_fields,
-            [0, Nt * self.dt * 1e12],
-            value=self.slider_value,
-            title="Time [ps]",
-            interaction_event="always",
-            style="modern",
-            fmt="%0.2f"
-        )
+        if not is_phasor:
+            # number of time points in the simulation
+            Nt = n_frames * n_step
+            # round starting point to nearest ps
+            self.slider_value = int(init_frame * n_step * self.dt * 1e12)
+
+            self.slider = plotter.add_slider_widget(
+                update_fields,
+                [0, Nt * self.dt * 1e12],
+                value=self.slider_value,
+                title="Time [ps]",
+                interaction_event="always",
+                style="modern",
+                fmt="%0.2f"
+            )
+        else:
+            # round starting point to nearest ps
+            self.slider_value = int(init_frame - 180)
+
+            self.slider = plotter.add_slider_widget(
+                update_phase,
+                [-180, 180],
+                value=self.slider_value,
+                title="Phase [deg]",
+                interaction_event="always",
+                style="modern",
+                fmt="%0.0f"
+            )
+            
 
         # generate gif
         if gif_setup is not None:
@@ -2482,19 +2527,32 @@ class FDTD_Solver():
             fps = gif_setup.get("fps", 15)
             loop = gif_setup.get("loop", 0)
 
-            # start and end time in ps of gif
-            start_ps = gif_setup.get("start_ps", 0)
-            end_ps = gif_setup.get("end_ps", Nt * self.dt * 1e12)
-            step_ps = gif_setup.get("step_ps", 1)
-
             plotter.open_gif(file_, fps=fps, loop=loop, subrectangles=True)
 
-            # step through each frame in the monitor, skipping by frame_step on each iteration
-            for time_ps in np.arange(start_ps, end_ps + step_ps, step_ps):
+            if is_phasor:
+                # start and end time in ps of gif
+                start_deg = gif_setup.get("start_deg", -180)
+                end_deg = gif_setup.get("end_deg", 180)
+                step_deg = gif_setup.get("step_deg", 1)
 
-                # update field overlays
-                update_fields(time_ps)
-                plotter.write_frame()
+                # step through each phase
+                for phase in np.arange(start_deg, end_deg + step_deg, step_deg):
+
+                    # update field overlays
+                    update_phase(phase)
+                    plotter.write_frame()
+            else:
+                # start and end time in ps of gif
+                start_ps = gif_setup.get("start_ps", 0)
+                end_ps = gif_setup.get("end_ps", Nt * self.dt * 1e12)
+                step_ps = gif_setup.get("step_ps", 1)
+                # step through each frame in the monitor, skipping by frame_step on each iteration
+                for time_ps in np.arange(start_ps, end_ps + step_ps, step_ps):
+
+                    # update field overlays
+                    update_fields(time_ps)
+                    plotter.write_frame()
+            
 
             # Closes and finalizes movie
             plotter.close()

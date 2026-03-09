@@ -29,7 +29,7 @@ typedef Eigen::Map<Eigen::Matrix<std::complex<double>, Eigen::Dynamic, Eigen::Dy
 
 #define DATA_NDIM 3
 
-#define MAX_MONITORS 20
+#define MAX_MONITORS 30
 #define MAX_PROBES 5000
 #define MAX_THREADS 20
 
