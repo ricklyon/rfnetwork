@@ -29,7 +29,7 @@ typedef Eigen::Map<Eigen::Matrix<std::complex<double>, Eigen::Dynamic, Eigen::Dy
 
 #define DATA_NDIM 3
 
-#define MAX_MONITORS 30
+#define MAX_MONITORS 50
 #define MAX_PROBES 5000
 #define MAX_THREADS 20
 
@@ -758,7 +758,8 @@ void solver_thread(int x_start, int x_stop, int Nt, int thread_idx)
     float * p_hz_y = mbuffer_allocate(Nx * Hz.Ny * Hz.Nz); //  
     float * p_hz   = mbuffer_allocate(Nx * Hz.Ny * Hz.Nz); //  
 
-    // populate thread data
+    // populate thread data. Hy and Hz at the beginning of the x-block are used by the previous thread to update
+    // the E fields at the edge. Ey and Ez are used by the next thread to update the H fields.
     thread_data[thread_idx].hy = p_hy;
     thread_data[thread_idx].hz = p_hz;
     thread_data[thread_idx].ey = p_ey + ((Nx - 1) * Ey.NyNz);

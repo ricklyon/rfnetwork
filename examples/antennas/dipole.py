@@ -157,8 +157,14 @@ for axis in range(3):
         # add monitors for each surface field
         for f in (sf0, sf1):
             f_s = ("x", "y", "z")[f]
-            s.add_field_monitor(f"e{f_s}_{side}{axis_s}", f"e{f_s}", axis_s, surf_pos_in, frequency=f0)
-            s.add_field_monitor(f"h{f_s}_{side}{axis_s}", f"h{f_s}", axis_s, surf_pos_in, frequency=f0)
+            s.add_field_monitor(f"e{f_s}_{side}{axis_s}", f"e{f_s}", axis_s, index=surf_idx, frequency=f0)
+
+            s.add_field_monitor(f"h{f_s}1_{side}{axis_s}", f"h{f_s}", axis_s, index=surf_idx, frequency=f0)
+            # add monitor on other side of edge so H fields can be averaged
+            if j == 0 :
+                s.add_field_monitor(f"h{f_s}2_{side}{axis_s}", f"h{f_s}", axis_s, index=surf_idx-1, frequency=f0)
+            else:
+                s.add_field_monitor(f"h{f_s}2_{side}{axis_s}", f"h{f_s}", axis_s, index=surf_idx+1, frequency=f0)
 
 
 
@@ -172,12 +178,12 @@ s.solve(n_threads=4)
 
 #%%
 # Calculate far-field terms
-theta_range = np.arange(-180, 182, 2)
+theta_range = np.arange(-180, 181, 1)
 
 E_theta = np.zeros(len(theta_range), dtype="complex128")
 E_phi = np.zeros(len(theta_range), dtype="complex128")
 
-phi_deg = 0
+phi_deg = 90
 beta = 2 * np.pi * f0 / rfn.const.c0
 
 for i, theta_deg in enumerate(theta_range):
@@ -219,11 +225,16 @@ for i, theta_deg in enumerate(theta_range):
             e_xyz = np.zeros(((3,) + phs_term.shape), dtype=np.complex128)
             h_xyz = np.zeros(((3,) + phs_term.shape), dtype=np.complex128)
             for f in (sf0, sf1):
-
+                # string value for field direction
                 f_s = ("x", "y", "z")[f]
 
                 edata = s.get_monitor_data(f"e{f_s}_{side}{axis_s}")
-                hdata = s.get_monitor_data(f"h{f_s}_{side}{axis_s}")
+                # average the two h field monitor surfaces to get the values at the same location as 
+                # the e-fields. Assumes cells are equal width in the free space region around the ff box
+                hdata1 = s.get_monitor_data(f"h{f_s}1_{side}{axis_s}")
+                hdata2 = s.get_monitor_data(f"h{f_s}1_{side}{axis_s}")
+
+                hdata = (hdata1 + hdata2) / 2
 
                 # average e field along opposite surface axis to get the fields on the cell center
                 left_idx, right_idx = [slice(None), slice(None)], [slice(None), slice(None)]
@@ -231,7 +242,7 @@ for i, theta_deg in enumerate(theta_range):
                 left_idx[avg_axis] = slice(1, None)
                 right_idx[avg_axis] = slice(None, -1)
 
-                edata_cell = np.sqrt(edata[tuple(left_idx)] * edata[tuple(right_idx)])
+                edata_cell = (edata[tuple(left_idx)] + edata[tuple(right_idx)]) / 2
                 # get values inside the solve box
                 e_xyz[f] = edata_cell[ff_idx[sf0, 0]: ff_idx[sf0, 1], ff_idx[sf1, 0]: ff_idx[sf1, 1]]
 
@@ -241,7 +252,7 @@ for i, theta_deg in enumerate(theta_range):
                 left_idx[avg_axis] = slice(1, None)
                 right_idx[avg_axis] = slice(None, -1)
 
-                hdata_cell = np.sqrt(hdata[tuple(left_idx)] * hdata[tuple(right_idx)])
+                hdata_cell = (hdata[tuple(left_idx)] + hdata[tuple(right_idx)]) / 2
                 # get values inside the solve box
                 h_xyz[f] = hdata_cell[ff_idx[sf0, 0]: ff_idx[sf0, 1], ff_idx[sf1, 0]: ff_idx[sf1, 1]]
 
@@ -283,14 +294,34 @@ for i, theta_deg in enumerate(theta_range):
 
 
 fig, ax = plt.subplots(1, 1, subplot_kw=dict(projection="polar"))
-plt.plot(np.deg2rad(theta_range), rfn.conv.db20_lin(E_phi))
-plt.plot(np.deg2rad(theta_range), rfn.conv.db20_lin(E_theta))
+# plt.plot(np.deg2rad(theta_range), rfn.conv.db20_lin(E_phi))
+ax.plot(np.deg2rad(theta_range), rfn.conv.db20_lin(E_theta))
 ax.set_theta_zero_location('N') 
 ax.set_theta_direction(-1) 
+ax.set_ylim([-40, 10])
 
+ax.set_xlabel("$\\theta$ [deg]")
 
-p = s.plot_monitor(["e_tot", "e_tot"], opacity=["linear", None], style=["vectors", "surface"], vmin=-30, vmax=20)
-p.show()
+#%%
+cpos = pv.CameraPosition(
+    position=(-1.2, -2.5, 0.5),
+    focal_point=(0, 0, 0),
+    viewup=(0, 0.0, 1.0),
+)
+
+gif_setup = dict(file="dipole.gif", fps=10, start_ps=0, end_ps=700, step_ps=5)
+p = s.plot_monitor(
+    ["e_tot", "e_tot"], 
+    opacity=["linear", None], 
+    style=["vectors", "surface"], 
+    vmin=-30, vmax=20, 
+    show_mesh=False, show_rulers=False,
+    camera_position=cpos,
+    # gif_setup=gif_setup
+)
+p.add_mesh(ff_box, style="wireframe")
+# p.show()
+
 
 frequency: np.ndarray = np.arange(5e9, 15e9, 10e6)
 sdata = s.get_sparameters(frequency)
@@ -304,3 +335,4 @@ ax.set_ylabel("[dB]")
 ax.legend(["S11"])
 
 plt.show()
+# %%

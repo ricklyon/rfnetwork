@@ -1248,7 +1248,8 @@ class FDTD_Solver():
         name: str, 
         field: str, 
         axis: str, 
-        position: float, 
+        position: float = None, 
+        index: int = None,
         n_step: int = 1,
         frequency: float = None
     ):
@@ -1263,8 +1264,10 @@ class FDTD_Solver():
             field quantity. If "e_total" is specified, three monitors are created for each x, y, z field component.
         axis : {'x', 'y', 'z'}
             surface normal axis
-        position : float
+        position : float, optional
             position on axis of the monitor surface, inches
+        index : int, optional
+            index on axis of the monitor surface. Ignored if position is given.
         n_step : int, default: 1
             number of time steps between each capture.
         frequency : float, optional
@@ -1294,18 +1297,21 @@ class FDTD_Solver():
             axis_len = shape.pop(axis_i)
 
             # convert position along axis to field index
-            full_pos = [0] * 3
-            full_pos[axis_i] = position
-            idx = int(self.field_pos_to_idx(full_pos, f)[axis_i])
+            if position is not None:
+                full_pos = [0] * 3
+                full_pos[axis_i] = position
+                index = int(self.field_pos_to_idx(full_pos, f)[axis_i])
+            elif index is not None:
+                position = self.floc[f][axis_i][index]
 
-            if idx >= (axis_len - 1):
+            if index < 0 or index >= (axis_len - 1):
                 raise ValueError("Field position out of bounds")
 
             self.monitors[n] = dict(
                 field=f, 
                 axis=axis_i, 
                 position=position, 
-                index=idx, 
+                index=index, 
                 n_step=n_step, 
                 shape=tuple(shape),
                 frequency=frequency
