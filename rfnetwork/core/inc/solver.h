@@ -125,7 +125,7 @@ struct Coeff_Hz {
 struct Monitor {
     char * values;
     std::complex<double> * dtft_phase;
-    bool is_phasor;
+    int n_phasors;
     int field_type;
     int axis;
     int position;
@@ -172,12 +172,7 @@ int solver_run(int Nt, int n_threads, int update_interval);
 void solver_thread(int x_start, int x_stop, int Nt, int thread_idx);
 void solver_controller(int Nt, int n_threads, int update_interval);
 
-int solver_update_ex(int x_start, int x_stop);
-int solver_update_ey(int x_start, int x_stop);
-int solver_update_ez(int x_start, int x_stop);
-
-int solver_update_hx(int x_start, int x_stop);
-int solver_update_hy(int x_start, int x_stop);
-int solver_update_hz(int x_start, int x_stop);
+int update_monitor(Monitor * mon, float * mon_field, int m_n, int x_start, int x_stop);
+int update_phasor_monitor(Monitor * mon, float * mon_field, int m_n, int x_start, int x_stop);
 
 #endif /* SOLVER_H */

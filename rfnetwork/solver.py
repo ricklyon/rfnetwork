@@ -34,8 +34,9 @@ class FDTD_Solver():
 
         self.pml_boundaries = []
 
-        self.monitors=dict()
-        self.probes=dict()
+        self.monitors = dict()
+        self.farfield =dict()
+        self.probes = dict()
         self.ports = []
         
         self._n_pml = None
@@ -1194,13 +1195,17 @@ class FDTD_Solver():
             if m["frequency"] is not None:
                 # initialize monitor for frequency domain phasor captures.
                 # DTFT is computed with a running sum in the time stepping equations
-                frequency = float(m["frequency"])
+                frequency = m["frequency"]
                 fs = (1 / (self.dt *  m["n_step"]))
                 fn = frequency / fs
                 omega = 2 * np.pi * fn
                 # phase terms of the DTFT at a single frequency for each time step
-                mon_config["values"] = np.zeros(m["shape"], dtype=np.complex128, order="C")
-                mon_config["dtft_phase"] = np.exp(-1j * omega * np.arange(n_m), dtype=np.complex128) 
+                mon_config["values"] = np.zeros(((len(frequency),) + m["shape"]), dtype=np.complex128, order="C")
+                # dtft phase is ordered (n_m, frequency)
+                mon_config["dtft_phase"] = np.exp(
+                    -1j * omega[None] * np.arange(n_m)[:, None], dtype=np.complex128, order="C" 
+                )
+                mon_config["n_frequencies"] = int(len(frequency))
             else:
                 # initialize monitor for time domain captures
                 mon_config["values"] = np.zeros(((n_m,) + m["shape"]), dtype=dtype_, order="C")
@@ -1254,7 +1259,7 @@ class FDTD_Solver():
         frequency: float = None
     ):
         """
-        Add field monitor on a 2D surface.
+        Add near field monitor on a 2D surface.
 
         Parameters
         ----------
@@ -1314,9 +1319,100 @@ class FDTD_Solver():
                 index=index, 
                 n_step=n_step, 
                 shape=tuple(shape),
-                frequency=frequency
+                frequency=np.atleast_1d(frequency) if frequency is not None else None
             )
 
+    def add_farfield_monitor(self, ff_box: pv.PolyData, frequency: np.ndarray):
+        """
+        Configure far field monitors
+
+        Parameters
+        ----------
+
+        ff_box: pv.PolyData
+            box defining the faces of the far-field monitor. PML must be used outside this region for accurate
+            far-field captures. Monitors will not be added for faces on the edges of the solve boundary.
+        frequency : np.ndarray | float
+            frequencies in Hz of the far-field monitors.
+
+        """
+        # grid indices of each face at grid edges
+        ffn_x, ffn_y, ffn_z = self.pos_to_idx(np.min(ff_box.points, axis=0), "edge")
+        ffp_x, ffp_y, ffp_z = self.pos_to_idx(np.max(ff_box.points, axis=0), "edge")
+
+        # edge indices at the monitor planes. The cell indices within each face can use the 
+        # the edge index slices since the last index is not inclusive when indexing cells.
+        ff_idx = np.array([[ffn_x, ffp_x], [ffn_y, ffp_y], [ffn_z, ffp_z]])
+        self.farfield["idx"] = ff_idx
+        # pos_to_idx returns index of edge greater or equal to the position
+        ff_idx[:, 1] -= 1
+
+        # position in meters of surfaces
+        self.farfield["surf_pos"] = np.zeros_like(ff_idx, dtype=np.float64)
+
+        # cell positions and widths on each surface as a meshgrid, meters
+        self.farfield["cell_pos"] = [None] * 3
+        self.farfield["cell_w"] = [None] * 3
+
+        self.farfield["box"] = ff_box.copy()
+        self.farfield["frequency"] = np.atleast_1d(frequency)
+
+        for axis in range(3):
+
+            # field components on surface
+            axis_s = ("x", "y", "z")[axis]
+            sf0, sf1 = [i for i in (0, 1, 2) if i != axis]
+            sf0_s, sf1_s = [a for a in ("x", "y", "z") if a != axis_s]
+
+            # grid cell positions are the same for both sides of the face
+            self.farfield["cell_pos"][axis] =  np.meshgrid(
+                conv.m_in(self.g_cells[sf0][ff_idx[sf0, 0]: ff_idx[sf0, 1]]), 
+                conv.m_in(self.g_cells[sf1][ff_idx[sf1, 0]: ff_idx[sf1, 1]]), 
+                indexing="ij"
+            )
+
+            # grid cell widths, same for both sides
+            self.farfield["cell_w"][axis] = np.meshgrid(
+                conv.m_in(self.d_cells[sf0][ff_idx[sf0, 0]: ff_idx[sf0, 1]]), 
+                conv.m_in(self.d_cells[sf1][ff_idx[sf1, 0]: ff_idx[sf1, 1]]), 
+                indexing="ij"
+            )
+            
+            # for each face on either side of the far-field box
+            for j, side in enumerate(["n", "p"]):
+
+                # edge index and the position of the surface along the normal axis
+                surf_idx = ff_idx[axis, j]
+
+                # monitor values are all zero if surface is at the solve boundary, skip monitor
+                if surf_idx < 1 or surf_idx >= len(self.g_edges[axis]) -1:
+                    continue
+
+                surf_pos_in = self.g_edges[axis][surf_idx]
+                # surface position in meters
+                self.farfield["surf_pos"][axis, j] = conv.m_in(surf_pos_in)
+                
+                # add monitors for each surface field
+                for f in (sf0, sf1):
+                    f_s = ("x", "y", "z")[f]
+                    # add e-field monitor
+                    self.add_field_monitor(
+                        f"ff_e{f_s}_{side}{axis_s}", f"e{f_s}", axis_s, index=surf_idx, frequency=frequency
+                    )
+
+                    # add h-field monitor 
+                    self.add_field_monitor(
+                        f"ff_h{f_s}1_{side}{axis_s}", f"h{f_s}", axis_s, index=surf_idx, frequency=frequency
+                    )
+                    # add monitor on other side of edge so H fields can be averaged
+                    if j == 0 :
+                        self.add_field_monitor(
+                            f"ff_h{f_s}2_{side}{axis_s}", f"h{f_s}", axis_s, index=surf_idx-1, frequency=frequency
+                        )
+                    else:
+                        self.add_field_monitor(
+                            f"ff_h{f_s}2_{side}{axis_s}", f"h{f_s}", axis_s, index=surf_idx+1, frequency=frequency
+                        )
 
     def add_current_probe(self, name: str, face: pv.PolyData):
         """
@@ -1560,6 +1656,11 @@ class FDTD_Solver():
             # along an axis line up if the camera is aligned with a cardinal plane.
             plotter.enable_parallel_projection()
             plotter.add_mesh(grid, style="wireframe", line_width=0.05, color="k", opacity=0.05)
+
+            # show far-field box
+            ff_box = self.farfield.get("box", None)
+            if ff_box is not None:
+                plotter.add_mesh(ff_box, style="wireframe")
 
         # add solve box
         plotter.add_mesh(self.bounding_box, style="wireframe")
@@ -2128,7 +2229,7 @@ class FDTD_Solver():
             spatial_coords = {spatial_dims[i]: self.floc[field][i] for i in spatial_axis}
 
             if mon_frequency is not None:
-                return ldarray(monitor["values"], coords=dict(**spatial_coords))
+                return ldarray(monitor["values"], coords=dict(frequency=mon_frequency, **spatial_coords))
             else:
                 return ldarray(monitor["values"], coords=dict(time=time_values, **spatial_coords))
 

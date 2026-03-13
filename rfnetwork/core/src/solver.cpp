@@ -456,16 +456,17 @@ int solver_init_monitors(PyObject * py_monitors, int Nt)
         // monitor is frequency domain phasor if dtft phase is present in the dictionary
         if (PyDict_Contains(py_mon, PyUnicode_FromString("dtft_phase")))
         {   
-            int shape_dtft[1] = {Nm};
-            int shape_phasors[2] = {n1, n2};
-            monitors[m].dtft_phase = get_complex_array(py_mon, "dtft_phase", shape_dtft, 1);
-            monitors[m].values = (char *) get_complex_array(py_mon, "values", shape_phasors, 2);
-            monitors[m].is_phasor = true;
+            int n_frequencies = PyLong_AsLong(PyDict_GetItemString(py_mon, "n_frequencies"));
+            int shape_dtft[2] = {Nm, n_frequencies};
+            int shape_phasors[3] = {n_frequencies, n1, n2};
+            monitors[m].dtft_phase = get_complex_array(py_mon, "dtft_phase", shape_dtft, 2);
+            monitors[m].values = (char *) get_complex_array(py_mon, "values", shape_phasors, 3);
+            monitors[m].n_phasors = n_frequencies;
         }
         else
         {
             monitors[m].values = (char *) get_solver_array(py_mon, "values", Nm, n1, n2);
-            monitors[m].is_phasor = false;
+            monitors[m].n_phasors = 0;
         }
 
         monitors[m].N1 = n1;
@@ -1135,88 +1136,108 @@ void solver_thread(int x_start, int x_stop, int Nt, int thread_idx)
             {
                 continue;
             }
+
+            // only update x slice monitor if it is within bounds of the thread.
+            // position has already been corrected in init_monitors to account for the fact that first
+            // grid cell in the thread grid starts at x=1 in the global grid for the Ez, Hx, and Ey components.
+            if ((mon.axis == 0) && (((mon.position) < x_start) || ((mon.position) >= x_stop)))
+            {
+                continue;
+            }
             
             int m_n = n / mon.n_step;
 
-            if (mon.is_phasor)
+            if (mon.n_phasors)
             {
-                MatrixComplexType m_values ((std::complex<double> *) mon.values, mon.N1, mon.N2);
-                std::complex<double> dtft_phase = mon.dtft_phase[m_n];
-
-                if (mon.axis == 0)
-                {
-                    // only update x slice monitor if it is within bounds of the thread.
-                    // position has already been corrected in init_monitors to account for the fact that first
-                    // grid cell in the thread grid starts at x=1 in the global grid for the Ez, Hx, and Ey components.
-                    if (((mon.position) < x_start) || ((mon.position) >= x_stop))
-                    {
-                        continue;
-                    }
-                    MatrixFloatType m_field (mon_field + ((mon.position - x_start) * (mon.NyNz)), mon.Ny, mon.Nz);
-                    m_values += ((m_field.cast<std::complex<double>>()) * dtft_phase);
-                }
-
-                else if (mon.axis == 1)
-                {
-                    // The x_offset accounts for the offset between
-                    // the global grid and the thread grid which skips x=0.
-                    for (int i = x_start; i < x_stop; i++)
-                    {
-                        MatrixFloatType m_field (mon_field + ((i - x_start) * (mon.NyNz)), mon.Ny, mon.Nz);
-                        m_values.row(i + mon.x_offset) += ((m_field.cast<std::complex<double>>()).row(mon.position) * dtft_phase);
-                    }
-                }
-
-                else // (m.axis == 2)
-                {
-                    for (int i = x_start; i < x_stop; i++)
-                    {
-                        MatrixFloatType m_field (mon_field + ((i - x_start) * (mon.NyNz)), mon.Ny, mon.Nz);
-                        m_values.row(i + mon.x_offset) += ((m_field.cast<std::complex<double>>()).col(mon.position) * dtft_phase);
-                    }
-                }
+                update_phasor_monitor(&mon, mon_field, m_n, x_start, x_stop);
             }
 
             else
             {
-                MatrixFloatType m_values (((float *) (mon.values)) + (m_n * (mon.N1N2)), mon.N1, mon.N2);
-            
-                if (mon.axis == 0)
-                {
-                    // only update x slice monitor if it is within bounds of the thread.
-                    // position has already been corrected in init_monitors to account for the fact that first
-                    // grid cell in the thread grid starts at x=1 in the global grid for the Ez, Hx, and Ey components.
-                    if (((mon.position) < x_start) || ((mon.position) >= x_stop))
-                    {
-                        continue;
-                    }
-                    MatrixFloatType m_field (mon_field + ((mon.position - x_start) * (mon.NyNz)), mon.Ny, mon.Nz);
-                    m_values = m_field;
-                }
-
-                else if (mon.axis == 1)
-                {
-                    // The x_offset accounts for the offset between
-                    // the global grid and the thread grid which skips x=0.
-                    for (int i = x_start; i < x_stop; i++)
-                    {
-                        MatrixFloatType m_field (mon_field + ((i - x_start) * (mon.NyNz)), mon.Ny, mon.Nz);
-                        m_values.row(i + mon.x_offset) = m_field.row(mon.position);
-                    }
-                }
-
-                else // (m.axis == 2)
-                {
-                    for (int i = x_start; i < x_stop; i++)
-                    {
-                        MatrixFloatType m_field (mon_field + ((i - x_start) * (mon.NyNz)), mon.Ny, mon.Nz);
-                        m_values.row(i + mon.x_offset) = m_field.col(mon.position);
-                    }
-                }
+                update_monitor(&mon, mon_field, m_n, x_start, x_stop);
             }
-            
-        } // end monitors
+        }
 
     } // end time stepping
 
+}
+
+
+int update_monitor(Monitor * mon, float * mon_field, int m_n, int x_start, int x_stop)
+{
+
+    MatrixFloatType m_values (((float *) (mon->values)) + (m_n * (mon->N1N2)), mon->N1, mon->N2);
+
+    if (mon->axis == 0)
+    {
+        MatrixFloatType m_field (mon_field + ((mon->position - x_start) * (mon->NyNz)), mon->Ny, mon->Nz);
+        m_values = m_field;
+    }
+
+    else if (mon->axis == 1)
+    {
+        // The x_offset accounts for the offset between
+        // the global grid and the thread grid which skips x=0.
+        for (int i = x_start; i < x_stop; i++)
+        {
+            MatrixFloatType m_field (mon_field + ((i - x_start) * (mon->NyNz)), mon->Ny, mon->Nz);
+            m_values.row(i + mon->x_offset) = m_field.row(mon->position);
+        }
+    }
+
+    else // (m->axis == 2)
+    {
+        for (int i = x_start; i < x_stop; i++)
+        {
+            MatrixFloatType m_field (mon_field + ((i - x_start) * (mon->NyNz)), mon->Ny, mon->Nz);
+            m_values.row(i + mon->x_offset) = m_field.col(mon->position);
+        }
+    }
+
+    return 0;
+        
+}
+
+
+int update_phasor_monitor(Monitor * mon, float * mon_field, int m_n, int x_start, int x_stop)
+{
+
+    for (int f = 0; f < mon->n_phasors; f++)
+    {
+        std::complex<double> * m_values_p = ((std::complex<double> *) (mon->values)) + (f * (mon->N1N2));
+
+        // pointer to matrix that holds the monitor results
+        MatrixComplexType m_values (m_values_p, mon->N1, mon->N2);
+        // get dtft exponential phase term at time step and frequency
+        std::complex<double> * dtft_phase_p = ((std::complex<double> *) (mon->dtft_phase)) + ((m_n * (mon->n_phasors)) + f);
+        std::complex<double> dtft_phase = *dtft_phase_p;
+
+        if (mon->axis == 0)
+        {
+            MatrixFloatType m_field (mon_field + ((mon->position - x_start) * (mon->NyNz)), mon->Ny, mon->Nz);
+            m_values += ((m_field.cast<std::complex<double>>()) * dtft_phase);
+        }
+
+        else if (mon->axis == 1)
+        {
+            // The x_offset accounts for the offset between
+            // the global grid and the thread grid which skips x=0.
+            for (int i = x_start; i < x_stop; i++)
+            {
+                MatrixFloatType m_field (mon_field + ((i - x_start) * (mon->NyNz)), mon->Ny, mon->Nz);
+                m_values.row(i + mon->x_offset) += ((m_field.cast<std::complex<double>>()).row(mon->position) * dtft_phase);
+            }
+        }
+
+        else // (m->axis == 2)
+        {
+            for (int i = x_start; i < x_stop; i++)
+            {
+                MatrixFloatType m_field (mon_field + ((i - x_start) * (mon->NyNz)), mon->Ny, mon->Nz);
+                m_values.row(i + mon->x_offset) += ((m_field.cast<std::complex<double>>()).col(mon->position) * dtft_phase);
+            }
+        }
+    }
+
+    return 0;
 }
