@@ -35,7 +35,7 @@ class FDTD_Solver():
         self.pml_boundaries = []
 
         self.monitors = dict()
-        self.farfield =dict()
+        self.farfield = dict()
         self.probes = dict()
         self.ports = []
         
@@ -2232,6 +2232,133 @@ class FDTD_Solver():
                 return ldarray(monitor["values"], coords=dict(frequency=mon_frequency, **spatial_coords))
             else:
                 return ldarray(monitor["values"], coords=dict(time=time_values, **spatial_coords))
+
+    def get_farfield_data(self, theta, phi):
+
+        self.check_solution()
+
+        # check that far-field monitor exists
+        if not len(self.farfield.keys()):
+            raise RuntimeError("Far-field monitor not found.")
+        
+        theta = np.atleast_1d(theta)
+        phi = np.atleast_1d(phi)
+
+        # equivalent currents at the cell centers, two faces per axis
+        J_xyz = [[None, None] for i in range(3)]
+        M_xyz = [[None, None] for i in range(3)]
+
+        # surface position, two faces per axis, meters
+        surf_pos = [[None, None] for i in range(3)]
+
+        # meshgrid of x/y positions on grid, same for each face on the same axis
+        r_grid = [[None, None] for i in range(3)]
+
+        # meshgrid of cell widths along each surface axis, same for each face on the same axis
+        w_grid = [[None, None] for i in range(3)]
+
+        # indices of each face on farfield box
+        ff_idx = self.farfield["idx"]
+
+        # initialize matrix for far-field data
+        frequency = self.farfield["frequency"]
+        n_frequencies = len(frequency)
+
+        for axis in range(3):
+
+            # field components on surface
+            axis_s = ("x", "y", "z")[axis]
+            sf0, sf1 = [i for i in (0, 1, 2) if i != axis]
+            sf0_s, sf1_s = [a for a in ("x", "y", "z") if a != axis_s]
+
+            # grid cell positions
+            r_grid[axis][0] = np.array(self.farfield["cell_pos"][axis][0], dtype=np.float32, order="C")
+            r_grid[axis][1] = np.array(self.farfield["cell_pos"][axis][1], dtype=np.float32, order="C")
+
+            # grid cell widths
+            w_grid[axis][0] = np.array(self.farfield["cell_w"][axis][0], order="C")
+            w_grid[axis][1] = np.array(self.farfield["cell_w"][axis][1], order="C")
+
+            # for each face on either side of the far-field box
+            for j, side in enumerate(["n", "p"]):
+                # surface position, meters
+                surf_pos[axis][j] = self.farfield["surf_pos"][axis, j]
+
+                # shape of the grid cells on surface
+                surf_shape = self.farfield["cell_pos"][axis][0].shape
+                
+                # initialize surface field at the cell centers
+                e_xyz = np.zeros(((3, n_frequencies) + surf_shape), dtype=np.complex128, order="C")
+                h_xyz = np.zeros(((3, n_frequencies) + surf_shape), dtype=np.complex128, order="C")
+                
+                for f in (sf0, sf1):
+                    # string value for field direction
+                    f_s = ("x", "y", "z")[f]
+
+                    # near-field monitor names
+                    emon = f"ff_e{f_s}_{side}{axis_s}"
+                    hmon1 = f"ff_h{f_s}1_{side}{axis_s}"
+                    hmon2 = f"ff_h{f_s}2_{side}{axis_s}"
+
+                    # skip faces that are on solve box boundaries
+                    if emon not in self.monitors.keys():
+                        continue
+                    
+                    # get near-field data
+                    edata = self.get_monitor_data(emon)
+                    hdata1 = self.get_monitor_data(hmon1)
+                    hdata2 = self.get_monitor_data(hmon2)
+
+                    # widths of the cells that the h-components are in, along the axis
+                    hidx1 = self.monitors[hmon1]["index"]
+                    hidx2 = self.monitors[hmon2]["index"]
+                    w1, w2 = self.d_cells[axis][hidx1], self.d_cells[axis][hidx2]
+                    # average the two h field monitor surfaces to get the values at the same location as 
+                    # the e-fields. 
+                    hdata = (hdata1 * (w1/2) + hdata2 * (w2/2)) / ((w1/2) + (w2/2))
+
+                    # average e field along opposite surface axis to get the fields on the cell center
+                    left_idx, right_idx = [slice(None), slice(None), slice(None)], [slice(None), slice(None), slice(None)]
+                    avg_axis = int(1 if f == sf1 else 2)
+                    left_idx[avg_axis] = slice(1, None)
+                    right_idx[avg_axis] = slice(None, -1)
+
+                    edata_cell = (edata[tuple(left_idx)] + edata[tuple(right_idx)]) / 2
+                    # get values inside the solve box
+                    e_xyz[f] = edata_cell[:, ff_idx[sf0, 0]: ff_idx[sf0, 1], ff_idx[sf1, 0]: ff_idx[sf1, 1]]
+
+                    # average h field along the field axis to get field at the cell center
+                    left_idx, right_idx = [slice(None), slice(None), slice(None)], [slice(None), slice(None), slice(None)]
+                    avg_axis = int(1 if f == sf0 else 2)
+                    left_idx[avg_axis] = slice(1, None)
+                    right_idx[avg_axis] = slice(None, -1)
+
+                    hdata_cell = (hdata[tuple(left_idx)] + hdata[tuple(right_idx)]) / 2
+                    # get values inside the solve box
+                    h_xyz[f] = hdata_cell[:, ff_idx[sf0, 0]: ff_idx[sf0, 1], ff_idx[sf1, 0]: ff_idx[sf1, 1]]
+
+                # the normal axis vector, points out from surface
+                normal_axis_v = np.array([0, 0, 0])
+                normal_axis_v[axis] = (-1 if j == 0 else 1)
+                # magnetic equivalent surface currents, n X Hs
+                # equation 7-43 in Balanis Fields and Waves
+                J_xyz[axis][j] = np.cross(normal_axis_v, h_xyz, axis=0)
+                # electric equivalent surface currents, -n X Es
+                M_xyz[axis][j] = np.cross(-normal_axis_v, e_xyz, axis=0)
+
+        # max grid length for temporary working grid
+        max_grid_length = np.max([len(d) for d in self.d_cells])
+
+        ff_data = dict(
+            beta = np.array(2 * np.pi * frequency / const.c0, dtype=np.float32),
+            theta = np.array(np.deg2rad(theta), dtype=np.float32),
+            phi = np.array(np.deg2rad(phi), dtype=np.float32),
+            data = np.zeros((2, n_frequencies, len(theta), len(phi)), dtype=np.complex128, order="C"),
+            working_grid_cmplx = np.zeros((max_grid_length, max_grid_length), dtype=np.complex128, order="C"),
+            working_grid_float = np.zeros((max_grid_length, max_grid_length), dtype=np.float32, order="C")
+        )
+
+        core.core_func.nf2ff(J_xyz, M_xyz, r_grid, w_grid, surf_pos, ff_data)
 
  
     def plot_monitor(
