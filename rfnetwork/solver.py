@@ -2233,8 +2233,25 @@ class FDTD_Solver():
             else:
                 return ldarray(monitor["values"], coords=dict(time=time_values, **spatial_coords))
 
-    def get_farfield_data(self, theta, phi):
+    def get_farfield_data(self, theta: np.ndarray, phi: np.ndarray) -> ldarray:
+        """
+        Compile E-field monitor data from the farfield monitor attached to the solver.
 
+        E-field values are returned for thetapol and phipol, and are normalized by (exp(1j * beta * r) / r).
+
+        Parameters
+        ----------
+        theta : np.ndarray | float
+            spatial theta values in degrees
+
+        phi : np.ndarray | float
+            spatial phi values in degrees
+
+        Returns
+        -------
+        ldarray
+            rE field values. labeled numpy array with dimensions (polarization, frequency, theta, phi)
+        """
         self.check_solution()
 
         # check that far-field monitor exists
@@ -2341,24 +2358,30 @@ class FDTD_Solver():
                 normal_axis_v = np.array([0, 0, 0])
                 normal_axis_v[axis] = (-1 if j == 0 else 1)
                 # magnetic equivalent surface currents, n X Hs
-                # equation 7-43 in Balanis Fields and Waves
-                J_xyz[axis][j] = np.cross(normal_axis_v, h_xyz, axis=0)
+                # equation 7-43 in Advanced Engineering Electromagnetics, 2nd Edition 
+                J_xyz[axis][j] = np.array(np.cross(normal_axis_v, h_xyz, axis=0), order="C")
                 # electric equivalent surface currents, -n X Es
-                M_xyz[axis][j] = np.cross(-normal_axis_v, e_xyz, axis=0)
+                M_xyz[axis][j] = np.array(np.cross(-normal_axis_v, e_xyz, axis=0), order="C")
 
         # max grid length for temporary working grid
         max_grid_length = np.max([len(d) for d in self.d_cells])
 
         ff_data = dict(
-            beta = np.array(2 * np.pi * frequency / const.c0, dtype=np.float32),
-            theta = np.array(np.deg2rad(theta), dtype=np.float32),
-            phi = np.array(np.deg2rad(phi), dtype=np.float32),
+            beta = np.array(2 * np.pi * frequency / const.c0, dtype=np.float32, order="C"),
+            theta = np.array(np.deg2rad(theta), dtype=np.float32, order="C"),
+            phi = np.array(np.deg2rad(phi), dtype=np.float32, order="C"),
             data = np.zeros((2, n_frequencies, len(theta), len(phi)), dtype=np.complex128, order="C"),
             working_grid_cmplx = np.zeros((max_grid_length, max_grid_length), dtype=np.complex128, order="C"),
             working_grid_float = np.zeros((max_grid_length, max_grid_length), dtype=np.float32, order="C")
         )
 
         core.core_func.nf2ff(J_xyz, M_xyz, r_grid, w_grid, surf_pos, ff_data)
+
+        # cast as labeled array
+        return ldarray(
+            ff_data["data"],
+            coords=dict(polarization=["thetapol", "phipol"], frequency=frequency, theta=theta, phi=phi)
+        )
 
  
     def plot_monitor(

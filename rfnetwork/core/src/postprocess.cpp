@@ -33,6 +33,8 @@ typedef Eigen::Map<Eigen::Matrix<std::complex<double>, Eigen::Dynamic, Eigen::Dy
 #define FF_THETA 2
 #define FF_PHI 3
 
+#define ETA0 376.730313
+
 std::complex<double> * get_complex_array(PyObject* py_obj, int * shape, int ndim) 
 {   
     PyArrayObject* array = (PyArrayObject*) py_obj;
@@ -120,7 +122,8 @@ int get_pointer_index_4(int * shape, const std::array<int, 4>& index)
     return idx;
 }
 
-
+// Integrate J and M equivalent surface currents on a rectangular box to produce the far-field electric field values.
+// See Section 6.8.2 in Balanis Advanced Engineering Electromagnetics 2nd Edition
 int postprocess_nf2ff(
     PyObject * J_xyz_py, 
     PyObject * M_xyz_py, 
@@ -132,17 +135,31 @@ int postprocess_nf2ff(
 {
     npy_intp * npy_shape;
 
+    // check that cell positions are given for the three cartesian axis
+    if (PyList_Size(r_grid_py) != 3)
+    {
+        throw std::runtime_error("Invalid r_grid data array. Expected list of length 3.");
+    }
+
+    // check that cell widths are given for the three cartesian axis
+    if (PyList_Size(w_grid_py) != 3)
+    {
+        throw std::runtime_error("Invalid w_grid data array. Expected list of length 3.");
+    }
+
+    // check surface positions
+    if (PyList_Size(surf_pos_py) != 3)
+    {
+        throw std::runtime_error("Invalid surf_pos array. Expected list of length 3.");
+    }
+
+    // get the result data array where the E-fields will be held.
     PyObject* py_data = PyDict_GetItemString(ff_data_py, "data");
     PyArrayObject* py_data_arr = (PyArrayObject*) py_data;
 
     if (PyArray_NDIM(py_data_arr) != FFDATA_NDIM)
     {
         throw std::runtime_error("Invalid far-field data array. Expected four dimensions.");
-    }
-
-    if (PyList_Size(r_grid_py) != 3)
-    {
-        throw std::runtime_error("Invalid r_grid data array. Expected list of length 3.");
     }
 
     // dimensions are polarization, frequency, theta, phi
@@ -269,21 +286,33 @@ int postprocess_nf2ff(
 
     }
     
+    // variables for N and L auxilary fields
     std::complex<double> N_theta, N_phi, L_theta, L_phi;
+    // pointers into the result data array for both polarizations
     std::complex<double> * thetapol_p;
     std::complex<double> * phipol_p;
 
-
+    // variables for the current frequency, theta and phi values in the loops
     float beta, theta, phi;
+    // working variables for cos(theta), sin(theta), etc...
     double cos_th, cos_ph, sin_th, sin_ph;
     // cos/sin terms cast as complex values
     std::complex<double> cos_th_c, cos_ph_c, sin_th_c, sin_ph_c;
+    std::complex<double> beta_c;
 
+    // 4 * PI as a complex number
+    std::complex<double> pi4_c = (std::complex<double>) (4 * M_PI);
+    // Impedance of free space as a complex number
+    std::complex<double> eta0_c = (std::complex<double>) (ETA0);
+
+    // variables for current uv values in the loop
     double u, v, w;
+    // number of spatial grid points in a face
     int grid_size;
 
-    // constant -1j
+    // constant -1j, 1j and 0 as complex numbers
     std::complex<double> n1J = std::complex<double>(0, -1);
+    std::complex<double> p1J = std::complex<double>(0, -1);
     std::complex<double> zero_c = std::complex<double>(0, 0);
 
     // loop over theta
@@ -299,7 +328,8 @@ int postprocess_nf2ff(
             cos_th = std::cos((double) theta);
             sin_ph = std::sin((double) phi);
             sin_th = std::sin((double) theta);
-
+            
+            // covert to uvw
             u = sin_th * cos_ph;
             v = sin_th * sin_ph;
             w = cos_th;
@@ -312,6 +342,8 @@ int postprocess_nf2ff(
             // loop over frequency
             for (int f = 0; f < data_shape[FF_FREQUENCY]; f++)
             {   
+                beta = beta_arr[f];
+                beta_c = (std::complex<double>) beta;
                 // reset N and L at each frequency, values from all faces are summed into a single value
                 N_theta = zero_c;
                 N_phi = zero_c;
@@ -351,9 +383,9 @@ int postprocess_nf2ff(
                             r_dot = ((surf_pos[axis][s] * w) + ((r_pos_0 * u).array() + (r_pos_1 * v).array()));
                         }
 
-
+                        // integrand term, same memory used for exponential phase term exp(1j * beta.item() * r_dot)
+                        // and the differential dS.
                         MatrixComplexType intg (working_grid_cmplx_p, grid_shape[axis][0], grid_shape[axis][1]);
-                        beta = beta_arr[f];
 
                         // phs_term = exp(1j * beta.item() * r_dot)
                         intg = ((n1J * ((std::complex<double>) beta)) * r_dot.array().cast<std::complex<double>>()).array().exp();
@@ -431,7 +463,6 @@ int postprocess_nf2ff(
 
                 }  // end axis loop
 
-
                 // pointer to thetapol result
                 thetapol_p = (data_array + get_pointer_index_4(data_shape, {0, f, th, ph}));
 
@@ -441,7 +472,9 @@ int postprocess_nf2ff(
                 // contributions to N and L have been summed from all faces by this point. Calculate far-field
                 // # electric field for thetapol and phipol
                 // E_theta[i] = (-j * beta / (4 * np.pi)) * (L_phi + eta0 * N_theta)
+                *thetapol_p = (n1J * beta_c / pi4_c) * (L_phi + (eta0_c * N_theta));
                 // E_phi[i] = (j * beta / (4 * np.pi)) * (L_theta - eta0 * N_phi)
+                *phipol_p = (p1J * beta_c / pi4_c) * (L_theta - (eta0_c * N_phi));
 
             } // end frequency loop 
 
