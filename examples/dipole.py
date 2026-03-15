@@ -156,9 +156,9 @@ ax.plot(theta_rad, rfn.conv.db10_lin(pp_gain).sel(frequency=30e9).squeeze(), lab
 ax.set_theta_zero_location('N') 
 ax.set_theta_direction(-1) 
 ax.set_xlabel(r"$\theta$ [deg]")
-ax.set_ylim([-35, 5])
-ax.set_yticks(np.arange(-25, 15, 10))
-ax.set_yticklabels(["-25", "-15", "-5", "5dBi"])
+ax.set_ylim([-25, 5])
+ax.set_yticks(np.arange(-25, 10, 5))
+ax.set_yticklabels(["", "-20", "-15", "10", "-5", "0", "5dBi"])
 ax.legend(loc="lower right")
 
 # Set theta labels
