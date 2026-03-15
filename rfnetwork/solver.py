@@ -165,7 +165,7 @@ class FDTD_Solver():
         self._add_object(
             self.lumped_element, 
             face, 
-            properties=dict(integration_axis=integration_axis, r=r0, port=number), 
+            properties=dict(integration_axis=integration_axis, r=r0, port=number, src=None), 
             name=name
         )
 
@@ -2233,7 +2233,52 @@ class FDTD_Solver():
             else:
                 return ldarray(monitor["values"], coords=dict(time=time_values, **spatial_coords))
 
-    def get_farfield_data(self, theta: np.ndarray, phi: np.ndarray) -> ldarray:
+    def get_farfield_gain(self, theta: np.ndarray, phi: np.ndarray) -> ldarray:
+        """
+        Compile E-field monitor data from the farfield monitor attached to the solver.
+
+        E-field values are returned for thetapol and phipol, and are normalized by (exp(1j * beta * r) / r).
+
+        Parameters
+        ----------
+        theta : np.ndarray | float
+            spatial theta values in degrees
+
+        phi : np.ndarray | float
+            spatial phi values in degrees
+
+        Returns
+        -------
+        ldarray
+            linear gain values. labeled numpy array with dimensions (polarization, frequency, theta, phi)
+        """
+
+        rE = self.get_farfield_rE(theta, phi)
+
+        frequency = self.farfield["frequency"]
+
+        # get all voltage sources in model
+        v_sources = [p["src"] for p in self.ports if p["src"] is not None]
+
+        # matrix of sources, shape is (src, frequency)
+        Vs = np.array([utils.dtft(v_src, frequency, 1 / self.dt, downsample=False) for v_src in v_sources])
+
+        # get input power for each source
+        Pin_src = (1 / 2) * (np.abs(Vs)**2 / 50)
+
+        # sum total power across all sources
+        Pin = np.sum(Pin_src, axis=0)
+
+        # radiation intensity,
+        # U_theta = (1 / 2 eta) * |E_theta|^2
+        # U_phi = (1 / 2 eta) * |E_phi|^2
+        U = (1 / (2 * const.eta0)) * np.abs(rE)**2
+
+        # compute gain. broadcast Pin across polarization, theta, and phi
+        return (4 * np.pi / Pin[None, :, None, None]) * U
+
+
+    def get_farfield_rE(self, theta: np.ndarray, phi: np.ndarray) -> ldarray:
         """
         Compile E-field monitor data from the farfield monitor attached to the solver.
 
