@@ -27,9 +27,9 @@ lam0 = const.c0_in / f0
 
 ms_w = 0.030
 
-sbox_h = lam0
-sbox_w = 1.3
-sbox_len = 1.3
+sbox_h = 1.1
+sbox_w = 1.1
+sbox_len = 1.5
 
 # gap between dipole legs
 gap = 0.015
@@ -68,7 +68,8 @@ port1_face = pv.Rectangle([
 ])
 
 # box faces to collect near-field equivalent currents used in the near-field to far-field conversion
-ff_bounds = np.array([(-0.5, 0.5), (-0.5, 0.5), (-0.5, 0.5)])
+ff_box_d = (sbox_w / 2) - 0.2
+ff_bounds = np.array([(-ff_box_d, ff_box_d), (-ff_box_d, ff_box_d), (-ff_box_d, ff_box_d)])
 ff_box = pv.Box(
     bounds = ff_bounds.flatten()
 )
@@ -79,13 +80,12 @@ s.add_lumped_port(1, port1_face, "z-")
 
 # PML boundaries are required on all sides to add a far-field monitor
 s.assign_PML_boundaries("x-", "x+", "y-", "y+", "z+", "z-", n_pml=5)
-s.generate_mesh(d0 = 0.03, d_edge=0.01)
+s.generate_mesh(d0 = 0.02, d_edge=0.01)
 
 # setup wide-band far-field monitor
-s.add_farfield_monitor(ff_box, frequency=np.arange(5, 21, 1) * 1e9)
-
+s.add_farfield_monitor(ff_box, frequency=np.arange(4, 32, 2) * 1e9)
 # near-field monitor
-s.add_field_monitor("e_tot", "e_total", "y", 0, n_step=10)
+# s.add_field_monitor("e_tot", "e_total", "y", 0, n_step=10)
 
 # apply edge singularity correction to the edges of traces, iterate over lower leg and upper leg
 for i, ms_z in enumerate((ms1_z, ms2_z)):
@@ -135,12 +135,12 @@ s.solve(n_threads=4)
 ff_swept_gain = s.get_farfield_gain(theta=90, phi=0).sel(polarization="thetapol")
 
 fig, ax = plt.subplots(1, 1)
-ax.plot(ff_swept_gain.coords["frequency"]  / 1e9, rfn.conv.db10_lin(ff_swept_gain).squeeze())
+ax.plot(ff_swept_gain.coords["frequency"]  / 1e9, rfn.conv.db10_lin(ff_swept_gain).squeeze(), marker=".")
 
 ax.set_xlabel("Frequency [GHz]")
 ax.set_ylabel("Gain [dBi]")
-ax.set_ylim([-30, 10])
-ax.set_xlim([5, 20])
+ax.set_ylim([-25, 5])
+ax.set_xlim([5, 30])
 ax.grid(True)
 mplm.line_marker(x=10)
 
@@ -153,13 +153,14 @@ pp_gain = s.get_farfield_gain(theta=np.arange(-180, 181, 1), phi=[0]).sel(polari
 theta_rad = np.deg2rad(pp_gain.coords["theta"])
 fig, ax = plt.subplots(1, 1, subplot_kw=dict(projection="polar"))
 ax.plot(theta_rad, rfn.conv.db10_lin(pp_gain).sel(frequency=10e9).squeeze(), label="10 GHz")
-ax.plot(theta_rad, rfn.conv.db10_lin(pp_gain).sel(frequency=20e9).squeeze(), label="20 GHz")
+ax.plot(theta_rad, rfn.conv.db10_lin(pp_gain).sel(frequency=20e9).squeeze(), label="20 GHz", alpha=0.5)
+ax.plot(theta_rad, rfn.conv.db10_lin(pp_gain).sel(frequency=30e9).squeeze(), label="30 GHz", alpha=0.5)
 ax.set_theta_zero_location('N') 
 ax.set_theta_direction(-1) 
 ax.set_xlabel(r"$\theta$ [deg]")
-ax.set_ylim([-40, 10])
-ax.set_yticks(np.arange(-30, 20, 10))
-ax.set_yticklabels(["-30", "-20", "-10", "0", "10dBi"])
+ax.set_ylim([-35, 5])
+ax.set_yticks(np.arange(-25, 15, 10))
+ax.set_yticklabels(["-25", "-15", "-5", "5dBi"])
 ax.legend(loc="lower right")
 
 # Set theta labels
@@ -193,6 +194,7 @@ ln1 = ax.plot(frequency / 1e9, conv.z_gamma(S11).real, label=r"Re($Z_{in}$)")
 ln2 = ax2.plot(frequency / 1e9, conv.z_gamma(S11).imag, color="tab:orange", label=r"Im($Z_{in}$)")
 mplm.line_marker(x = 10, axes=ax)
 ax.set_ylim([0, 400])
+ax.set_xlim([5, 40])
 ax2.set_ylim([-300, 300])
 
 ax.grid()

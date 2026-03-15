@@ -2338,8 +2338,8 @@ class FDTD_Solver():
             r_grid[axis][1] = np.array(self.farfield["cell_pos"][axis][1], dtype=np.float32, order="C")
 
             # grid cell widths
-            w_grid[axis][0] = np.array(self.farfield["cell_w"][axis][0], order="C")
-            w_grid[axis][1] = np.array(self.farfield["cell_w"][axis][1], order="C")
+            w_grid[axis][0] = np.array(self.farfield["cell_w"][axis][0], dtype=np.float32, order="C")
+            w_grid[axis][1] = np.array(self.farfield["cell_w"][axis][1], dtype=np.float32, order="C")
 
             # for each face on either side of the far-field box
             for j, side in enumerate(["n", "p"]):
@@ -2364,6 +2364,7 @@ class FDTD_Solver():
 
                     # skip faces that are on solve box boundaries
                     if emon not in self.monitors.keys():
+                        print(f"Skipped far-field side {axis_s}, {side}")
                         continue
                     
                     # get near-field data
@@ -2447,6 +2448,7 @@ class FDTD_Solver():
         show_mesh: bool = True,
         colorbar_title: str = None,
         plotter: pv.Plotter = None,
+        frequency: float = None,
         gif_setup: dict = None,
         axes: Axes = None
     ) -> pv.Plotter:
@@ -2570,6 +2572,8 @@ class FDTD_Solver():
 
             is_phasor = monitor["frequency"] is not None
 
+            field = self.get_monitor_data(name)
+
             # initialize time step values if on the first monitor
             if n_step is None and not is_phasor:
                 n_step = monitor["n_step"]
@@ -2590,11 +2594,14 @@ class FDTD_Solver():
                 n_frames = 360
                 init_frame = 180
 
+                if frequency is not None:
+                    field = field.sel(frequency=frequency).squeeze()
+                elif len(field.shape) > 2:
+                    raise ValueError("Frequency must be provided for phasor monitors.")
+
             # check that all monitors have the same time step size
             elif monitor["n_step"] != n_step:
                 raise ValueError("Monitors must have identical time steps in order to overlay them on the same plot.")
-
-            field = self.get_monitor_data(name)
 
             # get the two component axis on the monitor plane
             surf_axis = [0, 1, 2]

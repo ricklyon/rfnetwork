@@ -295,7 +295,7 @@ int postprocess_nf2ff(
     // variables for the current frequency, theta and phi values in the loops
     float beta, theta, phi;
     // working variables for cos(theta), sin(theta), etc...
-    double cos_th, cos_ph, sin_th, sin_ph;
+    float cos_th, cos_ph, sin_th, sin_ph;
     // cos/sin terms cast as complex values
     std::complex<double> cos_th_c, cos_ph_c, sin_th_c, sin_ph_c;
     std::complex<double> beta_c;
@@ -312,7 +312,7 @@ int postprocess_nf2ff(
 
     // constant -1j, 1j and 0 as complex numbers
     std::complex<double> n1J = std::complex<double>(0, -1);
-    std::complex<double> p1J = std::complex<double>(0, -1);
+    std::complex<double> p1J = std::complex<double>(0, 1);
     std::complex<double> zero_c = std::complex<double>(0, 0);
 
     // loop over theta
@@ -324,10 +324,10 @@ int postprocess_nf2ff(
         {
             phi = phi_arr[ph];
             
-            cos_ph = std::cos((double) phi);
-            cos_th = std::cos((double) theta);
-            sin_ph = std::sin((double) phi);
-            sin_th = std::sin((double) theta);
+            cos_ph = (float) std::cos((double) phi);
+            cos_th = (float) std::cos((double) theta);
+            sin_ph = (float) std::sin((double) phi);
+            sin_th = (float) std::sin((double) theta);
             
             // covert to uvw
             u = sin_th * cos_ph;
@@ -372,15 +372,15 @@ int postprocess_nf2ff(
                         // (r_pos[0] * u + r_pos[1] * v + r_pos[2] * w))
                         if (axis == 0)
                         {
-                            r_dot = ((surf_pos[axis][s] * u) + ((r_pos_0 * v).array() + (r_pos_1 * w).array()));
+                            r_dot = ((surf_pos[axis][s] * u) + ((r_pos_0 * v).array() + (r_pos_1 * w).array()).array());
                         }
                         else if (axis == 1)
                         {
-                            r_dot = ((surf_pos[axis][s] * v) + ((r_pos_0 * u).array() + (r_pos_1 * w).array()));
+                            r_dot = ((surf_pos[axis][s] * v) + ((r_pos_0 * u).array() + (r_pos_1 * w).array()).array());
                         }
                         else
                         {
-                            r_dot = ((surf_pos[axis][s] * w) + ((r_pos_0 * u).array() + (r_pos_1 * v).array()));
+                            r_dot = ((surf_pos[axis][s] * w) + ((r_pos_0 * u).array() + (r_pos_1 * v).array()).array());
                         }
 
                         // integrand term, same memory used for exponential phase term exp(1j * beta.item() * r_dot)
@@ -388,10 +388,9 @@ int postprocess_nf2ff(
                         MatrixComplexType intg (working_grid_cmplx_p, grid_shape[axis][0], grid_shape[axis][1]);
 
                         // phs_term = exp(1j * beta.item() * r_dot)
-                        intg = ((n1J * ((std::complex<double>) beta)) * r_dot.array().cast<std::complex<double>>()).array().exp();
+                        intg = exp((p1J * beta_c) * r_dot.array().cast<std::complex<double>>());
                         // dS = phs_term * d1 * d2
-                        intg = intg.cwiseProduct(w_0.cast<std::complex<double>>());
-                        intg = intg.cwiseProduct(w_1.cast<std::complex<double>>());
+                        intg = intg.array() * ((w_0.array() * w_1.array()).cast<std::complex<double>>());
 
                         // Jx current grid
                         std::complex<double> * Jx_p = J_xyz_p[axis][s] + get_pointer_index_4(JM_shape[axis], {0, f, 0, 0});
@@ -416,7 +415,7 @@ int postprocess_nf2ff(
                         // Mz current grid
                         std::complex<double> * Mz_p = (M_xyz_p[axis][s]) + get_pointer_index_4(JM_shape[axis], {2, f, 0, 0});
                         MatrixComplexType Mz (Mz_p, grid_shape[axis][0], grid_shape[axis][1]);
-                        
+
                         // N_theta
                         // N_theta_intg = (Jx * cos_th * cos_ph) + (Jy * cos_th * sin_ph) - (Jz * sin_th)
                         // N_theta += np.sum(N_theta_intg * dS)
@@ -472,9 +471,9 @@ int postprocess_nf2ff(
                 // contributions to N and L have been summed from all faces by this point. Calculate far-field
                 // # electric field for thetapol and phipol
                 // E_theta[i] = (-j * beta / (4 * np.pi)) * (L_phi + eta0 * N_theta)
-                *thetapol_p = (n1J * beta_c / pi4_c) * (L_phi + (eta0_c * N_theta));
+                *thetapol_p = ((n1J * beta_c / pi4_c) * (L_phi + (eta0_c * N_theta)));
                 // E_phi[i] = (j * beta / (4 * np.pi)) * (L_theta - eta0 * N_phi)
-                *phipol_p = (p1J * beta_c / pi4_c) * (L_theta - (eta0_c * N_phi));
+                *phipol_p = ((p1J * beta_c / pi4_c) * (L_theta - (eta0_c * N_phi)));
 
             } // end frequency loop 
 
