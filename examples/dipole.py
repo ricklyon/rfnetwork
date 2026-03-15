@@ -13,27 +13,25 @@ import pyvista as pv
 import rfnetwork as rfn
 import mpl_markers as mplm
 
-u0 = const.u0
-e0 = const.e0
-c0 = const.c0
-eta0 = const.eta0
 
 # %%
 # User defined Parameters
 # ------------------------
+# sphinx_gallery_thumbnail_number = -1
 
 f0 = 10e9
 lam0 = const.c0_in / f0
 
 ms_w = 0.030
 
+# solve box size
 sbox_h = 1.1
 sbox_w = 1.1
 sbox_len = 1.5
 
 # gap between dipole legs
 gap = 0.015
-# end to end length
+# end to end dipole length
 dipole_len = (lam0 * 0.95 / 2) - gap
 
 # %%
@@ -193,14 +191,14 @@ ax2 = ax.twinx()
 ln1 = ax.plot(frequency / 1e9, conv.z_gamma(S11).real, label=r"Re($Z_{in}$)")
 ln2 = ax2.plot(frequency / 1e9, conv.z_gamma(S11).imag, color="tab:orange", label=r"Im($Z_{in}$)")
 mplm.line_marker(x = 10, axes=ax)
-ax.set_ylim([0, 400])
-ax.set_xlim([5, 40])
-ax2.set_ylim([-300, 300])
-
 ax.grid()
+
 ax.set_xlabel("Frequency [GHz]")
 ax.set_ylabel(r"Re($Z_{in}$) [$\Omega$]")
 ax2.set_ylabel(r"Im($Z_{in}$) [$\Omega$]")
+ax.set_ylim([0, 400])
+ax.set_xlim([5, 40])
+ax2.set_ylim([-300, 300])
 
 # combined legend
 handles = ln1 + ln2
