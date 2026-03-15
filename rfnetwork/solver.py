@@ -2515,6 +2515,10 @@ class FDTD_Solver():
             pyvista Plotter object. If provided the model geometry is not drawn on the plot and needs to be drawn
             manually with render().
 
+        frequency : float, optional
+            If monitors are phasors, specify the frequency to plot. Only required if monitor contains more than 1
+            frequency.
+
         gif_setup : dict, optional
             Configuration settings for .gif generation. The required key/value pair is "file", the others are optional.
             - file : file path for .gif file (must end in .gif)
