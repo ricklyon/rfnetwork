@@ -5,6 +5,7 @@
 
 #include "connect.h"
 #include "solver.h"
+#include "postprocess.h"
 
 #include <stdio.h>
 #include <cstdint>
@@ -391,11 +392,64 @@ static PyObject* solver_run(PyObject* self, PyObject* args) {
     return PyLong_FromLong(0);
 }
 
+static PyObject* nf2ff(PyObject* self, PyObject* args) {
+
+    PyObject *J_xyz;
+    PyObject *M_xyz;
+    PyObject *r_grid;
+    PyObject *w_grid;
+
+    PyObject *surf_pos;
+    PyObject *ff_data;
+
+    // Parse arguments: expecting a single Python object
+    if (!PyArg_ParseTuple(
+        args, "OOOOOO", &J_xyz, &M_xyz, &r_grid, &w_grid, &surf_pos, &ff_data
+    )) {
+        return PyLong_FromLong(1);
+    }
+
+    if (!PyList_Check(J_xyz)) {
+        PyErr_SetString(PyExc_TypeError, "Expected J_xyz as a list");
+        return PyLong_FromLong(1);
+    }
+
+    if (!PyList_Check(M_xyz)) {
+        PyErr_SetString(PyExc_TypeError, "Expected M_xyz as a list");
+        return PyLong_FromLong(1);
+    }
+
+    if (!PyList_Check(r_grid)) {
+        PyErr_SetString(PyExc_TypeError, "Expected r_grid as a list");
+        return PyLong_FromLong(1);
+    }
+
+    if (!PyList_Check(w_grid)) {
+        PyErr_SetString(PyExc_TypeError, "Expected w_grid as a list");
+        return PyLong_FromLong(1);
+    }
+
+    if (!PyList_Check(surf_pos)) {
+        PyErr_SetString(PyExc_TypeError, "Expected surf_pos as a list");
+        return PyLong_FromLong(1);
+    }
+
+    if (!PyDict_Check(ff_data)) {
+        PyErr_SetString(PyExc_TypeError, "Expected ff_data as a dictionary");
+        return PyLong_FromLong(1);
+    }
+
+    postprocess_nf2ff(J_xyz, M_xyz, r_grid, w_grid, surf_pos, ff_data);
+
+    return PyLong_FromLong(0);
+}
+
 static PyMethodDef moduleMethods[] = {
     {"connect_other",  connect_other_bind, METH_VARARGS, ""},
     {"connect_self",  connect_self_bind, METH_VARARGS, ""},
     {"cascade_ndata",  cascade_ndata_bind, METH_VARARGS, ""},
     {"cascade_self_ndata",  cascade_self_ndata_bind, METH_VARARGS, ""},
+    {"nf2ff",  nf2ff, METH_VARARGS, ""},
     {"solver_run",  solver_run, METH_VARARGS, ""},
     {NULL, NULL, 0, NULL}        /* Sentinel */
 };
