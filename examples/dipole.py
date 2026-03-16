@@ -15,13 +15,11 @@ import mpl_markers as mplm
 
 
 # %%
-# User defined Parameters
+# User defined Parameters [inches]
 # ------------------------
 # sphinx_gallery_thumbnail_number = -1
 
-f0 = 10e9
-lam0 = const.c0_in / f0
-
+# trace width
 ms_w = 0.030
 
 # solve box size
@@ -32,7 +30,7 @@ sbox_len = 1.5
 # gap between dipole legs
 gap = 0.015
 # end to end dipole length
-dipole_len = (lam0 * 0.95 / 2) - gap
+dipole_len = 0.546
 
 # %%
 # Build Dipole Model
@@ -45,27 +43,31 @@ ms_y = (-ms_w / 2, ms_w / 2)
 ms1_z = (-(dipole_len / 2), -gap/2) 
 ms2_z = (gap / 2, (dipole_len / 2))
 
+# solve box
 sbox = pv.Cube(center=(0, 0, 0), x_length=sbox_len, y_length=sbox_w, z_length=sbox_h)
 
+# upper leg of dipole
 ms_upper = pv.Rectangle([
     (0, ms_y[0], ms1_z[0]),
     (0, ms_y[1], ms1_z[0]),
     (0, ms_y[1], ms1_z[1])
 ])
 
+# lower leg
 ms_lower = pv.Rectangle([
     (0, ms_y[0], ms2_z[0]),
     (0, ms_y[1], ms2_z[0]),
     (0, ms_y[1], ms2_z[1])
 ])
 
+# port between upper and lower leg
 port1_face = pv.Rectangle([
     (0, ms_y[0], gap/2),
     (0, ms_y[1], gap/2),
     (0, ms_y[1], -gap/2)
 ])
 
-# box faces to collect near-field equivalent currents used in the near-field to far-field conversion
+# box to collect near-field equivalent currents used in the near-field to far-field conversion
 ff_box_d = (sbox_w / 2) - 0.2
 ff_bounds = np.array([(-ff_box_d, ff_box_d), (-ff_box_d, ff_box_d), (-ff_box_d, ff_box_d)])
 ff_box = pv.Box(
@@ -123,7 +125,7 @@ plotter = s.render(show_mesh=True, camera_position=cpos, zoom=0.4, axes=ax)
 # Setup Excitation and Solve
 # ------------------------
 
-vsrc = s.gaussian_modulated_source(f0, width=60e-12, t0=60e-12, t_len=500e-12)
+vsrc = s.gaussian_source(width=50e-12, t0=40e-12, t_len=600e-12)
 s.assign_excitation(vsrc, 1)
 s.solve(n_threads=4)
 
@@ -137,14 +139,16 @@ ax.plot(ff_swept_gain.coords["frequency"]  / 1e9, rfn.conv.db10_lin(ff_swept_gai
 
 ax.set_xlabel("Frequency [GHz]")
 ax.set_ylabel("Gain [dBi]")
-ax.set_ylim([-25, 5])
+ax.set_ylim([-10, 4])
 ax.set_xlim([5, 30])
 ax.grid(True)
+ax.set_title("Swept Gain at phi=0°, theta=90°")
 mplm.line_marker(x=10)
 
 # %%
 # Principal Plane Cut at phi=0°
 # ------------------------
+# This plot shows realized gain
 
 pp_gain = s.get_farfield_gain(theta=np.arange(-180, 181, 1), phi=[0]).sel(polarization="thetapol")
 
@@ -155,7 +159,7 @@ ax.plot(theta_rad, rfn.conv.db10_lin(pp_gain).sel(frequency=20e9).squeeze(), lab
 ax.plot(theta_rad, rfn.conv.db10_lin(pp_gain).sel(frequency=30e9).squeeze(), label="30 GHz", alpha=0.5)
 ax.set_theta_zero_location('N') 
 ax.set_theta_direction(-1) 
-ax.set_xlabel(r"$\theta$ [deg]")
+ax.set_xlabel(r"$\theta$ [deg], $\phi$=0°")
 ax.set_ylim([-25, 5])
 ax.set_yticks(np.arange(-25, 10, 5))
 ax.set_yticklabels(["", "-20", "-15", "10", "-5", "0", "5dBi"])
