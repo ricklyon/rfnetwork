@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "rfnetwork"
-version = "0.3.0"
+version = "0.3.1"
 description = "rf/microwave network simulation tool"
 readme = "README.md"
 authors = [{ name = "Rick Lyon", email = "rlyon14@gmail.com" }]
