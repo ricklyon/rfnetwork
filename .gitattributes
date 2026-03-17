@@ -1,2 +1,2 @@
-test/** linguist-vendored
-examples/** linguist-vendored
+tests/** linguist-detectable=false
+examples/** linguist-detectable=false
