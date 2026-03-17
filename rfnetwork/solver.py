@@ -94,7 +94,7 @@ class FDTD_Solver():
 
             group[obj_name] = dict(obj=obj, **properties)
 
-    def add_dielectric(\
+    def add_dielectric(
         self,
         *objects: pv.PolyData, 
         er: float, 
@@ -103,7 +103,7 @@ class FDTD_Solver():
         style: dict = dict(), 
         name: str = None):
         """
-        Add rectangular dielectric
+        Add rectangular dielectric objects
 
         Parameters
         ----------
@@ -275,8 +275,6 @@ class FDTD_Solver():
         self._init_conductors()
         self._init_lumped_elements()
         self.invalidate_solution()
-
-        
 
     def _get_mesh_points(self, d_edge: float):
         """
@@ -1337,7 +1335,7 @@ class FDTD_Solver():
 
         """
         self.check_mesh()
-        
+
         # grid indices of each face at grid edges
         ffn_x, ffn_y, ffn_z = self.pos_to_idx(np.min(ff_box.points, axis=0), "edge")
         ffp_x, ffp_y, ffp_z = self.pos_to_idx(np.max(ff_box.points, axis=0), "edge")
@@ -1987,8 +1985,7 @@ class FDTD_Solver():
     
     def edge_correction(self, p1: tuple, p2: tuple, integration_axis: str, CFe: float = None, CFh: float = 1):
         """
-        Analytic correction factors for singularities at PEC surface edges. Corrects asymptotic Ez, Hy fields 
-        along the z-axis at the face edge, and Ey, Hz fields along the y-axis at the face edge.
+        Analytic correction factors for singularities at PEC surface edges. 
 
         Parameters
         ----------
@@ -2237,9 +2234,7 @@ class FDTD_Solver():
 
     def get_farfield_gain(self, theta: np.ndarray, phi: np.ndarray) -> ldarray:
         """
-        Compile E-field monitor data from the farfield monitor attached to the solver.
-
-        E-field values are returned for thetapol and phipol, and are normalized by (exp(1j * beta * r) / r).
+        Compile farfield realized gain from the farfield monitor attached to the solver.
 
         Parameters
         ----------
@@ -2252,7 +2247,7 @@ class FDTD_Solver():
         Returns
         -------
         ldarray
-            linear gain values. labeled numpy array with dimensions (polarization, frequency, theta, phi)
+            labeled numpy array with dimensions (polarization, frequency, theta, phi)
         """
 
         rE = self.get_farfield_rE(theta, phi)
