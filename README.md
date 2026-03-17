@@ -6,7 +6,8 @@ Linear circuit solver for networks of RF components.
 Installation
 ============
 
-``rfnetwork`` requires Python >= 3.9.
+``rfnetwork`` requires Python >= 3.9. Wheels are currently only available on linux, but can be built from
+source on Windows.
 
 ```bash
    pip install rfnetwork

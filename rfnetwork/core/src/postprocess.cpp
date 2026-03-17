@@ -1,5 +1,7 @@
 
 #define PY_SSIZE_T_CLEAN
+#define _USE_MATH_DEFINES
+
 #include <Python.h>
 #include <numpy/arrayobject.h>
 
@@ -14,6 +16,7 @@
 #include <math.h>
 #include <iostream>
 #include <thread>
+#include <cmath>
 
 #include "postprocess.h"
 
@@ -167,7 +170,7 @@ int postprocess_nf2ff(
     npy_shape = PyArray_SHAPE(py_data_arr); 
 
     for (int i = 0; i < FFDATA_NDIM; ++i) { 
-        data_shape[i] = npy_shape[i];
+        data_shape[i] = (int) npy_shape[i];
     }
 
     // result data array

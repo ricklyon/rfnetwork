@@ -1336,6 +1336,8 @@ class FDTD_Solver():
             frequencies in Hz of the far-field monitors.
 
         """
+        self.check_mesh()
+        
         # grid indices of each face at grid edges
         ffn_x, ffn_y, ffn_z = self.pos_to_idx(np.min(ff_box.points, axis=0), "edge")
         ffp_x, ffp_y, ffp_z = self.pos_to_idx(np.max(ff_box.points, axis=0), "edge")

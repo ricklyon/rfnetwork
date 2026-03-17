@@ -23,9 +23,9 @@ import mpl_markers as mplm
 ms_w = 0.030
 
 # solve box size
-sbox_h = 1.1
-sbox_w = 1.1
-sbox_len = 1.5
+sbox_h = 1.2
+sbox_w = 0.8
+sbox_len = 0.8
 
 # gap between dipole legs
 gap = 0.015
@@ -69,7 +69,8 @@ port1_face = pv.Rectangle([
 
 # box to collect near-field equivalent currents used in the near-field to far-field conversion
 ff_box_d = (sbox_w / 2) - 0.2
-ff_bounds = np.array([(-ff_box_d, ff_box_d), (-ff_box_d, ff_box_d), (-ff_box_d, ff_box_d)])
+ff_box_h = (sbox_h / 2) - 0.2
+ff_bounds = np.array([(-ff_box_d, ff_box_d), (-ff_box_d, ff_box_d), (-ff_box_h, ff_box_h)])
 ff_box = pv.Box(
     bounds = ff_bounds.flatten()
 )
@@ -83,7 +84,7 @@ s.assign_PML_boundaries("x-", "x+", "y-", "y+", "z+", "z-", n_pml=5)
 s.generate_mesh(d0 = 0.02, d_edge=0.01)
 
 # setup wide-band far-field monitor
-s.add_farfield_monitor(ff_box, frequency=np.arange(4, 32, 2) * 1e9)
+s.add_farfield_monitor(ff_box, frequency=np.arange(4, 42, 2) * 1e9)
 # near-field monitor
 # s.add_field_monitor("e_tot", "e_total", "y", 0, n_step=10)
 
@@ -140,7 +141,7 @@ ax.plot(ff_swept_gain.coords["frequency"]  / 1e9, rfn.conv.db10_lin(ff_swept_gai
 ax.set_xlabel("Frequency [GHz]")
 ax.set_ylabel("Gain [dBi]")
 ax.set_ylim([-10, 4])
-ax.set_xlim([5, 30])
+ax.set_xlim([5, 35])
 ax.grid(True)
 ax.set_title("Swept Gain at phi=0°, theta=90°")
 mplm.line_marker(x=10)
@@ -150,26 +151,37 @@ mplm.line_marker(x=10)
 # ------------------------
 # This plot shows realized gain
 
-pp_gain = s.get_farfield_gain(theta=np.arange(-180, 181, 1), phi=[0]).sel(polarization="thetapol")
+pp_gain = rfn.conv.db10_lin(
+    s.get_farfield_gain(theta=np.arange(-180, 181, 1), phi=[0]).sel(polarization="thetapol")
+)
+
+fig, (ax1, ax2) = plt.subplots(1, 2, subplot_kw=dict(projection="polar"), figsize=(8, 4))
+
+# plot settings
+line_style = ["-", "--", "-", "--"]
+p_freq = [10e9, 20e9, 30e9, 40e9]
+p_axes = [ax1, ax1, ax2, ax2]
 
 theta_rad = np.deg2rad(pp_gain.coords["theta"])
-fig, ax = plt.subplots(1, 1, subplot_kw=dict(projection="polar"))
-ax.plot(theta_rad, rfn.conv.db10_lin(pp_gain).sel(frequency=10e9).squeeze(), label="10 GHz")
-ax.plot(theta_rad, rfn.conv.db10_lin(pp_gain).sel(frequency=20e9).squeeze(), label="20 GHz", alpha=0.5)
-ax.plot(theta_rad, rfn.conv.db10_lin(pp_gain).sel(frequency=30e9).squeeze(), label="30 GHz", alpha=0.5)
-ax.set_theta_zero_location('N') 
-ax.set_theta_direction(-1) 
-ax.set_xlabel(r"$\theta$ [deg], $\phi$=0°")
-ax.set_ylim([-25, 5])
-ax.set_yticks(np.arange(-25, 10, 5))
-ax.set_yticklabels(["", "-20", "-15", "10", "-5", "0", "5dBi"])
-ax.legend(loc="lower right")
 
-# Set theta labels
-ax.set_xticks(np.linspace(0, 2 * np.pi, 8, endpoint=False))
-labels = [f"{d}°" for d in [0, 45, 90, 135, 180, -135, -90, -45]]
-ax.set_xticklabels(labels)
+for i, f in enumerate(p_freq):
+    p_axes[i].plot(theta_rad, pp_gain.sel(frequency=f).squeeze(), label=f"{f/1e9:.0f} GHz", linestyle=line_style[i])
 
+for ax in (ax1, ax2):
+    ax.set_theta_zero_location('N') 
+    ax.set_theta_direction(-1) 
+    ax.set_xlabel(r"$\theta$ [deg], $\phi$=0°")
+    ax.set_ylim([-25, 5])
+    ax.set_yticks(np.arange(-25, 10, 5))
+    ax.set_yticklabels(["", "-20", "-15", "10", "-5", "0", "5dBi"])
+    ax.legend(loc="lower right")
+
+    # Set theta labels
+    ax.set_xticks(np.linspace(0, 2 * np.pi, 8, endpoint=False))
+    labels = [f"{d}°" for d in [0, 45, 90, 135, 180, -135, -90, -45]]
+    ax.set_xticklabels(labels)
+
+fig.tight_layout()
 
 # %%
 # Plot S11
