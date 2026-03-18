@@ -127,12 +127,14 @@ class FloatTuner(QWidget):
         initial: float, 
         callback: Callable, 
         processor: QtCore.QThread,
+        multiplier: float = 1,
         component: str = None,
     ):
         super(FloatTuner, self).__init__()
         name = QLabel(label)
 
         self.variable = variable
+        self.multiplier = multiplier
 
         self.processor = processor
         
@@ -142,13 +144,13 @@ class FloatTuner(QWidget):
         self.upper_limit = QLineEdit(str(upper))
         self.upper_limit.setFixedWidth(50)
         
-        self.value = QLineEdit(str(initial))
+        self.value = QLineEdit(str(initial / multiplier))
         self.value.setFixedWidth(50)
 
         self.step = (upper - lower) / 100
         self.slider = DoubleSlider(self.step, QtCore.Qt.Horizontal)
-        self.slider.setValue(initial)
         self.slider.setBounds(lower, upper, self.step)
+        self.slider.setValue(initial / multiplier)
         
         self.setFixedWidth(500)
 
@@ -184,6 +186,7 @@ class FloatTuner(QWidget):
         self.slider.setValue(value)
         value = self.slider.value()
         self.value.setText(str(value))
+        
 
     def slider_value_changed(self, value):
         """
@@ -195,7 +198,7 @@ class FloatTuner(QWidget):
         if np.abs(value - prev_value) > (self.step / 2):
             self.value.setText(str(value))
             # notify the calling method that the variable has changed
-            self.callback(**{self.variable : value})
+            self.callback(**{self.variable : value * self.multiplier})
             # issue a plot update
             self.processor.push()
 

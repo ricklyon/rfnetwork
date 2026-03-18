@@ -281,6 +281,8 @@ class Component(object):
             - "lower" : Floating point lower bound of tuner.
             - "upper" : Floating point upper bound of tuner.
             - "label" : Label for tuner.
+            - "multiplier" : multiply the tuner by this value before sending it to the update function, 
+            default is 1.
             - "component" : If tuning a network, the component designator must be specified for each tuned variable. 
             Supports nested Networks by using a "." between sub-networks. For example "m_in.c1" would point to the 
             "c1" component of the "m_in" sub-network.
