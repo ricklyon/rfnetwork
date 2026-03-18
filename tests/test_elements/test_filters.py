@@ -14,7 +14,7 @@ DATA_DIR = Path(__file__).parent.parent / "data"
 class TestCore(unittest.TestCase):
 
     def test_bandpass(self):
-        bpf = rfn.elements.BandPassFilter(fc1=1e9, fc2=1.3e9, n=3)
+        bpf = rfn.elements.LumpedElementFilter.from_params(fc=(1e9, 1.3e9), btype="bandpass", n=3)
 
         frequency = np.arange(10e6, 4e9, 10e6)
 
@@ -31,7 +31,7 @@ class TestCore(unittest.TestCase):
 
 
     def test_bandstop(self):
-        bsf = rfn.elements.BandStopFilter(fc1=1e9, fc2=1.3e9, n=3)
+        bsf = rfn.elements.LumpedElementFilter.from_params(fc=(1e9, 1.3e9), btype="bandstop", n=3)
 
         frequency = np.arange(10e6, 3e9, 10e6)
 
@@ -52,7 +52,7 @@ class TestCore(unittest.TestCase):
         
         frequency = np.arange(10e6, 3e9, 10e6)
 
-        lpf = rfn.elements.LowPassFilter(fc, n=5)
+        lpf = rfn.elements.LumpedElementFilter.from_params(fc=fc, btype="lowpass", n=5)
 
         ref_lpf = rfn.Component_SnP(DATA_DIR / "test_lpf.s2p")
 
@@ -70,7 +70,7 @@ class TestCore(unittest.TestCase):
         
         frequency = np.arange(10e6, 3e9, 10e6)
 
-        hpf = rfn.elements.HighPassFilter(fc, n=5)
+        hpf = rfn.elements.LumpedElementFilter.from_params(fc=fc, btype="highpass", n=5)
 
         ref_hpf = rfn.Component_SnP(DATA_DIR / "test_hpf.s2p")
 

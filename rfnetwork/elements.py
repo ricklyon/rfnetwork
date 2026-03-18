@@ -27,10 +27,7 @@ __all__ = (
     "Load",
     "Attenuator",
     "PiAttenuator",
-    "LowPassFilter",
-    "HighPassFilter",
-    "BandPassFilter",
-    "BandStopFilter"
+    "LumpedElementFilter"
 )
 
 
@@ -895,163 +892,82 @@ class Stripline(Line):
         return properties
 
 
-class LowPassFilter(DynamicNetwork):
-    """ 
-    Lumped component low-pass filter 
-    """
-    def __init__(self, fc: float, n: int, r0: float = 50, ripple: float = 0.5):
+class LumpedElementFilter(DynamicNetwork):
+
+    @classmethod
+    def from_params(cls, fc: tuple, btype: str, n: int, ripple: float = 0.5):
         """
         Parameters
         ----------
-        fc : float
-            3 dB cutoff frequency [Hz]
+        fc1 : float
+            Lower 3 dB cutoff frequency [Hz]
+        fc2 : float
+            Upper 3 db cutoff frequency [Hz]
         n : int
             Filter order (1-10). Odd n will be matched to 50 ohms, while even n requires an impedance match.
         r0 : float, default: 50
             Port impedance. Default is 50 ohms.
         ripple : float, default: 0.5
-            Pass-band ripple in dB. Supported values are 0.5 and 3.0 dB.
+            Pass-band ripple. Supported values are 0.5 and 3.0 dB.
         """
-        # get n normalized element values, drop the last value which is the resistive load.
-        proto_vals = utils.lp_filter_prototype(n, ripple=ripple)[:-1]
+        prototype = utils.lp_filter_prototype(n, ripple=ripple)
 
-        components = dict()
-        wc = 2 * np.pi * fc
+        return cls(fc, btype, prototype)
 
-        # build components for each element, scaling the impedance and frequency from the normalized protoype values.
-        for i, g_k in enumerate(proto_vals):
-            if i % 2 == 0: # start with series inductor
-                components[f"L{i+1}"] = Inductor((g_k * r0) / wc)
-            else:
-                components[f"C{i+1}"] = Capacitor(g_k / (r0 * wc), shunt=True)
-        
-        cascades = [["P1"] + list(components.values()) + ["P2"]]
-
-        super().__init__(components, cascades=cascades, passive=True)
-
-
-class HighPassFilter(DynamicNetwork):
-    """ 
-    Lumped component high-pass filter 
-    """
     
-    def __init__(self, fc: float, n: int, r0: float = 50, ripple: float = 0.5):
-        """
-        Parameters
-        ----------
-        fc : float
-            3 dB cutoff frequency [Hz]
-        n : int
-            Filter order (1-10). Odd n will be matched to 50 ohms, while even n requires an impedance match.
-        r0 : float, default: 50
-            Port impedance. Default is 50 ohms.
-        ripple : float, default: 0.5
-            Pass-band ripple. Supported values are 0.5 and 3.0 dB.
-        """
-        # get n+1 normalized element values. drop the last value which is the resistive load.
-        proto_vals = utils.lp_filter_prototype(n, ripple=ripple)[:-1]
+    def __init__(cls, fc: tuple, btype: str, prototype: list):
 
         components = dict()
-        wc = 2 * np.pi * fc
-
-        # build components for each element, inductors are transformed to capacitors in the HP conversion, 
-        # and vice versa
-        for i, g_k in enumerate(proto_vals):
-            if i % 2 == 0: # start with series capacitor
-                components[f"C{i+1}"] = Capacitor(1 / (r0 * wc * g_k))
-            else:
-                components[f"L{i+1}"] = Inductor(r0 / (g_k * wc), shunt=True)
-
-        cascades = [["P1"] + list(components.values()) + ["P2"]]
-
-        super().__init__(components, cascades=cascades, passive=True)
-
-
-class BandPassFilter(DynamicNetwork):
-    """
-    Lumped component band-pass filter
-    """
-
-    def __init__(self, fc1: float, fc2: float, n: int, r0: float = 50, ripple: float = 0.5):
-        """
-        Parameters
-        ----------
-        fc1 : float
-            Lower 3 dB cutoff frequency [Hz]
-        fc2 : float
-            Upper 3 db cutoff frequency [Hz]
-        n : int
-            Filter order (1-10). Odd n will be matched to 50 ohms, while even n requires an impedance match.
-        r0 : float, default: 50
-            Port impedance. Default is 50 ohms.
-        ripple : float, default: 0.5
-            Pass-band ripple. Supported values are 0.5 and 3.0 dB.
-        """
-
-        # band pass 
-        components = dict()
-
         r0 = 50
-        wc1, wc2 = 2 * np.pi * fc1, 2 * np.pi * fc2
-        w0 = np.sqrt(wc1 * wc2) # geometric mean
-        fb = (wc2 - wc1) / w0 # fractional bandwidth
 
-        proto_vals = utils.lp_filter_prototype(n, ripple=ripple)[:-1]
+        if isinstance(fc, (tuple, list)):
+            wc1, wc2 = [2 * np.pi * f for f in fc]
+            w0 = np.sqrt(wc1 * wc2) # geometric mean
+            fb = (wc2 - wc1) / w0 # fractional bandwidth
+        else:
+            wc1 = 2 * np.pi * fc
 
-        for i, g_k in enumerate(proto_vals):
-            if i % 2 == 0:  # start with series element
-                L = (g_k * r0) / (w0 * fb)
-                C = fb / (r0 * w0 * g_k)
-                components[f"S{i+1}"] = LC_Series(L=L, C=C)
-            else:
-                L = (fb * r0) / (w0 * g_k)
-                C = g_k / (w0 * fb * r0)
-                components[f"P{i+1}"] = LC_Parallel(L=L, C=C, shunt=True)
+        if btype == "lowpass":
+            # build components for each element, scaling the impedance and frequency from the normalized protoype 
+            # values.
+            for i, g_k in enumerate(prototype[:-1]):
+                if i % 2 == 0: # start with series inductor
+                    components[f"L{i+1}"] = Inductor((g_k * r0) / wc1)
+                else:
+                    components[f"C{i+1}"] = Capacitor(g_k / (r0 * wc1), shunt=True)
 
-        cascades = [["P1"] + list(components.values()) + ["P2"]]
-        super().__init__(components, cascades=cascades, passive=True)
+        elif btype == "highpass":
+            # inductors are transformed to capacitors in the HP conversion, 
+            # and vice versa
+            for i, g_k in enumerate(prototype[:-1]):
+                if i % 2 == 0: # start with series capacitor
+                    components[f"C{i+1}"] = Capacitor(1 / (r0 * wc1 * g_k))
+                else:
+                    components[f"L{i+1}"] = Inductor(r0 / (g_k * wc1), shunt=True)
 
+        elif btype == "bandpass":
 
-class BandStopFilter(DynamicNetwork):
-    """
-    Lumped component band-stop filter
-    """
+            for i, g_k in enumerate(prototype[:-1]):
+                if i % 2 == 0:  # start with series element
+                    L = (g_k * r0) / (w0 * fb)
+                    C = fb / (r0 * w0 * g_k)
+                    components[f"S{i+1}"] = LC_Series(L=L, C=C)
+                else:
+                    L = (fb * r0) / (w0 * g_k)
+                    C = g_k / (w0 * fb * r0)
+                    components[f"P{i+1}"] = LC_Parallel(L=L, C=C, shunt=True)
 
-    def __init__(self, fc1: float, fc2: float, n: int, r0: float = 50, ripple: float = 0.5):
-        """
-        Parameters
-        ----------
-        fc1 : float
-            Lower 3 dB cutoff frequency [Hz]
-        fc2 : float
-            Upper 3 db cutoff frequency [Hz]
-        n : int
-            Filter order (1-10). Odd n will be matched to 50 ohms, while even n requires an impedance match.
-        r0 : float, default: 50
-            Port impedance. Default is 50 ohms.
-        ripple : float, default: 0.5
-            Pass-band ripple. Supported values are 0.5 and 3.0 dB.
-        """
+        elif btype == "bandstop":
 
-        # band pass 
-        components = dict()
-
-        r0 = 50
-        wc1, wc2 = 2 * np.pi * fc1, 2 * np.pi * fc2
-        w0 = np.sqrt(wc1 * wc2) # geometric mean
-        fb = (wc2 - wc1) / w0 # fractional bandwidth
-
-        proto_vals = utils.lp_filter_prototype(n, ripple=ripple)[:-1]
-
-        for i, g_k in enumerate(proto_vals):
-            if i % 2 == 0:  # start with series element
-                L = (g_k * r0 * fb) / (w0)
-                C = 1 / (r0 * w0 * g_k * fb)
-                components[f"S{i+1}"] = LC_Parallel(L=L, C=C)
-            else:
-                L = r0 / (w0 * g_k * fb)
-                C = (g_k * fb) / (w0 * r0)
-                components[f"P{i+1}"] = LC_Series(L=L, C=C, shunt=True)
+            for i, g_k in enumerate(prototype[:-1]):
+                if i % 2 == 0:  # start with series element
+                    L = (g_k * r0 * fb) / (w0)
+                    C = 1 / (r0 * w0 * g_k * fb)
+                    components[f"S{i+1}"] = LC_Parallel(L=L, C=C)
+                else:
+                    L = r0 / (w0 * g_k * fb)
+                    C = (g_k * fb) / (w0 * r0)
+                    components[f"P{i+1}"] = LC_Series(L=L, C=C, shunt=True)
 
         cascades = [["P1"] + list(components.values()) + ["P2"]]
         super().__init__(components, cascades=cascades, passive=True)
