@@ -303,15 +303,34 @@ class Component(object):
         for config in tuners:
 
             # drill down to a sub-component if this is a network
-            if "component" in config:
+            if "component" in config.keys():
                 component = self
                 for c in config["component"].split("."):
                     component = component[c]
             else:
                 component = self
 
-            config["callback"] = component.set_state
-            config["initial"] = component.state[config["variable"]]
+            # set default values
+            if "variable" not in config.keys():
+                config["variable"] = "value"
+
+            if "multiplier" not in config.keys():
+                config["multiplier"] = 1
+
+            if "callback" not in config.keys():
+                config["callback"] = component.set_state
+
+            if "initial" not in config.keys():
+                # multiplier is applied to the config values, use the inverse multiplier to convert the
+                # state variable to the config value
+                config["initial"] = component.state[config["variable"]] / config["multiplier"] 
+
+            if "upper" not in config.keys():
+                config["upper"] = config["initial"] * 1.5
+
+            if "lower" not in config.keys():
+                config["lower"] = config["initial"] / 1.5
+
 
         for ax in self._tune["axes"]:
             mplm.init_axes(ax)
