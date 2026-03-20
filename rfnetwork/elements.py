@@ -677,44 +677,15 @@ class MSLine(Line):
 
         # get the interpolated list of line properties
         properties = super().get_properties(frequency)
-
         er = properties[{"value": "er"}]
-        # B is in mm
-        B = conv.mm_mil(self.state["h"]* 1e3)
-        T = self.state["t"] / self.state["h"]
-        U = self.state["w"]/ self.state["h"]
-        eta = 376.73
 
-        U1 = U + (T * np.log(1 + ((4 * np.e) / T) * (np.tanh((6.517 * U) ** (1 / 2))) ** 2)) / np.pi
-        Ur = U + ((U1 - U) * (1 + 1 / (np.cosh((er - 1) ** 0.5)))) / 2
-
-        Au = 1 + (np.log((Ur**4 + (Ur**2 / 2704)) / (Ur**4 + 0.432))) / 49 + np.log((Ur / 18.1) ** 3 + 1) / 18.7
-        Ber = 0.564 * ((er - 0.9) / (er + 3)) ** 0.053
-
-        Y = (er + 1) / 2 + ((er - 1) / 2) * (1 + (10 / Ur)) ** (-Au * Ber)
-
-        def Z01(x):
-            return (
-                eta
-                * np.log((6 + (2 * np.pi - 6) * np.e ** (-((30.666 / x) ** 0.7528))) / x + ((4 / (x**2)) + 1) ** 0.5)
-            ) / (2 * np.pi)
-
-        Z0 = Z01(Ur) / (Y**0.5)
-        eff = Y * (Z01(U1) / Z01(Ur)) ** 2
-
-        P1 = 0.27488 + U * (0.6315 + 0.525 * (0.0157 * f_ghz * B + 1) ** -20) - 0.06583 * np.e ** (-8.7513 * U)
-        P2 = 0.33622 * (1 - np.e ** (-0.03442 * er))
-        P3 = 0.0363 * np.e ** (-4.6 * U) * (1 - np.e ** (-(((f_ghz * B) / 38.7) ** 4.97)))
-        P4 = 2.751 * (1 - np.e ** (-((er / 15.916) ** 8))) + 1
-
-        P = P1 * P2 * (f_ghz * B * (0.1844 + P3 * P4)) ** 1.5763
-
-        eff_f = er - ((er - eff) / (1 + P))
-        Z0_f = Z0 * (eff / eff_f) ** 0.5 * ((eff_f - 1) / (eff - 1))
+        Z0, eps_eff = utils.ustrip_impedance(
+            self.state["w"], self.state["h"], er, frequency, self.state["t"]
+        )
 
         # update the properties values
-        properties[{"value": "z0"}] = Z0_f
-        properties[{"value": "er"}] = eff_f
+        properties[{"value": "z0"}] = Z0
+        properties[{"value": "er"}] = eps_eff
         
         # generate dielectric loss from the loss tangent, as well as conductor losses
         if np.any(np.array(self.state["df"]) > 0):
@@ -731,7 +702,7 @@ class MSLine(Line):
             lmbda0_in = const.c0_in / (f_ghz * 1e9)
             k0 = (2 * np.pi) / lmbda0_in
             # calculate dielectric loss per inch
-            ad_in = ((k0 * er) * (eff_f - 1) * df) / (2 * np.sqrt(eff_f) * (er - 1))
+            ad_in = ((k0 * er) * (eps_eff - 1) * df) / (2 * np.sqrt(eps_eff) * (er - 1))
 
             # calculate copper resistivity using conductivity in seimens per meter
             Rs = np.sqrt((2 * np.pi * f_ghz * 1e9 * const.u0) / (2 * const.cu_sigma))
@@ -739,7 +710,7 @@ class MSLine(Line):
             # calculate losses due to copper conductor in np/m.
             # use width in meters
             w_m = conv.m_in(self.state["w"])
-            a_c = Rs / (Z0_f * w_m)
+            a_c = Rs / (Z0 * w_m)
             # convert loss to per inch
             ac_in = a_c / 39.3701
 

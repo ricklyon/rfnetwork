@@ -76,7 +76,7 @@ s.assign_PML_boundaries("x+", "z+", "y-", "y+", n_pml=5)
 
 # create mesh with a nominal width of 20mils far from geometry edges, and 2.5mils near edges.
 # cell widths are tapered to minimize errors
-s.generate_mesh(d0 = 0.02, d_edge = 0.0025)
+s.generate_mesh(d0 = 0.01, d_edge = 0.0025)
 
 # apply edge singularity correction to the edges along the length of the microstrip lines
 for i, ms_y in enumerate((ms1_y, ms2_y)):
@@ -106,7 +106,6 @@ ax.plot(vsrc.coords["time"] * 1e12, vsrc * 1e3)
 ax.set_xlabel("Time [ps]")
 ax.set_ylabel("Voltage [mV]")
 
-fig.tight_layout()
 
 # %%
 # Solve Even Mode 
@@ -132,7 +131,7 @@ plot_mon_kwargs = dict(
     show_mesh=False,
     show_rulers=False,
     camera_position=cpos,
-    vmax=35,  # maximum colormap value, in dB because linear is False by default
+    vmax=35,  # maximum colormap value, in dB
 )
 
 # run even mode, same waveform at both port 1 and 2
@@ -166,19 +165,21 @@ fig.tight_layout(pad=0)
 # Coupled Line Impedance
 # ------------------------
 
-# reference even and odd impedance are taken from this online solver:
+# Compare even and odd impedance with this online solver:
 # https://wcalc.sourceforge.net/cgi-bin/coupled_microstrip.cgi
+# ref_even_z = 101.847
+# ref_odd_z = 45.0888
 
-ref_even_z = 101.847
-ref_odd_z = 45.0888
+Zo, Ze = rfn.utils.coupled_ustrip_impedance(ms_w, sub_h, ms_sp, er, frequency = 10e9)
+print(f"Even: {Ze:.2f}, Odd: {Zo:.2f}")
 
 fig, ax = plt.subplots()
 ax.plot(frequency / 1e9, conv.z_gamma(S_odd.sel(b=1)).real)
 ax.plot(frequency / 1e9, conv.z_gamma(S_even.sel(b=1)).real)
 
 plt.ylim([0, 110])
-plt.axhline(y=ref_odd_z, linestyle=":", color="tab:blue")
-plt.axhline(y=ref_even_z, linestyle=":", color="tab:orange")
+plt.axhline(y=Zo, linestyle=":", color="tab:blue")
+plt.axhline(y=Ze, linestyle=":", color="tab:orange")
 ax.set_xlabel("Frequency [GHz]")
 ax.set_ylabel("Impedance [Ohm]")
 ax.legend(["Odd Mode", "Even Mode", "Ref Odd", "Ref Even"])

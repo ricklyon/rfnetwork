@@ -3,7 +3,7 @@ from pathlib import Path
 import numpy as np
 from scipy.special import ellipk
 from scipy import signal
-from .core.units import const
+from .core.units import const, conv
 
 
 def dtft(xn: np.ndarray, frequency: np.ndarray, fs: float, downsample: bool = False) -> np.ndarray:
@@ -172,22 +172,155 @@ def coupled_sline_fringing_cap(w: float, s: float, b: float, er: float):
     return Cf_o * eps, Cf_e * eps
 
 
-def ustrip_impedance(w: float, h: float, er: float):
+def ustrip_impedance(w: float, h: float, er: float, frequency: np.ndarray = 1e9, t: float = 0.0013) -> tuple:
     """
     Microstrip impedance and effective permittivity for thin microstrip lines
+
+    Parameters
+    ----------
+    w : float, optional
+        Width of microstrip trace in inches.
+    h : float
+        Substrate thickness in inches
+    er : float | list
+        Dielectric constant of substrate. Supports single values or a list for each frequency. 
+    frequency : list, optional
+        Array of frequencies in Hz.
+    t : float, optional
+        Copper thickness in inches, defaults to 1oz copper (1.3 mils).
+
+    Returns
+    -------
+    Z0 : float | np.ndarray
+        characteristic line impedance at each frequency
+
+    eps_eff : float | np.ndarray
+        effective permittivity at each frequency
+
+    References
+    ----------
+    [1] Design-Data-for-Microstrip-Transmission-Lines-on-RT-duroid-Laminates, Rogers Corporation, 2013
     """
 
-    if (w / h) < 1:
-        er_eff = ((er + 1) / 2) + ((er - 1) / 2) * ((1 + 12 * (h / w))**(-0.5) + 0.04 * (1 - (w / h)**2))
-        zc = (const.eta0 / (2 * np.pi * np.sqrt(er_eff))) * np.log((8 * h / w) + 0.25 * (w / h))
-    else:
-        er_eff = ((er + 1) / 2) + ((er - 1) / 2) * ((1 + 12 * (h / w))**(-0.5))
-        zc = (const.eta0 / (np.sqrt(er_eff))) * ((w / h) + 1.393  + 0.677 * np.log((w / h) + 1.444))**(-1)
+    f_isscalar = np.isscalar(frequency)
+    frequency = np.atleast_1d(frequency)
+    f_ghz = frequency / 1e9
 
-    return zc, er_eff
+    # B is in mm
+    B = conv.mm_mil(h * 1e3)
+    T = t / h
+    U = w / h
+    eta = 376.73
+
+    U1 = U + (T * np.log(1 + ((4 * np.e) / T) * (np.tanh((6.517 * U) ** (1 / 2))) ** 2)) / np.pi
+    Ur = U + ((U1 - U) * (1 + 1 / (np.cosh((er - 1) ** 0.5)))) / 2
+
+    Au = 1 + (np.log((Ur**4 + (Ur**2 / 2704)) / (Ur**4 + 0.432))) / 49 + np.log((Ur / 18.1) ** 3 + 1) / 18.7
+    Ber = 0.564 * ((er - 0.9) / (er + 3)) ** 0.053
+
+    Y = (er + 1) / 2 + ((er - 1) / 2) * (1 + (10 / Ur)) ** (-Au * Ber)
+
+    def Z01(x):
+        return (
+            eta * np.log((6 + (2 * np.pi - 6) * np.exp(-((30.666 / x) ** 0.7528))) / x + ((4 / (x**2)) + 1) ** 0.5)
+        ) / (2 * np.pi)
+
+    Z0 = Z01(Ur) / (Y**0.5)
+    eff = Y * (Z01(U1) / Z01(Ur)) ** 2
+
+    P1 = 0.27488 + U * (0.6315 + 0.525 * (0.0157 * f_ghz * B + 1) ** -20) - 0.06583 * np.e ** (-8.7513 * U)
+    P2 = 0.33622 * (1 - np.e ** (-0.03442 * er))
+    P3 = 0.0363 * np.e ** (-4.6 * U) * (1 - np.e ** (-(((f_ghz * B) / 38.7) ** 4.97)))
+    P4 = 2.751 * (1 - np.e ** (-((er / 15.916) ** 8))) + 1
+
+    P = P1 * P2 * (f_ghz * B * (0.1844 + P3 * P4)) ** 1.5763
+
+    eff_f = er - ((er - eff) / (1 + P))
+    Z0_f = Z0 * (eff / eff_f) ** 0.5 * ((eff_f - 1) / (eff - 1))
+
+    # return values to scalar values if frequency was a scalar
+    if f_isscalar:
+        Z0_f, eff_f = Z0_f.item(), eff_f.item()
+
+    return Z0_f, eff_f
 
 
-def ustrip_fringing_cap(w, h, er):
+def coupled_ustrip_impedance(
+    w: float, h: float, s: float, er: float, frequency: np.ndarray = 1e9, t: float = 0.0013
+) -> tuple:
+    """
+    Coupled microstrip line impedance for odd and even modes. See section 3.8.2 in [1], but be aware there are typos.
+    Another good reference with the same equations: https://qucs.github.io/tech/node77.html.
+
+    Parameters
+    ----------
+    w : float, optional
+        Width of microstrip traces in inches.
+    h : float
+        Substrate thickness in inches
+    s : float
+        trace spacing in inches
+    er : float
+        Dielectric constant of substrate.
+    frequency : float | list, default: 1 GHz
+        frequencies in Hz.
+    t : float, optional
+        Copper thickness in inches, defaults to 1oz copper (1.3 mils).
+
+    Returns
+    -------
+    Zo : float | np.ndarray
+        Odd mode impedance
+
+    Ze : float | np.ndarray
+        Even mode impedance
+
+    References
+    ----------
+    [1] P. Pramanick and P. Bhartia, Modern RF and Microwave Filter Design. Norwood, MA, USA: Artech House, 2016. 
+    
+    """
+
+    u = w / h
+    g = s / h
+
+    ZL, eps_eff = ustrip_impedance(w, h, er, frequency, t)
+
+    v = (u * (20 + g**2) / (10 + g**2)) + g * np.exp(-g)
+    a_e = 1 + (1 / 49) * np.log((v**4 + (v / 52)**2) / (v**4 + 0.432)) + (1 / 18.7) * np.log(1 + (v / 18.1)**3)
+    b_e = 0.564 * ((er - 0.9) / (er + 3))**0.053
+
+    a0 = 0.7287 * (eps_eff - (er + 1) / 2) * ( 1 - np.exp(-0.179 * u))
+    b0 = 0.747 * er / (0.15 + er)
+    c0 = b0 - (b0 - 0.207) * np.exp(-0.414 * u)
+    d0 = 0.593 + 0.694 * np.exp(-0.562 * u)
+
+    # even and odd mode effective permittivity
+    eps_e = (er + 1) / 2 + (er - 1) / 2 * (1 + (10 / v)) ** (-a_e * b_e)
+    eps_o = (((er + 1) / 2) + a0 - eps_eff) * np.exp(-c0 * (g ** d0)) + eps_eff
+
+    # static even mode impedance
+    Q1 = 0.8695 * u **(0.194)
+    Q2 = 1 + 0.7519* g + 0.189 * g ** 2.31
+    Q3 = 0.1975 + (16.6 + (8.4 / g) **6)**(-0.387) + (np.log((g**10) / (1 + (g / 3.4)**10)) / 241)
+    Q4 = (2 * Q1) / (Q2 * ((u **-Q3) * np.exp(-g) + (2 - np.exp(-g) * u ** (-Q3))))
+    Ze = (ZL * np.sqrt(eps_eff / eps_e)) / (1 - Q4 * ( ZL / const.eta0) * np.sqrt(eps_eff))
+
+    # static odd mode impedance
+    Q5 = 1.794 + 1.14 * np.log(1 + 0.638 / (g + 0.517 * g ** 2.43))
+    Q6 = 0.2305 + (np.log(g**10 / (1 + (g / 5.8) ** 10)) / 281.3) + (np.log(1 + 0.598 * g ** (1.154)) / 5.1)
+    Q7 = (10 + 190 * g**2) / (1 + 82.3 * g **3)
+    Q8 = np.exp(-6.5 - 0.95 * np.log(g) - (g / 0.15) ** 5)
+    Q9 = np.log(Q7) * (Q8 + 1 / 16.5)
+    Q10 = (Q2 * Q4 - Q5 * np.exp(np.log(u) * Q6 * u ** (-Q9))) / Q2
+    Zo = (ZL * np.sqrt(eps_eff / eps_o)) / (1 - Q10 * ( ZL / const.eta0) * np.sqrt(eps_eff))
+
+    # TODO: implement the impedance equations with frequency dispersion.
+
+    return Zo, Ze
+
+
+def ustrip_fringing_cap(w: float, h: float, er: float):
     """
     Fringing capacitance from edge of uncoupled microstrip line, per unit length [m].
     This is a weak function of the width of the line.
@@ -247,7 +380,7 @@ def coupled_ustrip_cap(w: float, s: float, h: float, er: float):
     return Co, Ce
 
 
-def coupled_ustrip_impedance(w: float, s: float, h: float, er: float):
+def _coupled_ustrip_impedance(w: float, s: float, h: float, er: float):
     """
     Odd and even mode total capacitance for edge coupled microstrip line, per unit length [m].
     See microstrip_coupled_capacitance.pdf in docs/solver
