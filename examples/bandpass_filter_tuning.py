@@ -19,22 +19,27 @@ bpf = rfn.elements.LumpedElementFilter(fc=(f1, f2), btype="bandpass", prototype=
 
 frequency = np.arange(10e6, 3e9, 1e6)
 
-ax = plt.axes()
-bpf.plot(11, 21, freq_unit="mhz", frequency=frequency, axes=ax, tune=True)
-ax.set_ylim([-30, 2])
+fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(6, 9), height_ratios=[1, 2], constrained_layout=True)
+bpf.plot(11, 21, freq_unit="mhz", frequency=frequency, axes=ax1, tune=True)
+ax1.set_ylim([-30, 2])
 
-plt.figure()
-ax = plt.axes()
-bpf.plot(11, freq_unit="mhz", fmt="smith", frequency=frequency, axes=ax, tune=True)
-
-bpf.state
+bpf.plot(11, freq_unit="mhz", fmt="smith", frequency=frequency, axes=ax2, tune=True)
 
 tuners = [
-    dict(component="S1.l1", variable="value", lower=20, upper=45, label="L1 [nH]", multiplier=1e-9),
-    dict(component="S1.c2", variable="value", lower=0.05, upper=2, label="C1 [pF]", multiplier=1e-12),
-    dict(component="P2.l1", variable="value", lower=1, upper=3, label="L2 [nH]", multiplier=1e-9),
-    dict(component="P2.c2", variable="value", lower=5, upper=10, label="C2 [pF]", multiplier=1e-12),
+    dict(component="S1.l1", label="L1 [nH]", multiplier=1e-9),
+    dict(component="S1.c2", label="C1 [pF]", multiplier=1e-12),
+    dict(component="P2.l1", label="L2 [nH]", multiplier=1e-9),
+    dict(component="P2.c2", label="C2 [pF]", multiplier=1e-12),
+    dict(component="S3.l1", label="L3 [nH]", multiplier=1e-9),
+    dict(component="S3.c2", label="C3 [pF]", multiplier=1e-12),
+    dict(component="P4.l1", label="L4 [nH]", multiplier=1e-9),
+    dict(component="P4.c2", label="C4 [pF]", multiplier=1e-12),
+    dict(component="S5.l1", label="L5 [nH]", multiplier=1e-9),
+    dict(component="S5.c2", label="C5 [pF]", multiplier=1e-12),
 ]
 
-# start the tuner (this is disabled for the readthedocs runner)
+# start the tuner
 bpf.tune(tuners)
+
+# print tuned values (unless tune was canceled, then this just shows the initial values)
+print(bpf.state)
