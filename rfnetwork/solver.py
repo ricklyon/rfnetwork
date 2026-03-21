@@ -1159,11 +1159,14 @@ class FDTD_Solver():
         probes = []
         # initialize sources. Sources act like probes, but the values are input to the 
         # field grid before being replaced by the actual component value.
-        src_ports = [p for p in self.ports if p["src"] is not None]  # ports with excitations
+
         # iterate over all ports with excitations applied
-        for port in src_ports:
+        for port in self.ports:
 
             idx, Vs_a, field, src = port["idx"], port["Vs_a"], port["field"], port["src"]
+
+            if src is None:
+                src = np.zeros(Nt, dtype=dtype_, order="C")
 
             # convert slice indices to a list of values
             idx_list = [list(np.arange(v.start, v.stop)) if isinstance(v, slice) else [v] for v in idx]
@@ -1176,7 +1179,7 @@ class FDTD_Solver():
                         values=np.array(Vs_a_flt[j] * src, dtype=dtype_, order="C"), 
                         field=int(list(self.fshape.keys()).index(field)),
                         idx=[int(id) for id in idx_j],
-                        is_source=int(1)
+                        is_source=int(port["src"] is not None)
                     )
                 )
 
@@ -1244,18 +1247,20 @@ class FDTD_Solver():
         # get the voltages at each source components
         src_v = [s["values"] for s in probes]
         # move the measured source voltages back to the class variable for the associated port
-        cur_source = 0
-        for port in src_ports:
-            # get the number of components associated with this port
+        probe_i = 0 # counter for the current probe
+        for port in self.ports:
+            # get the number of probes associated with this port
             src_len = port["Vs_a"].size
             src_shape = port["Vs_a"].shape
 
-            port["values"] = np.array(src_v[cur_source: cur_source + src_len]).reshape(src_shape + (Nt,))
-            cur_source += src_len
+            # assemble the port values into a single matrix for this port
+            port["values"] = np.array(src_v[probe_i: probe_i + src_len]).reshape(src_shape + (Nt,))
+            # increment 
+            probe_i += src_len
 
         # move probe values to the class variable
         for i, (k, p) in enumerate(self.probes.items()):
-            self.probes[k]["values"] = probes[i + cur_source]["values"]
+            self.probes[k]["values"] = probes[i + probe_i]["values"]
 
         self._solved = True
 
