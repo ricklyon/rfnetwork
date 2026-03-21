@@ -3,6 +3,7 @@ from pathlib import Path
 import numpy as np
 from scipy.special import ellipk
 from scipy import signal
+from np_struct import ldarray
 from .core.units import const, conv
 
 
@@ -34,13 +35,12 @@ def dtft(xn: np.ndarray, frequency: np.ndarray, fs: float, downsample: bool = Fa
     # determine whether downsample can be used. The sampling rate must be at least twice the downsampled rate
     downsample_apply = downsample and (len(xn) / downsample_factor) > 100 and fs > (frs * 2)
 
-    # In most cases 1 / dt is much greater than the highest frequency of interest and the DTFT can be made much faster
+    # In most cases 1 / dt is much greater than the highest frequency of interest and the DTFT can be made faster
     # by down-sampling. 
     if downsample_apply:
         # create lowpass filter that removes all frequency content above frs/2
-        sos = signal.butter(20, frs/2.5, btype="lowpass", output="sos", fs = fs)
-        # apply filter, then downsample the signal. The downsampling will leave aliases, but at much higher frequencies
-        # than the DTFT will be evaluated.
+        sos = signal.butter(20, frs / 2.5, btype="lowpass", output="sos", fs = fs)
+        # apply filter, then downsample the signal. 
         xn = signal.sosfiltfilt(sos, xn)[::downsample_factor]
         fs = frs
 
@@ -65,6 +65,89 @@ def dtft(xn: np.ndarray, frequency: np.ndarray, fs: float, downsample: bool = Fa
         Xw *= downsample_factor
 
     return Xw
+
+
+def ifft(Xw: ldarray):
+    """
+    Computes the inverse fft on data over a positive frequency range. Data should extend down to near DC for 
+    accurate results.
+
+    Parameters:
+    -----------
+    Xw : np.ndarray
+        frequency domain data defined over the positive frequency range. 
+        Data should extend down in frequency to the step size of frequency. For example, if the frequency 
+        step is 10MHz, the lowest data point should be at 10MHz.
+
+    Returns
+    -------
+    time : np.ndarray
+        time vector in seconds
+    xt : np.ndarray
+        time domain data, with time as the first dimension followed by the remaining dimensions of Xw
+    """
+
+    data = Xw.transpose(("frequency", ...))
+
+    frequency = Xw.coords["frequency"]
+    # frequency step size
+    f0, f1 = frequency[:2]
+    fstep = f1 - f0
+
+    # count out many data points are missing between 0Hz and the first data point (assumes data does
+    # not contain a 0hz term)
+    missing_fnum = int((f0 - fstep) / fstep) + 1
+
+    missing_data = np.zeros(missing_fnum, dtype=np.complex128)
+    missing_f = np.arange(0, f0, fstep)
+
+    # create zero frequency term by extrapolating lowest value
+    b_dims = [None] * len(data.shape[1:])
+    missing_data = np.broadcast_to(missing_data[:, *b_dims], (missing_fnum,) + data.shape[1:])
+    data_full = np.concatenate((missing_data, data), axis=0)
+
+    # full frequency array
+    data_f = np.concatenate((missing_f, frequency))
+
+    # mirror the data around the y-axis to generate negative frequency terms for full spectrum
+    # do not flip 0 freq term
+    data_flip = np.flip(np.conjugate(data_full[1:]), axis=0)
+
+    # numpy ifft requires the values sorted in frequency as:
+    # [0, ..., np.pi, -np.pi, ...]
+    ifft_spectrum = np.concatenate((data_full, data_flip), axis=0)
+
+    # number of samples
+    n = len(ifft_spectrum)
+
+    # plt.plot(ifft_spectrum[:, 1])
+
+    # the frequency points are f = k * (fs /N). fs is samples per second, dividing this by N (samples), gives units s^-1
+    # where N is the number of samples and k is 0, 1... N
+    # this means the sample rate is fs = f_1 * N
+    fs = f0 * n
+    ds = 1 / fs
+
+    # casual time is t >= 0. the length n includes samples < 0, so the length of the casual time is half of n
+    t_casual = np.arange(0, (ds * (n / 2)), ds)
+
+    # check that the frequency map from fftfreq matches the data freq
+    fft_freq = np.fft.fftfreq(n, d=ds)
+    assert np.max(fft_freq[: len(data_f)] - data_f) < 1e-3
+
+    # compute inverse FFT
+    xt = np.fft.ifft(ifft_spectrum, axis=0).real
+    # center the spectrum at 0s, move negative time samples to the beginning
+    xt = np.fft.fftshift(xt, axes=0)
+    # time vector, with 0s in the middle
+    time = np.concatenate((-np.flip(t_casual)[:-1], t_casual))
+    
+    # data coordinates excluding frequency
+    d_coords = {k: data.coords[k] for k in data.coords.keys() if k != "frequency"}
+                
+    return ldarray(
+        xt, coords = dict(time=time, **d_coords)
+    )
 
 def n_ports_from_snp(path: str) -> int:
     """
@@ -380,21 +463,6 @@ def coupled_ustrip_cap(w: float, s: float, h: float, er: float):
     return Co, Ce
 
 
-def _coupled_ustrip_impedance(w: float, s: float, h: float, er: float):
-    """
-    Odd and even mode total capacitance for edge coupled microstrip line, per unit length [m].
-    See microstrip_coupled_capacitance.pdf in docs/solver
-    """
-
-    # total even and odd mode coupled capacitance
-    Co, Ce = coupled_ustrip_cap(w, s, h, er)
-    # coupled capacitance in air
-    Co_a, Ce_a = coupled_ustrip_cap(w, s, h, 1)
-
-    Zo = 1 / (const.c0 * np.sqrt(Co * Co_a))
-    Ze = 1 / (const.c0 * np.sqrt(Ce * Ce_a))
-
-    return Zo, Ze
 
 
 def lp_filter_prototype(n: int, ripple: float = 0.5):

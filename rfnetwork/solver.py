@@ -50,6 +50,11 @@ class FDTD_Solver():
 
         self._meshed = False
         self._solved = False
+        self._time = None
+
+    @property
+    def time(self):
+        return self._time
 
     def invalidate_mesh(self):
         self._meshed = False
@@ -1021,12 +1026,21 @@ class FDTD_Solver():
         self.invalidate_solution()
         self.check_mesh()
 
+        # check that waveforms all have identical lengths
+        if self._time is not None:
+            if len(self._time) != len(waveform):
+                raise ValueError("All excitations must have identical lengths.")
+        else:
+            self._time = np.arange(0, self.dt * len(waveform), self.dt)
+
         for p in np.atleast_1d(ports):
             self.ports[p-1]["src"] = waveform.astype(np.float32)
 
     def reset_excitations(self):
         """ Remove excitations from all ports. """
         
+        self._time = None
+
         for p in self.ports:
             p["src"] = None
 
@@ -1886,7 +1900,7 @@ class FDTD_Solver():
 
         return np.sum([p["values"] * p["d"] for k, p in self.probes.items() if k[:len(name)] == name], axis=0)
 
-    def get_sparameters(self, frequency: np.ndarray, source_port: int = 1, downsample: bool = True) -> ldarray:
+    def get_sparameters(self, frequency: np.ndarray, source_port: int = 1, downsample: bool = False) -> ldarray:
         """
         Returns a column of the s-parameter matrix for solutions that have an excitation applied to a single port.
 
