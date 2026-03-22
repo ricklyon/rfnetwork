@@ -460,73 +460,58 @@ def coupled_ustrip_cap(w: float, s: float, h: float, er: float):
 
     return Co, Ce
 
-
-
-
-def lp_filter_prototype(n: int, ripple: float = 0.5):
+def butterworth_prototype(n: int):
     """
-    Normalized element values for equal ripple low-pass filter prototypes. See Table 8.4 in [1].
-    
+    Prototype values for maximally flat low-pass filter. See section 3.2.1 in [1]. Values include
+    the normalized source and load resistance.
+
     Parameters
     ----------
     n : int
-        filter order (1-10). Odd n will be matched to 50 ohms, while even n requires an impedance match.
-    ripple : float, default: 0.5
-        pass-band ripple. Supported values are 0.5 and 3.0 dB.
-
-    Returns
-    -------
-    list
-        list of n+1 element values. The last value is the normalized resistive load.
+        filter order.
 
     References
     ----------
-    [1] Pozar, David M. Microwave Engineering. 4th ed., Wiley, 2011.
+    [1] Microstrip Filters for RF/Microwave Applications. Jia-Sheng Hong, M. J. Lancaster
 
     """
-    lp_table = {
-        "0.0" : {
-            1: [2.0000, 1.0000],
-            2: [1.4142, 1.4142, 1.0000],
-            3: [1.0000, 2.0000, 1.0000, 1.0000],
-            4: [0.7654, 1.8478, 1.8478, 0.7654, 1.0000],
-            5: [0.6180, 1.6180, 2.0000, 1.6180, 0.6180, 1.0000],
-            6: [0.5176, 1.4142, 1.9318, 1.9318, 1.4142, 0.5176, 1.0000],
-            7: [0.4450, 1.2470, 1.8019, 2.0000, 1.8019, 1.2470, 0.4450, 1.0000],
-            8: [0.3902, 1.1111, 1.6629, 1.9615, 1.9615, 1.6629, 1.1111, 0.3902, 1.0000],
-            9: [0.3473, 1.0000, 1.5321, 1.8794, 2.0000, 1.8794, 1.5321, 1.0000, 0.3473, 1.0000],
-            10: [0.3129, 0.9080, 1.4142, 1.7820, 1.9754, 1.9754, 1.7820, 1.4142, 0.9080, 0.3129, 1.0000]
-        },
-        # 0.5dB Ripple.
-        "0.5" : {
-            1: [0.6986, 1.0000],
-            2: [1.4029, 0.7071, 1.9841],
-            3: [1.5963, 1.0967, 1.5963, 1.0000],
-            4: [1.6703, 1.1926, 2.3661, 0.8419, 1.9841],
-            5: [1.7058, 1.2296, 2.5408, 1.2296, 1.7058, 1.0000],
-            6: [1.7254, 1.2479, 2.6064, 1.3137, 2.4758, 0.8696, 1.9841],
-            7: [1.7372, 1.2583, 2.6381, 1.3444, 2.6381, 1.2583, 1.7372, 1.0000],
-            8: [1.7451, 1.2647, 2.6564, 1.3590, 2.6964, 1.3389, 2.5093, 0.8796, 1.9841],
-            9: [1.7504, 1.2690, 2.6678, 1.3673, 2.7239, 1.3673, 2.6678, 1.2690, 1.7504, 1.0000],
-            10: [1.7543, 1.2721, 2.6754, 1.3725, 2.7392, 1.3806, 2.7231, 1.3485, 2.5239, 0.8842, 1.9841]
-        },
-        # 3.0dB Ripple.
-        "3.0" : {
-            1: [1.9953, 1.0000],
-            2: [3.1013, 0.5339, 5.8095],
-            3: [3.3487, 0.7117, 3.3487, 1.0000],
-            4: [3.4389, 0.7483, 4.3471, 0.5920, 5.8095],
-            5: [3.4817, 0.7618, 4.5381, 0.7618, 3.4817, 1.0000],
-            6: [3.5045, 0.7685, 4.6061, 0.7929, 4.4641, 0.6033, 5.8095],
-            7: [3.5182, 0.7723, 4.6386, 0.8039, 4.6386, 0.7723, 3.518, 1.0000],
-            8: [3.5277, 0.7745, 4.6575, 0.8089, 4.6990, 0.8018, 4.499, 0.6073, 5.8095],
-            9: [3.5340, 0.7760, 4.6692, 0.8118, 4.7272, 0.8118, 4.669, 0.7760, 3.5340, 1.0000],
-            10: [3.5384, 0.7771, 4.6768, 0.8136, 4.7425, 0.816, 4.726, 0.8051, 4.5142, 0.6091, 5.8095]
-        }
-    }
 
-    return lp_table[f"{ripple:.1f}"][n]
+    g_i = [float(2 * np.sin(((2 * i - 1) * np.pi) / (2 * n))) for i in range(1, n + 1)]
 
+    return [1] + g_i + [1]
+
+def chebyshev_prototype(n: int, ripple: float):
+    """
+    Prototype values for chebyshev low-pass filter. See section 3.2.1 in [1]. Values include
+    the normalized source and load resistance.
+
+    Parameters
+    ----------
+    n : int
+        filter order.
+    ripple : float
+        passband ripple in dB
+
+    References
+    ----------
+    [1] Microstrip Filters for RF/Microwave Applications. Jia-Sheng Hong, M. J. Lancaster
+
+    """
+    beta = np.log(1 / np.tanh(ripple / 17.37))
+    gamma = np.sinh(beta / (2 * n))
+
+    g = [1] * (n + 2)
+
+    g[1] = (2 / gamma) * np.sin(np.pi / (2 * n))
+
+    for i in range(2, n + 1):
+        g[i] = (1 / g[i - 1]) * (
+            4 * np.sin(((2 * i - 1) * np.pi) / (2 * n)) * np.sin(((2 * i - 3) * np.pi) / (2 * n))
+        ) / (gamma **2 + np.sin(((i - 1) * np.pi) / n) ** 2)
+
+    g[n + 1] = 1 if (n % 2) else (1 / np.tanh(beta / 4))**2
+
+    return [float(i) for i in g]
 
 
 def combline_sections_nb(g: list, f1: float, f2: float, er: float, h: float, wp: float = 1):

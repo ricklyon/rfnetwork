@@ -866,7 +866,7 @@ class Stripline(Line):
 class LumpedElementFilter(DynamicNetwork):
 
     @classmethod
-    def from_params(cls, fc: tuple, btype: str, n: int, ripple: float = 0.5):
+    def from_chebyshev(cls, fc: tuple, btype: str, n: int, ripple: float = 0.5):
         """
         Parameters
         ----------
@@ -876,12 +876,26 @@ class LumpedElementFilter(DynamicNetwork):
             Upper 3 db cutoff frequency [Hz]
         n : int
             Filter order (1-10). Odd n will be matched to 50 ohms, while even n requires an impedance match.
-        r0 : float, default: 50
-            Port impedance. Default is 50 ohms.
         ripple : float, default: 0.5
-            Pass-band ripple. Supported values are 0.5 and 3.0 dB.
+            Passband ripple in dB
         """
-        prototype = utils.lp_filter_prototype(n, ripple=ripple)
+        prototype = utils.chebyshev_prototype(n, ripple=ripple)
+
+        return cls(fc, btype, prototype)
+    
+    @classmethod
+    def from_butterworth(cls, fc: tuple, btype: str, n: int):
+        """
+        Parameters
+        ----------
+        fc1 : float
+            Lower 3 dB cutoff frequency [Hz]
+        fc2 : float
+            Upper 3 db cutoff frequency [Hz]
+        n : int
+            Filter order (1-10). Odd n will be matched to 50 ohms, while even n requires an impedance match.
+        """
+        prototype = utils.butterworth_prototype(n)
 
         return cls(fc, btype, prototype)
 
@@ -901,7 +915,7 @@ class LumpedElementFilter(DynamicNetwork):
         if btype == "lowpass":
             # build components for each element, scaling the impedance and frequency from the normalized protoype 
             # values.
-            for i, g_k in enumerate(prototype[:-1]):
+            for i, g_k in enumerate(prototype[1:-1]):  # skip source and load resitive elements on each end
                 if i % 2 == 0: # start with series inductor
                     components[f"L{i+1}"] = Inductor((g_k * r0) / wc1)
                 else:
@@ -910,7 +924,7 @@ class LumpedElementFilter(DynamicNetwork):
         elif btype == "highpass":
             # inductors are transformed to capacitors in the HP conversion, 
             # and vice versa
-            for i, g_k in enumerate(prototype[:-1]):
+            for i, g_k in enumerate(prototype[1:-1]):
                 if i % 2 == 0: # start with series capacitor
                     components[f"C{i+1}"] = Capacitor(1 / (r0 * wc1 * g_k))
                 else:
@@ -918,7 +932,7 @@ class LumpedElementFilter(DynamicNetwork):
 
         elif btype == "bandpass":
 
-            for i, g_k in enumerate(prototype[:-1]):
+            for i, g_k in enumerate(prototype[1:-1]):
                 if i % 2 == 0:  # start with series element
                     L = (g_k * r0) / (w0 * fb)
                     C = fb / (r0 * w0 * g_k)
@@ -930,7 +944,7 @@ class LumpedElementFilter(DynamicNetwork):
 
         elif btype == "bandstop":
 
-            for i, g_k in enumerate(prototype[:-1]):
+            for i, g_k in enumerate(prototype[1:-1]):
                 if i % 2 == 0:  # start with series element
                     L = (g_k * r0 * fb) / (w0)
                     C = 1 / (r0 * w0 * g_k * fb)

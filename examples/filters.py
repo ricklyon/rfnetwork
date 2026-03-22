@@ -16,11 +16,11 @@ import matplotlib.pyplot as plt
 # sphinx_gallery_thumbnail_number = -1
 #
 
-bsf = rfn.elements.LumpedElementFilter.from_params(fc=(70e6, 150e6), btype="bandstop", n=3)
+bsf = rfn.elements.LumpedElementFilter.from_chebyshev(fc=(70e6, 150e6), btype="bandstop", n=3)
 
 frequency = np.arange(10e6, 0.5e9, 1e6)
 
-ax = plt.axes()
+fig, ax = plt.subplots()
 bsf.plot(21, freq_unit="mhz", frequency=frequency, axes=ax)
 ax.set_ylim([-50, 0]);
 
@@ -28,11 +28,11 @@ ax.set_ylim([-50, 0]);
 # Bandpass Filter
 # ----------------
 #
-bpf = rfn.elements.LumpedElementFilter.from_params(fc=(70e6, 150e6), btype="bandpass", n=3)
+bpf = rfn.elements.LumpedElementFilter.from_chebyshev(fc=(70e6, 150e6), btype="bandpass", n=3)
 
 frequency = np.arange(10e6, 0.5e9, 1e6)
 
-ax = plt.axes()
+fig, ax = plt.subplots()
 bpf.plot(21, freq_unit="mhz", frequency=frequency, axes=ax)
 ax.set_ylim([-50, 0]);
 
@@ -51,7 +51,7 @@ fig, ax = plt.subplots(1, 1, figsize=(10, 7))
 
 for n in n_list:
     # build lowpass filter network
-    fn = bpf = rfn.elements.LumpedElementFilter.from_params(fc, btype="lowpass", n=n)
+    fn = bpf = rfn.elements.LumpedElementFilter.from_chebyshev(fc, btype="lowpass", n=n)
     sdata = fn.evaluate(frequency)["s"]
     ax.plot((frequency / fc) - 1, -rfn.conv.db20_lin(sdata.sel(b=2, a=1)), linewidth=2)
 
