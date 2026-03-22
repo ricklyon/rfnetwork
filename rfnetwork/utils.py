@@ -69,8 +69,8 @@ def dtft(xn: np.ndarray, frequency: np.ndarray, fs: float, downsample: bool = Fa
 
 def ifft(Xw: ldarray):
     """
-    Computes the inverse fft on data over a positive frequency range. Data should extend down to near DC for 
-    accurate results.
+    Computes the inverse fft on complex-valued data over a positive frequency range. Data should extend down to near 
+    DC for accurate results.
 
     Parameters:
     -----------
@@ -88,8 +88,8 @@ def ifft(Xw: ldarray):
     """
 
     data = Xw.transpose(("frequency", ...))
-
     frequency = Xw.coords["frequency"]
+    
     # frequency step size
     f0, f1 = frequency[:2]
     fstep = f1 - f0
@@ -119,8 +119,6 @@ def ifft(Xw: ldarray):
 
     # number of samples
     n = len(ifft_spectrum)
-
-    # plt.plot(ifft_spectrum[:, 1])
 
     # the frequency points are f = k * (fs /N). fs is samples per second, dividing this by N (samples), gives units s^-1
     # where N is the number of samples and k is 0, 1... N

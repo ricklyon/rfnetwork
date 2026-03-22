@@ -47,7 +47,7 @@ class Load(Component):
         assert value > 0, "Load must be passive"
     
     def evaluate_sdata(self, frequency: np.ndarray) -> np.ndarray:
-        return np.full((len(frequency), 1, 1), conv.gamma_z(self.value), dtype="complex128")
+        return np.full((len(frequency), 1, 1), conv.gamma_z(self.state["value"]), dtype="complex128")
 
 class Open(Component):
     """

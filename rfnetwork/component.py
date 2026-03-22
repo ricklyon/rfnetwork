@@ -466,6 +466,17 @@ class Component(object):
             ret_data["n"] = ldarray(ndata, coords=dict(frequency=frequency, b=port_a, a=port_a))
 
         return ret_data
+    
+    def evaluate_s(self, frequency: np.ndarray = None) -> ldarray:
+        """
+        Computes the component s-matrix data
+
+        Parameters
+        ----------
+        frequency : np.ndarray, optional
+            Frequency vector to compute data over.
+        """
+        return self.evaluate(frequency)["s"]
 
 
 class Component_SnP(Component):
