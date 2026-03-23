@@ -1339,7 +1339,7 @@ class FDTD_Solver():
                 frequency=np.atleast_1d(frequency) if frequency is not None else None
             )
 
-    def add_farfield_monitor(self, ff_box: pv.PolyData, frequency: np.ndarray):
+    def add_farfield_monitor(self, frequency: np.ndarray, padding: int = 2):
         """
         Configure far field monitors
 
@@ -1351,30 +1351,30 @@ class FDTD_Solver():
             far-field captures. Monitors will not be added for faces on the edges of the solve boundary.
         frequency : np.ndarray | float
             frequencies in Hz of the far-field monitors.
+        padding : int, default: 3
+            number of grid cells to place between PML boundaries and far-field integration surface
 
         """
         self.check_mesh()
 
-        # grid indices of each face at grid edges
-        ffn_x, ffn_y, ffn_z = self.pos_to_idx(np.min(ff_box.points, axis=0), "edge")
-        ffp_x, ffp_y, ffp_z = self.pos_to_idx(np.max(ff_box.points, axis=0), "edge")
+        # integration surfaces are not added to faces without PML. If no side has PML the
+        # farfield result will be zero.
+        if not len(self.pml_boundaries):
+            raise ValueError("No radiation or PML boundaries found. Unable to create farfield monitor.")
 
-        # edge indices at the monitor planes. The cell indices within each face can use the 
-        # the edge index slices since the last index is not inclusive when indexing cells.
-        ff_idx = np.array([[ffn_x, ffp_x], [ffn_y, ffp_y], [ffn_z, ffp_z]])
-        self.farfield["idx"] = ff_idx
-        # pos_to_idx returns index of edge greater or equal to the position
-        ff_idx[:, 1] -= 1
+        sbox_bounds = np.column_stack([self.sbox_min, self.sbox_max])
 
-        # position in meters of surfaces
-        self.farfield["surf_pos"] = np.zeros_like(ff_idx, dtype=np.float64)
+        # indices of the farfield faces on each axis and side
+        ff_idx = np.zeros_like(sbox_bounds, dtype=np.int64)
+        # pos of the farfield faces in inches
+        ff_pos = np.zeros_like(sbox_bounds)
+
+        # position in meters of farfield surface
+        self.farfield["surf_pos"] = np.zeros_like(sbox_bounds, dtype=np.float64)
 
         # cell positions and widths on each surface as a meshgrid, meters
         self.farfield["cell_pos"] = [None] * 3
         self.farfield["cell_w"] = [None] * 3
-
-        self.farfield["box"] = ff_box.copy()
-        self.farfield["frequency"] = np.atleast_1d(frequency)
 
         for axis in range(3):
 
@@ -1382,33 +1382,28 @@ class FDTD_Solver():
             axis_s = ("x", "y", "z")[axis]
             sf0, sf1 = [i for i in (0, 1, 2) if i != axis]
             sf0_s, sf1_s = [a for a in ("x", "y", "z") if a != axis_s]
-
-            # grid cell positions are the same for both sides of the face
-            self.farfield["cell_pos"][axis] =  np.meshgrid(
-                conv.m_in(self.g_cells[sf0][ff_idx[sf0, 0]: ff_idx[sf0, 1]]), 
-                conv.m_in(self.g_cells[sf1][ff_idx[sf1, 0]: ff_idx[sf1, 1]]), 
-                indexing="ij"
-            )
-
-            # grid cell widths, same for both sides
-            self.farfield["cell_w"][axis] = np.meshgrid(
-                conv.m_in(self.d_cells[sf0][ff_idx[sf0, 0]: ff_idx[sf0, 1]]), 
-                conv.m_in(self.d_cells[sf1][ff_idx[sf1, 0]: ff_idx[sf1, 1]]), 
-                indexing="ij"
-            )
             
             # for each face on either side of the far-field box
             for j, side in enumerate(["n", "p"]):
+                
+                pml_name = axis_s + ("-" if side == "n" else "+")
+                # if face has no PML boundary, the boundary condition is PEC, place surface on boundary edge
+                if pml_name not in self.pml_boundaries:
+                    print("skip")
+                    ff_idx[axis, j] = 0 if j == 0 else len(self.g_edges[axis]) - 1
+                else:
+                    # set the position of farfield integration surface by index value in the grid
+                    if side == "n":
+                        ff_idx[axis, j] = self._n_pml + padding
+                    else:
+                        ff_idx[axis, j] = len(self.g_edges[axis]) - self._n_pml - 1 - padding
 
-                # edge index and the position of the surface along the normal axis
-                surf_idx = ff_idx[axis, j]
-
-                # monitor values are all zero if surface is at the solve boundary, skip monitor
-                if surf_idx < 1 or surf_idx >= len(self.g_edges[axis]) -1:
-                    continue
-
+                # integration face position, inches
+                surf_idx = ff_idx[axis, j] 
                 surf_pos_in = self.g_edges[axis][surf_idx]
-                # surface position in meters
+                ff_pos[axis, j] = surf_pos_in
+
+                # face position in meters
                 self.farfield["surf_pos"][axis, j] = conv.m_in(surf_pos_in)
                 
                 # add monitors for each surface field
@@ -1432,6 +1427,28 @@ class FDTD_Solver():
                         self.add_field_monitor(
                             f"ff_h{f_s}2_{side}{axis_s}", f"h{f_s}", axis_s, index=surf_idx+1, frequency=frequency
                         )
+
+        for axis in range(3):
+            
+            sf0, sf1 = [i for i in (0, 1, 2) if i != axis]
+
+            # grid cell positions are the same for both sides of the face
+            self.farfield["cell_pos"][axis] =  np.meshgrid(
+                conv.m_in(self.g_cells[sf0][ff_idx[sf0, 0]: ff_idx[sf0, 1]]), 
+                conv.m_in(self.g_cells[sf1][ff_idx[sf1, 0]: ff_idx[sf1, 1]]), 
+                indexing="ij"
+            )
+
+            # grid cell widths, same for both sides
+            self.farfield["cell_w"][axis] = np.meshgrid(
+                conv.m_in(self.d_cells[sf0][ff_idx[sf0, 0]: ff_idx[sf0, 1]]), 
+                conv.m_in(self.d_cells[sf1][ff_idx[sf1, 0]: ff_idx[sf1, 1]]), 
+                indexing="ij"
+            )
+
+        self.farfield["box"] = pv.Box(ff_pos.flatten())
+        self.farfield["frequency"] = np.atleast_1d(frequency)
+        self.farfield["idx"] = ff_idx
 
     def add_current_probe(self, name: str, face: pv.PolyData):
         """

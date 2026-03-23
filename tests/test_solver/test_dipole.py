@@ -53,13 +53,6 @@ class TestDipole(unittest.TestCase):
             (0, ms_y[1], -gap/2)
         ])
 
-        # box faces to collect near-field equivalent currents used in the near-field to far-field conversion
-        ff_box_d = (sbox_w / 2) - 0.2
-        ff_bounds = np.array([(-ff_box_d, ff_box_d), (-ff_box_d, ff_box_d), (-ff_box_d, ff_box_d)])
-        ff_box = pv.Box(
-            bounds = ff_bounds.flatten()
-        )
-
         s = rfn.FDTD_Solver(sbox)
         s.add_conductor(ms_upper, ms_lower, style=dict(color="gold"))
         s.add_lumped_port(1, port1_face, "z-")
@@ -69,7 +62,7 @@ class TestDipole(unittest.TestCase):
         s.generate_mesh(d0 = 0.03, d_edge=0.01)
 
         # setup wide-band far-field monitor
-        s.add_farfield_monitor(ff_box, frequency=[10e9, 20e9])
+        s.add_farfield_monitor(frequency=[10e9, 20e9])
 
         # apply edge singularity correction to the edges of traces, iterate over lower leg and upper leg
         for i, ms_z in enumerate((ms1_z, ms2_z)):
