@@ -405,6 +405,10 @@ def ustrip_fringing_cap(w: float, h: float, er: float):
     """
     Fringing capacitance from edge of uncoupled microstrip line, per unit length [m].
     This is a weak function of the width of the line.
+
+    References
+    ----------
+    [1] Microstrip Filters for RF/Microwave Applications. Jia-Sheng Hong, M. J. Lancaster
     """
     # characteristic impedance and effective epsilon
     zc, er_eff  = ustrip_impedance(w, h, er)
@@ -414,8 +418,7 @@ def ustrip_fringing_cap(w: float, h: float, er: float):
     # uncoupled fringe capacitance
     Cf = ((np.sqrt(er_eff) / (const.c0 * zc)) - Cp) / 2
 
-    # fringing capacitance seems to be a bit high, reduced empirically 
-    return Cf * 0.9
+    return Cf
 
 
 def coupled_ustrip_fringing_cap(w: float, s: float, h: float, er: float):
@@ -424,6 +427,10 @@ def coupled_ustrip_fringing_cap(w: float, s: float, h: float, er: float):
     See microstrip_coupled_capacitance.pdf in docs/solver
 
     Assumes that thickness is zero.
+
+    References
+    ----------
+    [1] Microstrip Filters for RF/Microwave Applications. Jia-Sheng Hong, M. J. Lancaster
     """
     # uncoupled fringing capacitance
     Cf = ustrip_fringing_cap(w, h, er)
@@ -512,6 +519,7 @@ def chebyshev_prototype(n: int, ripple: float):
     g[n + 1] = 1 if (n % 2) else (1 / np.tanh(beta / 4))**2
 
     return [float(i) for i in g]
+
 
 
 def combline_sections_nb(g: list, f1: float, f2: float, er: float, h: float, wp: float = 1):
