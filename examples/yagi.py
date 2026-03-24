@@ -14,8 +14,9 @@ import sys
 import rfnetwork as rfn
 import mpl_markers as mplm
 
-pv.set_jupyter_backend("trame")
 np.set_printoptions(suppress=True)
+
+# pv.set_jupyter_backend("trame")
 sys.argv = sys.argv[0:1]
 
 
@@ -32,7 +33,7 @@ wire_d = 0.2
 # gap between driver elements
 gap = 0.2
 
-driver_len = 0.89 * (lam0 / 2)
+driver_len = 0.88 * (lam0 / 2)
 
 # reflector_len = lam0 * 0.482
 # director1_len = lam0 * 0.428
@@ -42,43 +43,25 @@ reflector_len = lam0 * 0.49
 director1_len = lam0 * 0.428
 director2_len = lam0 * 0.416
 
-sp = 0.22 * lam0
+sp = 0.195 * lam0
 
 # %%
 # Build Yagi Model
 # ------------------------
 
-driver_upper = pv.Cylinder(
-    center=(0, 0, gap / 2 + driver_len / 4), direction=(0, 0, 1), radius = wire_d / 2, height = driver_len / 2, resolution=4
-)
+def add_element(s: rfn.FDTD_Solver, x_loc: float, length: float, gap=0, resolution=4):
 
-driver_lower = pv.Cylinder(
-    center=(0, 0, -gap / 2 - driver_len / 4), direction=(0, 0, 1), radius = wire_d / 2, height = driver_len / 2, resolution=4
-)
+    for z_center in (gap / 2 + (length / 4), -gap / 2 - (length / 4)):
 
-reflector_upper = pv.Cylinder(
-    center=(-sp, 0, reflector_len / 4), direction=(0, 0, 1), radius = wire_d / 2, height = reflector_len / 2, resolution=4
-)
+        element = pv.Cylinder(
+            center = (x_loc, 0, z_center), 
+            direction=(0, 0, 1), 
+            radius = wire_d / 2, 
+            height = length / 2, 
+            resolution=resolution
+        )
 
-reflector_lower = pv.Cylinder(
-    center=(-sp, 0, - reflector_len / 4), direction=(0, 0, 1), radius = wire_d / 2, height = reflector_len / 2, resolution=4
-)
-
-director1_upper = pv.Cylinder(
-    center=(sp, 0, director1_len / 4), direction=(0, 0, 1), radius = wire_d / 2, height = director1_len / 2, resolution=4
-)
-
-director1_lower = pv.Cylinder(
-    center=(sp, 0, - director1_len / 4), direction=(0, 0, 1), radius = wire_d / 2, height = director1_len / 2, resolution=4
-)
-
-director2_upper = pv.Cylinder(
-    center=(sp * 2, 0, director2_len / 4), direction=(0, 0, 1), radius = wire_d / 2, height = director2_len / 2, resolution=4
-)
-
-director2_lower = pv.Cylinder(
-    center=(sp * 2, 0, - director2_len / 4), direction=(0, 0, 1), radius = wire_d / 2, height = director2_len / 2, resolution=4
-)
+        s.add_conductor(element, style=dict(color="gold"))
 
 # solve box
 sbox = pv.Cube(center=(sp/2, 0, 0), x_length=lam0 * 1.1, y_length=lam0 / 2, z_length=lam0)
@@ -92,13 +75,12 @@ port1_face = pv.Rectangle([
 
 s = rfn.FDTD_Solver(sbox)
 
-# add elements
-s.add_conductor(
-    driver_upper, driver_lower, 
-    reflector_upper, reflector_lower,
-    director1_lower, director1_upper,
-    director2_lower, director2_upper,
-    style=dict(color="gold", opacity=0.9))
+
+add_element(s, x_loc=0, length=driver_len, gap=gap)
+add_element(s, x_loc=-sp, length=reflector_len)
+add_element(s, x_loc=sp, length=director1_len)
+add_element(s, x_loc=2.1*sp, length=director2_len)
+
 s.add_lumped_port(1, port1_face, "z-")
 
 # PML boundaries are required on all sides to add a far-field monitor
@@ -108,8 +90,8 @@ s.generate_mesh(d0 = 0.5, d_edge=0.1)
 # setup wide-band far-field monitor
 s.add_farfield_monitor(frequency=f0)
 
-# near-field monitor
-s.add_field_monitor("e_tot", "e_total", "y", 0, n_step=10)
+# # near-field monitor
+# s.add_field_monitor("e_tot", "e_total", "y", 0, n_step=10)
 
 
 plotter = s.render(show_mesh=True)
@@ -119,12 +101,13 @@ plotter.show()
 # Setup Excitation and Solve
 # ------------------------
 vsrc = s.gaussian_source(width=800e-12, t0=500e-12, t_len=30e-9)
-
+# vsrc = s.gaussian_modulated_source(f0, width=10e-9, t0=5e-9, t_len=20e-9)
 # plt.plot(vsrc)
+
 s.assign_excitation(vsrc, 1)
 s.solve(n_threads=4)
 
-s.plot_monitor(["e_tot"], zoom=1.1, opacity=1, camera_position="xz").show()
+# s.plot_monitor(["e_tot"], zoom=1.1, opacity=1, camera_position="xz").show()
 
 
 # %%
@@ -132,28 +115,36 @@ s.plot_monitor(["e_tot"], zoom=1.1, opacity=1, camera_position="xz").show()
 # ------------------------
 # This plot shows realized gain
 
-pp_gain = rfn.conv.db10_lin(
-    s.get_farfield_gain(theta=np.arange(-180, 181, 1), phi=[0]).sel(polarization="thetapol")
+phi_cut = rfn.conv.db10_lin(
+    s.get_farfield_gain(phi=np.arange(-180, 182, 2), theta=90).sel(polarization="thetapol")
 )
 
-fig, (ax) = plt.subplots(1, 1, subplot_kw=dict(projection="polar"))
-theta_rad = np.deg2rad(pp_gain.coords["theta"])
+theta_cut = rfn.conv.db10_lin(
+    s.get_farfield_gain(theta=np.arange(-180, 181, 2), phi=0).sel(polarization="thetapol")
+)
 
-ax.plot(theta_rad, pp_gain.squeeze())
+fig, (ax1, ax2) = plt.subplots(1, 2, subplot_kw=dict(projection="polar"), figsize=(8, 4))
+theta_rad = np.deg2rad(theta_cut.coords["theta"])
+phi_rad = np.deg2rad(phi_cut.coords["phi"])
 
-ax.set_theta_zero_location('N') 
-ax.set_theta_direction(-1) 
-ax.set_xlabel(r"$\theta$ [deg], $\phi$=0°")
-ax.set_ylim([-20, 10])
-ax.set_yticks(np.arange(-20, 15, 5))
-ax.set_yticklabels(["", "-15", "-10", "-5", "0", "5", "10dBi"])
-ax.legend(loc="lower right")
-mplm.line_marker(x=np.pi/2)
+ax1.plot(theta_rad, theta_cut.squeeze())
+ax2.plot(phi_rad, phi_cut.squeeze())
 
-# Set theta labels
-ax.set_xticks(np.linspace(0, 2 * np.pi, 8, endpoint=False))
-labels = [f"{d}°" for d in [0, 45, 90, 135, 180, -135, -90, -45]]
-ax.set_xticklabels(labels)
+for ax in (ax1, ax2):
+    ax.set_theta_zero_location('N') 
+    ax.set_theta_direction(-1) 
+    ax.set_ylim([-20, 10])
+    ax.set_yticks(np.arange(-20, 15, 5))
+    ax.set_yticklabels(["", "-15", "-10", "-5", "0", "5", "10dBi"])
+
+    # Set theta labels
+    ax.set_xticks(np.linspace(0, 2 * np.pi, 8, endpoint=False))
+    labels = [f"{d}°" for d in [0, 45, 90, 135, 180, -135, -90, -45]]
+    ax.set_xticklabels(labels)
+
+ax1.set_xlabel(r"$\theta$ [deg], $\phi$=0°")
+ax2.set_xlabel(r"$\phi$ [deg], $\theta$=90°")
+mplm.line_marker(x=np.pi/2, axes=ax1)
 
 fig.tight_layout()
 
@@ -170,7 +161,7 @@ ax.set_ylim([-20, 5])
 ax.set_xlabel("Frequency [MHz]")
 ax.set_ylabel("[dB]")
 # ax.legend(["S11"])
-mplm.line_marker(x=f0 / 1e6)
+mplm.line_marker(x=f0 / 1e6, ylabel=False)
 ax.grid()
 
 plt.show()
