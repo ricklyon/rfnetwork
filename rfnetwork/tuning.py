@@ -53,9 +53,10 @@ class TunerThread(QtCore.QThread):
         self.mutex = QtCore.QMutex()
         self.queue = []
         self.plot = plot
+        self._terminate = False
         super().__init__()
 
-    @QtCore.Slot(str)
+    @QtCore.Slot()
     def push(self):
         """
         Request a plot update
@@ -63,16 +64,20 @@ class TunerThread(QtCore.QThread):
 
         self._wait.wakeAll()
 
+    @QtCore.Slot()
+    def terminate(self):
+        self._terminate = True
+        self._wait.wakeAll()
+
     def run(self):
 
-        while 1:
-
+        while not self._terminate:
+            
             self.mutex.lock()
             self._wait.wait(self.mutex)
             self.mutex.unlock()
 
             self.plot()
-
     
 class DoubleSlider(QSlider):
 
@@ -277,8 +282,8 @@ class TunerGroup(QWidget):
 
     def closeEvent(self, event = None):
         
-        # if event:
-        #     event.accept()
+        if event:
+            event.accept()
 
         self.processor.terminate()
         self.processor.wait()

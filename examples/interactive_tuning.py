@@ -151,17 +151,16 @@ fig.tight_layout()
 #
 
 tuners = [
-    dict(component="m_in.c1", variable="value", lower=1, upper=30, label="C1 [pF]"),
-    dict(component="m_in.ms1", variable="length", lower=0.1, upper=2, label="MS1 [in]"),
-    dict(component="m_in.c2", variable="value", lower=10, upper=80, label="C2 [pF]"),
-    dict(component="m_in.ms2", variable="length", lower=0.1, upper=1, label="MS2 [in]"),
-    dict(component="m_in.r1", variable="value", lower=0.1, upper=5, label="R1 [ohms]"),
-    dict(component="m_out.ms3", variable="length", lower=0.1, upper=1, label="MS3 [in]"),
-    dict(component="m_out.c4", variable="value", lower=10, upper=100, label="C3 [pF]"),
-    dict(component="m_out.ms4", variable="length", lower=0.1, upper=2, label="MS2 [in]"),
+    dict(component="m_in.c1", variable="value", label="C1 [pF]"),
+    dict(component="m_in.ms1", variable="length", label="MS1 [in]"),
+    dict(component="m_in.c2", variable="value", label="C2 [pF]"),
+    dict(component="m_in.ms2", variable="length", label="MS2 [in]"),
+    dict(component="m_in.r1", variable="value", label="R1 [ohms]"),
+    dict(component="m_out.ms3", variable="length", label="MS3 [in]"),
+    dict(component="m_out.c4", variable="value", label="C3 [pF]"),
+    dict(component="m_out.ms4", variable="length", label="MS2 [in]"),
     dict(component="m_out.c4", variable="value", lower=5, upper=30, label="C4 [pF]"),
 ]
-
 # start the tuner (this is disabled for the readthedocs runner)
 # n.tune(tuners)
 
