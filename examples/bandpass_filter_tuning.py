@@ -10,8 +10,15 @@ import numpy as np
 import matplotlib.pyplot as plt
 import mpl_markers as mplm
 
+
+plt.style.use('ggplot')
+# Set the font family to serif, with "Times New Roman" as the preferred serif font
+plt.rcParams["font.family"] = "serif"
+plt.rcParams["font.serif"] = ["Times New Roman"] + plt.rcParams["font.serif"]
+
 f1 = 1.1e9
 f2 = 1.6e9
+
 
 f0 = (f1 + f2) / 2
 
@@ -23,11 +30,20 @@ bpf = rfn.elements.LumpedElementFilter(fc=(f1, f2), btype="bandpass", prototype=
 frequency = np.arange(10e6, 3e9, 1e6)
 
 fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(6, 9), height_ratios=[1, 2], constrained_layout=True)
-bpf.plot(11, 21, freq_unit="mhz", frequency=frequency, axes=ax1, tune=True)
+bpf.plot(11, 21, freq_unit="ghz", frequency=frequency, axes=ax1, tune=True)
 ax1.set_ylim([-30, 2])
 
-bpf.plot(11, freq_unit="mhz", fmt="smith", frequency=frequency, axes=ax2, tune=True)
-mplm.line_marker(x=1200, axes=ax1, xlabel=True)
+bpf.plot(11, freq_unit="ghz", fmt="smith", frequency=frequency, axes=ax2, tune=True)
+# mplm.line_marker(x=1200, axes=ax1, xlabel=True)
+
+ax1.set_xlabel("Frequency [GHz]")
+ax1.set_xticks(np.arange(0.6, 2.6, 0.2))
+ax1.set_xlim([0.6, 2.4])
+ax1.set_ylabel("[dB]")
+ax1.set_ylim([-40, 2])
+ax1.grid(True)
+ax1.legend(["S11", "S21"])
+
 
 tuners = [
     dict(component="S1.l1", label="L1 [nH]", multiplier=1e-9),

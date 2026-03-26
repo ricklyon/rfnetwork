@@ -113,12 +113,10 @@ w0 = 0.035
 feed_y = 0.28
 feed_len = 0.08
 
-sk[1] += 0.002
-sk[-2] += 0.002
-
-# wk[1] += 0.002
-# wk[-2] += 0.002
-
+sk[1] += 0.003
+sk[2] += 0.002
+sk[3] += 0.002
+sk[4] += 0.003
 
 
 # x coordinates of the left and right edge of each line
@@ -142,8 +140,11 @@ for i in range(1, K):
     x0_k[i] = x1_k[i-1] + sk[i-1]
     x1_k[i] = x0_k[i] + wk[i]
 
-y1_k[1] += 0.075
-y1_k[-2] += 0.075
+y1_k[1] += 0.04
+y0_k[2] += 0.02
+y1_k[3] -= 0.02
+y0_k[4] += 0.02
+y1_k[5] += 0.04
 
 sbox_w = x1_k[-1] + 0.15
 sbox_len = ymax + 0.15
@@ -226,8 +227,6 @@ s.add_lumped_port(2, port2_face, "z+", r0=100)
 s.add_lumped_port(3, port3_face, "z-", r0=100)
 s.add_lumped_port(4, port4_face, "z+", r0=100)
 
-
-# s.init_mesh(d0 = lam0/20, n0 = 2, d_pec = lam0/20, n_min_pec=4, d_sub=lam0/20, n_min_sub=4, blend_pec=True)
 s.generate_mesh(d0 = 0.02, d_edge = 0.005)
 
 for i in range(0, K):
@@ -241,9 +240,6 @@ for i in range(0, K):
         (x1_k[i], y1_k[i], 0), 
         integration_axis="x+"
     )
-
-
-self = s
 
 plotter = s.render(show_probes=False)
 plotter.camera_position = "xy"
@@ -291,41 +287,40 @@ S11 = sdata[:, 0]
 S21 = sdata[:, 2]
 
 
-fig, axes = plt.subplots(2, 2, figsize=(9, 9))
+fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(6, 9), height_ratios=[1, 2], constrained_layout=True)
 
-ax = axes[1,0]
-rfn.plots.draw_smithchart(ax)
-ax.plot(S11.real, S11.imag)
+rfn.plots.draw_smithchart(ax2)
+ax2.plot(S11.real, S11.imag)
 
-ax = axes[0,1]
-ax.plot(frequency / 1e9, conv.db20_lin(S11))
-ax.set_xlabel("Frequency [GHz]")
-ax.set_xticks(np.arange(0.6, 2.6, 0.2))
-ax.set_xlim([0.6, 2.4])
-ax.set_ylabel("[dB]")
-ax.set_ylim([-40, 2])
-ax.grid(True)
-ax.legend(["S11", "Ref"])
+ax1.plot(frequency / 1e9, conv.db20_lin(S11))
+ax1.plot(frequency / 1e9, conv.db20_lin(S21))
+ax1.set_xlabel("Frequency [GHz]")
+ax1.set_xticks(np.arange(0.6, 2.6, 0.2))
+ax1.set_xlim([0.6, 2.4])
+ax1.set_ylabel("[dB]")
+ax1.set_ylim([-40, 2])
+ax1.grid(True)
+ax1.legend(["S11", "S21"])
 
-ax = axes[0,0]
-ax.plot(frequency / 1e9, conv.db20_lin(S21))
-mplm.line_marker(x = f0/1e9, axes=ax)
-ax.set_xticks(np.arange(0.6, 2.6, 0.2))
-ax.set_xlim([0.6, 2.4])
-ax.set_ylim([-60, 2])
-ax.grid(True)
-ax.set_xlabel("Frequency [GHz]")
-ax.set_ylabel("[dB]")
-ax.legend(["S21", "Ref"])
+# ax = axes[0,0]
+# ax.plot(frequency / 1e9, conv.db20_lin(S21))
+# mplm.line_marker(x = f0/1e9, axes=ax)
+# ax.set_xticks(np.arange(0.6, 2.6, 0.2))
+# ax.set_xlim([0.6, 2.4])
+# ax.set_ylim([-60, 2])
+# ax.grid(True)
+# ax.set_xlabel("Frequency [GHz]")
+# ax.set_ylabel("[dB]")
+# ax.legend(["S21", "Ref"])
 
-ax = axes[1,1]
-ax.plot(frequency / 1e9, np.unwrap(np.angle(S21, deg=True)))
-ax.set_xticks(np.arange(0.6, 2.6, 0.2))
-ax.set_xlim([0.6, 2.4])
-mplm.line_marker(x = f0/1e9, axes=ax)
-ax.set_xlabel("Frequency [GHz]")
-ax.set_ylabel("[deg]")
-ax.legend(["S21", "Ref"])
+# ax = axes[1,1]
+# ax.plot(frequency / 1e9, np.unwrap(np.angle(S21, deg=True)))
+# ax.set_xticks(np.arange(0.6, 2.6, 0.2))
+# ax.set_xlim([0.6, 2.4])
+# mplm.line_marker(x = f0/1e9, axes=ax)
+# ax.set_xlabel("Frequency [GHz]")
+# ax.set_ylabel("[deg]")
+# ax.legend(["S21", "Ref"])
 
 fig.tight_layout()
 plt.show()

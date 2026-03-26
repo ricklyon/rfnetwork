@@ -2850,7 +2850,7 @@ class FDTD_Solver():
                 title="Time [ps]",
                 interaction_event="always",
                 style="modern",
-                fmt="%0.2f"
+                # fmt=lambda x: f"{x:.2f}"
             )
         else:
             # round starting point to nearest ps
@@ -2863,7 +2863,7 @@ class FDTD_Solver():
                 title="Phase [deg]",
                 interaction_event="always",
                 style="modern",
-                fmt="%0.0f"
+                # fmt=lambda x: f"{x:.2f}"
             )
             
 
