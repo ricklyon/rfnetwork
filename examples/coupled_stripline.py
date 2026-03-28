@@ -32,7 +32,7 @@ er =  3.66  # relative permittivity
 # solve box dimensions, inches
 sbox_h = b
 sbox_w = 0.6
-sbox_len = 0.4
+sbox_len = 0.25
 
 # center locations of microstrip lines along y axis
 line1_y = -(sl_w / 2) - (sl_sp / 2)
@@ -183,12 +183,12 @@ Zo, Ze = rfn.utils.coupled_sline_impedance(sl_w, sl_sp, b, er)
 print(f"Even: {Ze:.2f}, Odd: {Zo:.2f}")
 
 fig, ax = plt.subplots()
-ax.plot(frequency / 1e9, conv.z_gamma(S_odd.sel(b=1)).real)
-ax.plot(frequency / 1e9, conv.z_gamma(S_even.sel(b=1)).real)
+ax.plot(frequency / 1e9, conv.z_gamma(S_odd.sel(b=1)).real, color="tab:orange")
+ax.plot(frequency / 1e9, conv.z_gamma(S_even.sel(b=1)).real, color="tab:blue")
 
-plt.ylim([0, 110])
-plt.axhline(y=Zo, linestyle=":", color="tab:blue")
-plt.axhline(y=Ze, linestyle=":", color="tab:orange")
+ax.set_ylim([0, 110])
+ax.axhline(y=Zo, linestyle=":", color="tab:orange")
+ax.axhline(y=Ze, linestyle=":", color="tab:blue")
 ax.set_xlabel("Frequency [GHz]")
 ax.set_ylabel("Impedance [Ohm]")
 ax.legend(["Odd Mode", "Even Mode", "Ref Odd", "Ref Even"])

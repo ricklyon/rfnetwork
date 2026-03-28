@@ -230,7 +230,7 @@ def coupled_sline_impedance(w: float, s: float, b: float, er: float, t: float = 
 def coupled_sline_fringing_cap(w: float, s: float, b: float, er: float):
     """
     Odd and even mode fringing capacitance for edge coupled stripline, per unit length [m].
-    See equations 5.05-24 and 5.05-25 (page 201) and Figure 5.05-13. Units of w, s, and b are arbitrary.
+    See equations 5.05-24 and 5.05-25 (page 201) and Figure 5.05-13, Matthaei. Units of w, s, and b are arbitrary.
 
     Fringing capacitance is a weak function of the trace width. Assumes that both traces are the same width,
     but very little difference is seen in asymmetrical lines.
@@ -252,6 +252,7 @@ def coupled_sline_fringing_cap(w: float, s: float, b: float, er: float):
     Cp = 2 * w / (b)
     # fringing capacitance on the outer edges (not between the two lines), figure 5.05-10b, for t=0.
     # or Balanis Advanced Engineering Electromagnetics, 2nd edition, equation 8-201
+    # Cf = (2 / np.pi) * np.log((1 / (1 - t/b) + 1)) - (t / (np.pi * b)) * np.log((1 / (1 - t/b)**2 - 1))
     Cf = 0.44
     # solve for even and odd fringing capacitances, equation 5.05-24 and 5.05-25
     Cf_e = (Ce / 2) - Cp - Cf

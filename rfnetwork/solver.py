@@ -1783,18 +1783,18 @@ class FDTD_Solver():
         -------
         pv.Plotter
         """
-        self.check_mesh()
-
-        gx, gy, gz = self.g_edges
-        gx_h, gy_h, gz_h = self.g_cells
-        
-        grid = pv.RectilinearGrid(gx, gy, gz)
         
         if plotter is None:
             plotter = pv.Plotter(off_screen=bool(axes is not None))
         
         # add grid
         if show_mesh:
+            self.check_mesh()
+
+            gx, gy, gz = self.g_edges
+            gx_h, gy_h, gz_h = self.g_cells
+            grid = pv.RectilinearGrid(gx, gy, gz)
+            
             # mesh is not easily viewed unless the parallel projection is used. This makes all the grid lines
             # along an axis line up if the camera is aligned with a cardinal plane.
             plotter.enable_parallel_projection()
