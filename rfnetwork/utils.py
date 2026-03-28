@@ -192,22 +192,31 @@ def ms_z_to_width(z: float, er: float, d: float) -> float:
         return wd12 * d
 
 
-def coupled_sline_impedance(w: float, s: float, b: float, er: float):
+def coupled_sline_impedance(w: float, s: float, b: float, er: float, t: float = 0):
     """
     Odd and even mode impedance for coupled stripline. Units of w, s and b are arbitrary.
-
-    Assumes that thickness is zero.
     """
+
+    # this version in Modern RF and Microwave Filter Design section 3.7.1, Protap Pramanick
+    # seems to be more accurate for the even mode than Matthaei
+    Ae = (np.log(2) + np.log(1 + np.tanh(np.pi * s / (2 * b)))) / (2 * np.pi * np.log(2))
+    Ao = (np.log(2) + np.log(1 + ( 1 / np.tanh(np.pi * s / (2 * b))))) / (2 * np.pi * np.log(2))
+
+    Cf = 2 * np.log((2 * b - t) / (b - t)) - (t / b) * ((t * (2 * b - t)) / (b - t)**2)
+
+    Z0_e = (30 * np.pi * (b - t)) / (np.sqrt(er) * (w + Ae * b * Cf))
+    Z0_o = (30 * np.pi * (b - t)) / (np.sqrt(er) * (w + Ao * b * Cf))
+
     # reference odd, even mode impedances.
     # page 174 in Matthaei, even and odd mode impedances of coupled strip line
-    k_e = np.tanh((np.pi / 2) * (w / b)) * np.tanh((np.pi / 2) * (w + s) / b)
-    kp_e = np.sqrt(1 - (k_e **2))
+    # k_e = np.tanh((np.pi / 2) * (w / b)) * np.tanh((np.pi / 2) * (w + s) / b)
+    # kp_e = np.sqrt(1 - (k_e **2))
 
-    k_o = np.tanh((np.pi / 2) * (w / b)) * (1 / np.tanh((np.pi / 2) * (w + s) / b))
-    kp_o = np.sqrt(1 - (k_o **2))
+    # k_o = np.tanh((np.pi / 2) * (w / b)) * (1 / np.tanh((np.pi / 2) * (w + s) / b))
+    # kp_o = np.sqrt(1 - (k_o **2))
 
-    Z0_e = ((30 * np.pi) / (np.sqrt(er))) * (ellipk(kp_e) / ellipk(k_e))
-    Z0_o = ((30 * np.pi) / (np.sqrt(er))) * (ellipk(kp_o) / ellipk(k_o))
+    # Z0_e = ((30 * np.pi) / (np.sqrt(er))) * (ellipk(kp_e) / ellipk(k_e))
+    # Z0_o = ((30 * np.pi) / (np.sqrt(er))) * (ellipk(kp_o) / ellipk(k_o))
 
     # mutual capacitance
     # Z0_e = 1 / vp*Ce

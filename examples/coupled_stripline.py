@@ -31,8 +31,8 @@ er =  3.66  # relative permittivity
 
 # solve box dimensions, inches
 sbox_h = b
-sbox_w = 0.3
-sbox_len = 0.25
+sbox_w = 0.6
+sbox_len = 0.4
 
 # center locations of microstrip lines along y axis
 line1_y = -(sl_w / 2) - (sl_sp / 2)
@@ -132,7 +132,7 @@ plot_mon_kwargs = dict(
     style=["vectors", "surface"],  # plot both vector field and magnitude colormap
     max_vector_len=0.005,  # keep vectors shorter than 5mils
     opacity="linear",   # fade smaller field components
-    init_time=100,  # start at 165ps
+    init_time=100,  # start at 100ps
     show_mesh=False,
     show_rulers=False,
     camera_position=cpos,
@@ -175,9 +175,9 @@ fig.tight_layout(pad=0)
 # ------------------------
 
 # Compare even and odd impedance with this online solver:
-# https://wcalc.sourceforge.net/cgi-bin/coupled_microstrip.cgi
-# ref_even_z = 101.847
-# ref_odd_z = 45.0888
+# https://wcalc.sourceforge.net/cgi-bin/coupled_stripline.cgi
+# ref_even_z = 72.5
+# ref_odd_z = 48.2
 
 Zo, Ze = rfn.utils.coupled_sline_impedance(sl_w, sl_sp, b, er)
 print(f"Even: {Ze:.2f}, Odd: {Zo:.2f}")
