@@ -57,7 +57,7 @@ sbox = pv.Cube(
 )
 
 s = rfn.FDTD_Solver(sbox)
-s.add_dielectric(substrate, er=er, style=dict(opacity=0.2))
+s.add_dielectric(substrate, er=er, style=dict(opacity=0.0))
 
 # add lines
 for i, y in enumerate((line1_y, line2_y)):
@@ -69,18 +69,14 @@ for i, y in enumerate((line1_y, line2_y)):
     s.add_conductor(ms_trace, style=dict(color="gold"))
 
     # add lumped ports
-    port_face1 = pv.Rectangle([
-        (ms_x[0], y - sl_w/2, 0),
-        (ms_x[0], y + sl_w/2, 0),
+    port_face = pv.Rectangle([
+        (ms_x[0], y - sl_w/2, -b/2),
         (ms_x[0], y + sl_w/2, -b/2),
-    ])
-    port_face2 = pv.Rectangle([
-        (ms_x[0], y - sl_w/2, 0),
-        (ms_x[0], y + sl_w/2, 0),
         (ms_x[0], y + sl_w/2, b/2),
     ])
-    s.add_lumped_port(i*2 + 1, port_face1, integration_axis="z-", r0=100)
-    s.add_lumped_port(i*2 + 2, port_face2, integration_axis="z+", r0=100)
+
+    integration_line = pv.Line((ms_x[0], y, -b/2), (ms_x[0], y, 0))
+    s.add_lumped_port(i + 1, port_face, integration_line=integration_line)
 
 # assign PML layers, omitting the x- side near the ports
 s.assign_PML_boundaries("x+", n_pml=5)
@@ -94,15 +90,16 @@ for i, y in enumerate((line1_y, line1_y)):
     p1 = (ms_x[0], y + sl_w/2, 0)
     p2 = (ms_x[1], y + sl_w/2, 0)
 
-    s.edge_correction(p1, p2, integration_axis="y+")
+    s.edge_correction(p1, p2, integration_line="y+")
 
     p1 = (ms_x[0], y - sl_w/2, 0)
     p2 = (ms_x[1], y - sl_w/2, 0)
 
-    s.edge_correction(p1, p2, integration_axis="y-")
+    s.edge_correction(p1, p2, integration_line="y-")
 
 # add 2D field monitor normal to the x-axis at the center of the grid
 s.add_field_monitor("mon1", "e_total", axis="x", position=0, n_step=10)
+
 
 # %%
 # Setup Excitations
@@ -122,13 +119,10 @@ ax.set_ylabel("Voltage [mV]")
 # Solve Even Mode 
 # ------------------------
 
-fig, (ax1) = plt.subplots()
-ax1.set_title("Even Mode")
-
 # set up camera to view the fields near the ports, looking down the x axis
 cpos = pv.CameraPosition(
-    position=(-0.15, -0.05, 0.04),
-    focal_point=(0, 0, 0.01),
+    position=(-0.15, -0.05, 0.05),
+    focal_point=(0, 0, 0.00),
     viewup=(0, 0.0, 1.0),
 )
 
@@ -146,10 +140,15 @@ plot_mon_kwargs = dict(
 )
 
 # run even mode, same waveform at both port 1 and 2
-s.assign_excitation(vsrc, [1, 2, 3, 4])
+s.assign_excitation(vsrc, [1, 2])
+
+
 s.solve(n_threads=4, show_progress=False)
+
 S_even = s.get_sparameters(frequency)
 
+fig, (ax1) = plt.subplots()
+ax1.set_title("Even Mode")
 s.plot_monitor(**plot_mon_kwargs, axes=ax1)
 
 fig.tight_layout(pad=0)
@@ -158,20 +157,18 @@ fig.tight_layout(pad=0)
 # Solve Odd Mode 
 # ------------------------
 
-fig, (ax2) = plt.subplots()
-ax2.set_title("Odd Mode")
-
 # setup opposite polarity waveforms at each port
 s.reset_excitations()
-s.assign_excitation(vsrc, [1, 2])
-s.assign_excitation(-vsrc, [3, 4])
+s.assign_excitation(vsrc, 1)
+s.assign_excitation(-vsrc, 2)
 s.solve(n_threads=4, show_progress=False)
 S_odd = s.get_sparameters(frequency)
 
+fig, (ax2) = plt.subplots()
+ax2.set_title("Odd Mode")
 s.plot_monitor(**plot_mon_kwargs, axes=ax2)
 
 fig.tight_layout(pad=0)
-
 
 # %%
 # Coupled Line Impedance

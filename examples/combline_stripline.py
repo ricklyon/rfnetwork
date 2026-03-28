@@ -197,35 +197,21 @@ s.add_conductor(feed_2, style=dict(color="gold"))
 
 
 port1_face = pv.Rectangle([
-    (x0_k[1] - feed_len, feed_y-w0/2, 0),
-    (x0_k[1] - feed_len, feed_y+w0/2, 0),
+    (x0_k[1] - feed_len, feed_y-w0/2, -sbox_h/2),
     (x0_k[1] - feed_len, feed_y+w0/2, -sbox_h/2),
-])
-
-port2_face = pv.Rectangle([
-    (x0_k[1] - feed_len, feed_y-w0/2, 0),
-    (x0_k[1] - feed_len, feed_y+w0/2, 0),
     (x0_k[1] - feed_len, feed_y+w0/2, sbox_h/2),
 ])
 
-
-port3_face = pv.Rectangle([
-    (x1_k[-2]+feed_len, feed_y-w0/2, 0),
-    (x1_k[-2]+feed_len, feed_y+w0/2, 0),
+port2_face = pv.Rectangle([
+    (x1_k[-2]+feed_len, feed_y-w0/2, -sbox_h/2),
     (x1_k[-2]+feed_len, feed_y+w0/2, -sbox_h/2),
-])
-
-
-port4_face = pv.Rectangle([
-    (x1_k[-2]+feed_len, feed_y-w0/2, 0),
-    (x1_k[-2]+feed_len, feed_y+w0/2, 0),
     (x1_k[-2]+feed_len, feed_y+w0/2, sbox_h/2),
 ])
 
-s.add_lumped_port(1, port1_face, "z-", r0=100)
-s.add_lumped_port(2, port2_face, "z+", r0=100)
-s.add_lumped_port(3, port3_face, "z-", r0=100)
-s.add_lumped_port(4, port4_face, "z+", r0=100)
+integration_line1 = pv.Line((x0_k[1] - feed_len, feed_y, -sbox_h/2), (x0_k[1] - feed_len, feed_y, 0))
+integration_line2 = pv.Line((x1_k[-2] + feed_len, feed_y, -sbox_h/2), (x1_k[-2] + feed_len, feed_y, 0))
+s.add_lumped_port(1, port1_face, integration_line=integration_line1)
+s.add_lumped_port(2, port2_face, integration_line=integration_line2)
 
 s.generate_mesh(d0 = 0.02, d_edge = 0.005)
 
@@ -233,12 +219,12 @@ for i in range(0, K):
     s.edge_correction(
         (x0_k[i], y0_k[i], 0), 
         (x0_k[i], y1_k[i], 0), 
-        integration_axis="x-"
+        integration_line="x-"
     )
     s.edge_correction(
         (x1_k[i], y0_k[i], 0), 
         (x1_k[i], y1_k[i], 0), 
-        integration_axis="x+"
+        integration_line="x+"
     )
 
 plotter = s.render(show_probes=False)
@@ -271,7 +257,7 @@ plt.plot(vsrc)
 
 frequency: np.ndarray = np.arange(0.5e9, 3e9, 2e6)
 
-s.assign_excitation(vsrc, (1, 2))
+s.assign_excitation(vsrc, 1)
 s.solve(n_threads=4)
 self = s
 
@@ -284,7 +270,7 @@ self = s
 
 sdata = s.get_sparameters(frequency, 1, downsample=True)
 S11 = sdata[:, 0]
-S21 = sdata[:, 2]
+S21 = sdata[:, 1]
 
 
 fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(6, 9), height_ratios=[1, 2], constrained_layout=True)

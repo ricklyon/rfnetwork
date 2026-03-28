@@ -69,7 +69,7 @@ for i, ms_y in enumerate((ms1_y, ms2_y)):
         (ms_x[0], ms_y + ms_w/2, sub_h),
         (ms_x[0], ms_y + ms_w/2, 0),
     ])
-    s.add_lumped_port(i+1, port_face, integration_axis="z-")
+    s.add_lumped_port(i+1, port_face, integration_line="z-")
 
 # assign PML layers, omitting the x- side near the ports
 s.assign_PML_boundaries("x+", "z+", "y-", "y+", n_pml=5)
@@ -83,12 +83,12 @@ for i, ms_y in enumerate((ms1_y, ms2_y)):
     p1 = (ms_x[0], ms_y + ms_w/2, sub_h)
     p2 = (ms_x[1], ms_y + ms_w/2, sub_h)
 
-    s.edge_correction(p1, p2, integration_axis="y+")
+    s.edge_correction(p1, p2, integration_line="y+")
 
     p1 = (ms_x[0], ms_y - ms_w/2, sub_h)
     p2 = (ms_x[1], ms_y - ms_w/2, sub_h)
 
-    s.edge_correction(p1, p2, integration_axis="y-")
+    s.edge_correction(p1, p2, integration_line="y-")
 
 # add 2D field monitor normal to the x-axis at the center of the grid
 s.add_field_monitor("mon1", "e_total", axis="x", position=0, n_step=10)
