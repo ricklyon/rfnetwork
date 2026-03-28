@@ -87,21 +87,21 @@ for i, ms_z in enumerate((ms1_z, ms2_z)):
     s.edge_correction(
         (0, ms_y[0], ms_z[0]), 
         (0, ms_y[0], ms_z[1]), 
-        integration_axis="y-"
+        integration_line="y-"
     )
 
     # right edge
     s.edge_correction(
         (0, ms_y[1], ms_z[0]), 
         (0, ms_y[1], ms_z[1]), 
-        integration_axis="y+"
+        integration_line="y+"
     )
 
     # top/lower edge
     s.edge_correction(
         (0, ms_y[0], ms_z[i]), 
         (0, ms_y[1], ms_z[i]), 
-        integration_axis=("z-" if i == 0 else "z+")
+        integration_line=("z-" if i == 0 else "z+")
     )
 
 

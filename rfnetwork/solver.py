@@ -1141,7 +1141,8 @@ class FDTD_Solver():
             p["src"] = None
 
         for p in self.ports_inv:
-            p["src"] = None
+            if p is not None:
+                p["src"] = None
 
 
     def solve(self, n_threads: int = 4, show_progress: bool = True):
