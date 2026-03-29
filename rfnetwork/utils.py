@@ -225,9 +225,32 @@ def coupled_sline_impedance(w: float, s: float, b: float, er: float, t: float = 
 
     return Z0_o, Z0_e
 
+def coupled_sline_fringing_cap(s: float, b: float, er: float):
+    # from https://ieeexplore.ieee.org/document/1124973
+    Cfe = (2 / np.pi) * np.log( 1 + np.tanh(np.pi * s / (2 * b)))
+    Cfo = (2 / np.pi) * np.log( 1 + (1 / np.tanh(np.pi * s / (2 * b))))
 
+    # this method returns the same result but requires the width
+    # Z0_o, Z0_e = coupled_sline_impedance(w, s, b, er)
+    # vp = const.c0 / np.sqrt(er)
+    # Ce = 1 / (Z0_e * vp * eps)
+    # Co = 1 / (Z0_o * vp * eps)
 
-def coupled_sline_fringing_cap(w: float, s: float, b: float, er: float):
+    # # parallel plate capacitance, normalized by epsilon
+    # Cp = 2 * w / (b)
+    # # fringing capacitance on the outer edges (not between the two lines), figure 5.05-10b, for t=0.
+    # # or Balanis Advanced Engineering Electromagnetics, 2nd edition, equation 8-201
+    # # Cf = (2 / np.pi) * np.log((1 / (1 - t/b) + 1)) - (t / (np.pi * b)) * np.log((1 / (1 - t/b)**2 - 1))
+    # Cf = 0.44
+    # # solve for even and odd fringing capacitances, equation 5.05-24 and 5.05-25
+    # Cf_e = (Ce / 2) - Cp - Cf
+    # Cf_o = (Co / 2) - Cp - Cf
+
+    # return unnormalized values
+    eps = er * const.e0
+    return Cfo * eps, Cfe * eps
+
+def coupled_sline_fringing_cap_old(w: float, s: float, b: float, er: float):
     """
     Odd and even mode fringing capacitance for edge coupled stripline, per unit length [m].
     See equations 5.05-24 and 5.05-25 (page 201) and Figure 5.05-13, Matthaei. Units of w, s, and b are arbitrary.
@@ -237,6 +260,8 @@ def coupled_sline_fringing_cap(w: float, s: float, b: float, er: float):
 
     Assumes that thickness is zero.
     """
+    eps = er * const.e0
+
     Z0_o, Z0_e = coupled_sline_impedance(w, s, b, er)
 
     # even ad odd mode capacitances, normalized by epsilon
@@ -245,8 +270,8 @@ def coupled_sline_fringing_cap(w: float, s: float, b: float, er: float):
     # Co = Ca + 2 Cab
     # Ce = Ca = Cb
     vp = const.c0 / np.sqrt(er)
-    Ce = 1 / (Z0_e * vp * const.e0 * er)
-    Co = 1 / (Z0_o * vp * const.e0 * er)
+    Ce = 1 / (Z0_e * vp * eps)
+    Co = 1 / (Z0_o * vp * eps)
 
     # parallel plate capacitance, normalized by epsilon
     Cp = 2 * w / (b)
@@ -259,7 +284,7 @@ def coupled_sline_fringing_cap(w: float, s: float, b: float, er: float):
     Cf_o = (Co / 2) - Cp - Cf
 
     # return unnormalized capacitance in farads
-    eps = er * const.e0
+    
     return Cf_o * eps, Cf_e * eps
 
 
