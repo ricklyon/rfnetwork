@@ -8,13 +8,10 @@ Examples of a simple wilkison and branchline combiner.
 import rfnetwork as rfn
 import numpy as np
 import matplotlib.pyplot as plt
-import matplotlib as mpl 
-import time
 from pathlib import Path
 
-DATA_DIR = Path.cwd() / 'data'
-
-mpl.rc("legend", loc="lower right")
+# set matplotlib style
+plt.style.use(rfn.DEFAULT_STYLE)
 
 # 50 ohm ms line on RO4350B substrate
 msline50 = rfn.elements.MSLine(

@@ -11,9 +11,14 @@ import numpy as np
 import matplotlib.pyplot as plt
 import mpl_markers as mplm
 
-np.set_printoptions(suppress=True, threshold=12)
+# set matplotlib style
+plt.style.use(rfn.DEFAULT_STYLE)
 
-dir_ = Path().cwd()# / 'examples'
+try:
+    dir_ = Path(__file__).parent
+except:
+    dir_ = Path().cwd() / "examples"
+
 DATA_DIR = dir_ / "data/PD55008E_S_parameter"
 
 # frequency range for plots
@@ -118,7 +123,6 @@ lines1 = n.plot_probe(
 
 
 ln_s11 = n.plot(11, fmt="smith", tune=True, axes=axes["s11"], frequency=frequency)
-axes["s11"].legend(fontsize=8)
 
 smithchart_marker(axes["s11"], f0, lines=lines1, ylabel=False)
 smithchart_marker(axes["s11"], f0, lines=ln_s11)
@@ -132,11 +136,9 @@ lines2 = n.plot_probe(
 )
 
 ln_s22 = n.plot(22, fmt="smith", tune=True, axes=axes["s22"], frequency=frequency) 
-axes["s22"].legend(fontsize=8)
 
 smithchart_marker(axes["s22"], f0, lines=lines2, ylabel=False)
 smithchart_marker(axes["s22"], f0, lines=ln_s22)
-
 
 im = plt.imread(dir_ / "data/img/pa_tuning.png")
 axes["im"].imshow(im)

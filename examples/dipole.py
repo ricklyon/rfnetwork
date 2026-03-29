@@ -13,6 +13,8 @@ import pyvista as pv
 import rfnetwork as rfn
 import mpl_markers as mplm
 
+# set matplotlib style
+plt.style.use(rfn.DEFAULT_STYLE)
 
 # %%
 # User defined Parameters [inches]
@@ -188,7 +190,6 @@ ax.set_ylim([-20, 0])
 ax.set_xlabel("Frequency [GHz]")
 ax.set_ylabel("[dB]")
 ax.legend(["S11"])
-ax.grid()
 
 # %%
 # Plot Input Impedance
@@ -197,7 +198,7 @@ ax.grid()
 fig, ax = plt.subplots()
 ax2 = ax.twinx()
 ln1 = ax.plot(frequency / 1e9, conv.z_gamma(S11).real, label=r"Re($Z_{in}$)")
-ln2 = ax2.plot(frequency / 1e9, conv.z_gamma(S11).imag, color="tab:orange", label=r"Im($Z_{in}$)")
+ln2 = ax2.plot(frequency / 1e9, conv.z_gamma(S11).imag, color="C1", label=r"Im($Z_{in}$)")
 mplm.line_marker(x = 10, axes=ax)
 ax.grid()
 

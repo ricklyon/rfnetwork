@@ -5,20 +5,22 @@ Yagi Antenna
 Simulate UHF Yagi antenna and plot far-field gain.
 """
 
+from pathlib import Path
 import numpy as np 
 import matplotlib.pyplot as plt 
-from rfnetwork import const, conv
+from rfnetwork import conv
 import pyvista as pv
-import sys
 
 import rfnetwork as rfn
 import mpl_markers as mplm
 
-np.set_printoptions(suppress=True)
+# set matplotlib style
+plt.style.use(rfn.DEFAULT_STYLE)
 
-# pv.set_jupyter_backend("trame")
-sys.argv = sys.argv[0:1]
-
+try:
+    dir_ = Path(__file__).parent
+except:
+    dir_ = Path().cwd() / "examples"
 
 # %%
 # User defined Parameters [inches]
@@ -33,16 +35,15 @@ wire_d = 0.2
 # gap between driver elements
 gap = 0.2
 
+# driver length
 driver_len = 0.88 * (lam0 / 2)
 
-# reflector_len = lam0 * 0.482
-# director1_len = lam0 * 0.428
-# director2_len = lam0 * 0.424
-
+# element lengths
 reflector_len = lam0 * 0.49
 director1_len = lam0 * 0.428
 director2_len = lam0 * 0.416
 
+# element spacing
 sp = 0.195 * lam0
 
 # %%
@@ -50,9 +51,9 @@ sp = 0.195 * lam0
 # ------------------------
 
 def add_element(s: rfn.FDTD_Solver, x_loc: float, length: float, gap=0, resolution=4):
+    """ Add a parasitic element to the yagi model at a x location with given length. """
 
     for z_center in (gap / 2 + (length / 4), -gap / 2 - (length / 4)):
-
         element = pv.Cylinder(
             center = (x_loc, 0, z_center), 
             direction=(0, 0, 1), 
@@ -60,27 +61,24 @@ def add_element(s: rfn.FDTD_Solver, x_loc: float, length: float, gap=0, resoluti
             height = length / 2, 
             resolution=resolution
         )
-
         s.add_conductor(element, style=dict(color="gold"))
 
 # solve box
 sbox = pv.Cube(center=(sp/2, 0, 0), x_length=lam0 * 1.1, y_length=lam0 / 2, z_length=lam0)
 
-# port between upper and lower leg
-port1_face = pv.Rectangle([
-    (0, -wire_d/2, gap/2),
-    (0, wire_d/2, gap/2),
-    (0, wire_d/2, -gap/2)
-])
-
+# create model and add elements
 s = rfn.FDTD_Solver(sbox)
-
-
 add_element(s, x_loc=0, length=driver_len, gap=gap)
 add_element(s, x_loc=-sp, length=reflector_len)
 add_element(s, x_loc=sp, length=director1_len)
 add_element(s, x_loc=2.1*sp, length=director2_len)
 
+# add port in driver element
+port1_face = pv.Rectangle([
+    (0, -wire_d/2, gap/2),
+    (0, wire_d/2, gap/2),
+    (0, wire_d/2, -gap/2)
+])
 s.add_lumped_port(1, port1_face, "z-")
 
 # PML boundaries are required on all sides to add a far-field monitor
@@ -90,25 +88,23 @@ s.generate_mesh(d0 = 0.5, d_edge=0.1)
 # setup wide-band far-field monitor
 s.add_farfield_monitor(frequency=f0)
 
-# # near-field monitor
-# s.add_field_monitor("e_tot", "e_total", "y", 0, n_step=10)
+# show model rendering
+cpos = pv.CameraPosition(
+    position=(25, 25, 10),
+    focal_point=(5, 0, 0),
+    viewup=(0, 0.0, 1.0),
+)
 
-
-plotter = s.render(show_mesh=True)
-plotter.show()
+fig, ax = plt.subplots()
+plotter = s.render(show_mesh=False, show_rulers=False, axes=ax, camera_position=cpos)
 
 # %%
 # Setup Excitation and Solve
 # ------------------------
 vsrc = s.gaussian_source(width=800e-12, t0=500e-12, t_len=30e-9)
-# vsrc = s.gaussian_modulated_source(f0, width=10e-9, t0=5e-9, t_len=20e-9)
-# plt.plot(vsrc)
 
 s.assign_excitation(vsrc, 1)
 s.solve(n_threads=4)
-
-# s.plot_monitor(["e_tot"], zoom=1.1, opacity=1, camera_position="xz").show()
-
 
 # %%
 # Principal Plane Cut at phi=0°
@@ -144,7 +140,7 @@ for ax in (ax1, ax2):
 
 ax1.set_xlabel(r"$\theta$ [deg], $\phi$=0°")
 ax2.set_xlabel(r"$\phi$ [deg], $\theta$=90°")
-mplm.line_marker(x=np.pi/2, axes=ax1)
+mplm.line_marker(x=np.pi/2, axes=ax1, xline=False)
 
 fig.tight_layout()
 
@@ -160,8 +156,6 @@ ax.plot(frequency / 1e6, conv.db20_lin(S11))
 ax.set_ylim([-20, 5])
 ax.set_xlabel("Frequency [MHz]")
 ax.set_ylabel("[dB]")
-# ax.legend(["S11"])
-mplm.line_marker(x=f0 / 1e6, ylabel=False)
-ax.grid()
 
+mplm.line_marker(x=f0 / 1e6, ylabel=False)
 plt.show()

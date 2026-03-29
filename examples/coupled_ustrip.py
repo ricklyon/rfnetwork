@@ -12,6 +12,9 @@ import pyvista as pv
 import rfnetwork as rfn
 import mpl_markers as mplm
 
+# set matplotlib style
+plt.style.use(rfn.DEFAULT_STYLE)
+
 frequency = np.arange(5e9, 15e9, 10e6)
 
 # %%

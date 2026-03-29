@@ -2,27 +2,23 @@
 Coupled Microstrip Lines
 ============
 
-Analyze even and odd mode impedance of coupled microstrip lines.
+Analyze even and odd mode impedance of coupled strip lines.
 """
 
 import numpy as np 
 import matplotlib.pyplot as plt 
-from rfnetwork import const, conv, utils
+from rfnetwork import conv
 import pyvista as pv
 import rfnetwork as rfn
 import mpl_markers as mplm
-import sys
 
-frequency = np.arange(5e9, 15e9, 10e6)
-
-pv.set_jupyter_backend("trame")
-sys.argv = sys.argv[0:1]
-
+# set matplotlib style
+plt.style.use(rfn.DEFAULT_STYLE)
 
 # %%
 # Design Parameters 
 # ------------------------
-# sphinx_gallery_thumbnail_number = -2
+# sphinx_gallery_thumbnail_number = 1
 
 sl_w = 0.022  # trace width
 sl_sp = 0.013  # trace spacing
@@ -40,6 +36,8 @@ line2_y = (sl_w / 2) + (sl_sp / 2)
 
 # end locations of lines along x axis, lines terminate in PML region 
 ms_x = (-sbox_len/2 + 0.1, sbox_len/2)
+
+frequency = np.arange(5e9, 15e9, 10e6)
 
 # %%
 # Create 3D Model
@@ -141,8 +139,6 @@ plot_mon_kwargs = dict(
 
 # run even mode, same waveform at both port 1 and 2
 s.assign_excitation(vsrc, [1, 2])
-
-
 s.solve(n_threads=4, show_progress=False)
 
 S_even = s.get_sparameters(frequency)
@@ -183,12 +179,12 @@ Zo, Ze = rfn.utils.coupled_sline_impedance(sl_w, sl_sp, b, er)
 print(f"Even: {Ze:.2f}, Odd: {Zo:.2f}")
 
 fig, ax = plt.subplots()
-ax.plot(frequency / 1e9, conv.z_gamma(S_odd.sel(b=1)).real, color="tab:orange")
-ax.plot(frequency / 1e9, conv.z_gamma(S_even.sel(b=1)).real, color="tab:blue")
+ax.plot(frequency / 1e9, conv.z_gamma(S_odd.sel(b=1)).real)
+ax.plot(frequency / 1e9, conv.z_gamma(S_even.sel(b=1)).real)
 
 ax.set_ylim([0, 110])
-ax.axhline(y=Zo, linestyle=":", color="tab:orange")
-ax.axhline(y=Ze, linestyle=":", color="tab:blue")
+ax.axhline(y=Zo, linestyle=":", color="C0")
+ax.axhline(y=Ze, linestyle=":", color="C1")
 ax.set_xlabel("Frequency [GHz]")
 ax.set_ylabel("Impedance [Ohm]")
 ax.legend(["Odd Mode", "Even Mode", "Ref Odd", "Ref Even"])

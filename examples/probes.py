@@ -17,7 +17,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 import mpl_markers as mplm
 
-np.set_printoptions(suppress=True, threshold=12)
+# set matplotlib style
+plt.style.use(rfn.DEFAULT_STYLE)
 
 # frequency range for plots
 frequency = np.arange(350, 550, 5) * 1e6 

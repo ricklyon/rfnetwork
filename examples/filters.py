@@ -9,6 +9,8 @@ import rfnetwork as rfn
 import numpy as np
 import matplotlib.pyplot as plt
 
+# set matplotlib style
+plt.style.use(rfn.DEFAULT_STYLE)
 
 # %%
 # Bandstop Filter
@@ -74,3 +76,59 @@ ax.xaxis.set_major_formatter(lambda x, pos: f"{x:.2f}")
 ax.legend([f"n={n}" for n in n_list])
 ax.set_xlabel(r"$|\frac{\omega}{\omega_c}| - 1$", fontsize=13)
 ax.set_ylabel("Attenuation [dB]")
+
+
+# %%
+# Filter Tuning
+# ----------------
+# Interactively tune a lumped element band-pass filter. 
+
+# This uses the same prototype values as the combline_stripline example. The tuning parameters can give a sense
+# for how the elements of the real filter affect the filter response.
+
+f1 = 1.1e9
+f2 = 1.6e9
+
+g = rfn.utils.chebyshev_prototype(5, 0.25)
+print(g)
+
+bpf = rfn.elements.LumpedElementFilter(fc=(f1, f2), btype="bandpass", prototype=g)
+
+frequency = np.arange(10e6, 3e9, 1e6)
+
+fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(6, 9), height_ratios=[1, 2], constrained_layout=True)
+bpf.plot(11, 21, freq_unit="ghz", frequency=frequency, axes=ax1, tune=True)
+ax1.set_ylim([-30, 2])
+
+bpf.plot(11, freq_unit="ghz", fmt="smith", frequency=frequency, axes=ax2, tune=True)
+
+ax1.set_xlabel("Frequency [GHz]")
+ax1.set_xticks(np.arange(0.6, 2.6, 0.2))
+ax1.set_xlim([0.6, 2.4])
+ax1.set_ylabel("[dB]")
+ax1.set_ylim([-40, 2])
+ax1.grid(True)
+ax1.legend(["S11", "S21"])
+
+tuners = [
+    dict(component="S1.l1", label="L1 [nH]", multiplier=1e-9),
+    dict(component="S1.c2", label="C1 [pF]", multiplier=1e-12),
+    dict(component="P2.l1", label="L2 [nH]", multiplier=1e-9),
+    dict(component="P2.c2", label="C2 [pF]", multiplier=1e-12),
+    dict(component="S3.l1", label="L3 [nH]", multiplier=1e-9),
+    dict(component="S3.c2", label="C3 [pF]", multiplier=1e-12),
+    dict(component="P4.l1", label="L4 [nH]", multiplier=1e-9),
+    dict(component="P4.c2", label="C4 [pF]", multiplier=1e-12),
+    dict(component="S5.l1", label="L5 [nH]", multiplier=1e-9),
+    dict(component="S5.c2", label="C5 [pF]", multiplier=1e-12),
+]
+
+# start the tuner (turned off for the readthedocs runner)
+# bpf.tune(tuners)
+
+# %%
+# .. image:: ../_static/img/filter_tuning_window.png
+#
+
+# print tuned values (unless tune was canceled, then this just shows the initial values)
+print(bpf.state)

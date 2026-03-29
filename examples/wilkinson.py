@@ -15,10 +15,13 @@ from pathlib import Path
 import rfnetwork as rfn
 import mpl_markers as mplm
 
-dir_ = Path().cwd()
+# set matplotlib style
+plt.style.use(rfn.DEFAULT_STYLE)
 
-# pv.set_jupyter_backend("trame")
-# sys.argv = sys.argv[0:1]
+try:
+    dir_ = Path(__file__).parent
+except:
+    dir_ = Path().cwd() / "examples"
 
 # %%
 # Design Parameters 
@@ -177,7 +180,7 @@ wilk.plot(21, 31, fmt="ang_unwrap", axes=ax3)
 mplm.line_marker(x=f0/1e9, axes=ax2)
 mplm.line_marker(x=f0/1e9, axes=ax3)
 fig.tight_layout()
-
+plt.show()
 
 # %%
 # Visualize Fields

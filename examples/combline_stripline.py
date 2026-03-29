@@ -20,21 +20,18 @@ import pyvista as pv
 from np_struct import ldarray
 import rfnetwork as rfn
 
-# set the pyvista backend
-import sys
-pv.set_jupyter_backend("trame")
-sys.argv = sys.argv[0:1]
-
 # set matplotlib style
 plt.style.use(rfn.DEFAULT_STYLE)
 
-dir_ = Path(__file__).parent
-np.set_printoptions(suppress=True)
+try:
+    dir_ = Path(__file__).parent
+except:
+    dir_ = Path().cwd() / "examples"
 
 # %%
 # Design Parameters 
 # ------------------------
-# sphinx_gallery_thumbnail_number = -2
+# sphinx_gallery_thumbnail_number = 1
 
 er = 3.66  # dielectric constant
 b = 0.06  # substrate height, inches
@@ -263,15 +260,16 @@ sdata_ref = ldarray.load(dir_ / "data/combline_fine_mesh.npy")
 S11_ref = sdata_ref.sel(b=1)
 S21_ref = sdata_ref.sel(b=2)
 
+# plot smithchart and log plot
 fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(6, 9), height_ratios=[1, 2])
-
 rfn.plots.draw_smithchart(ax2)
 ax2.plot(S11.real, S11.imag)
 
 ax1.plot(frequency / 1e9, rfn.conv.db20_lin(S11))
 ax1.plot(frequency / 1e9, rfn.conv.db20_lin(S21))
-ax1.plot(frequency / 1e9, rfn.conv.db20_lin(S11_ref), linestyle=":")
-ax1.plot(frequency / 1e9, rfn.conv.db20_lin(S21_ref), linestyle=":")
+# show finer mesh results in a lighter line style
+ax1.plot(frequency / 1e9, rfn.conv.db20_lin(S11_ref), alpha=0.3, color="C0")
+ax1.plot(frequency / 1e9, rfn.conv.db20_lin(S21_ref), alpha=0.3, color="C1")
 
 ax1.set_xlabel("Frequency [GHz]")
 ax1.set_xticks(np.arange(0.6, 2.6, 0.2))
