@@ -4,7 +4,10 @@ import numpy as np
 from scipy.special import ellipk
 from scipy import signal
 from np_struct import ldarray
+from scipy import optimize
+
 from .core.units import const, conv
+
 
 
 def dtft(xn: np.ndarray, frequency: np.ndarray, fs: float, downsample: bool = False) -> np.ndarray:
@@ -649,6 +652,61 @@ def combline_sections_wb(g: list, f1: float, f2: float, er: float, h: float, wp:
     Cmk = np.array([Cm12] + Cmk2 + [CmN])
 
     return Ck, Cmk
+
+
+def synthesize_combline_stripline(Ck: list, Cmk: list, b: float, er: float) -> tuple:
+    """
+    Synthesize a stripline combline filter with thin traces (t=0). 
+
+    Parameters
+    ----------
+    Ck : array_like
+        list of even mode capacitances for each line, normalized by epsilon. 
+    Cmk : array_like
+        list of inter-line capacitances, normalized by epsilon. Should have length one less than Ck.
+    b : float
+        substrate height, width and spacing will be returned in the same units as b.
+    er : float
+        relative permittivity of substrate
+    
+    Returns
+    -------
+    wk : np.ndarray
+        line widths, in same units as b
+    sk : np.ndarray
+        edge to edge line spacings
+    """
+    eps = er * const.e0
+
+    def Cab_error(sp, target_Cab):
+        """ 
+        error between realized interline capacitance Cab and target value for lines with the given spacing.
+        target_Cab is normalized by epsilon
+        """
+        Cf_o, Cf_e = coupled_sline_fringing_cap(sp, b, er)
+        # normalized by epsilon
+        Cab = (Cf_o - Cf_e) / eps
+        return Cab - target_Cab
+
+    # determine spacings using the capacitance between lines Cmk
+    sk = np.zeros_like(Cmk)
+    for i, cmk in enumerate(Cmk):
+        sk[i] = optimize.least_squares(Cab_error, x0=b*0.5, args=(cmk,), bounds=(0.0001, b*2)).x[0]
+
+    # even mode fringing capacitance for each space between lines, normalized by epsilon
+    Cf_e = np.array([coupled_sline_fringing_cap(s, b, er)[1] for s in sk]) / eps
+
+    # fringing capacitance on the outer edges (not between the two lines), figure 5.05-10b, for t=0
+    Cf = 0.4407
+    # Ck is the even mode capacitance Ce. Use equation 5.05-25 to determine the per unit length parallel plate 
+    # capacitance for each line. Normalized by eps
+    Cf_eps_left = np.concatenate([[Cf], Cf_e])
+    Cf_eps_right = np.concatenate([Cf_e, [Cf]])
+    Cp_e = (Ck / 2) - Cf_eps_left - Cf_eps_right
+    # determine width using parallel plate capacitance Cp_e = 2w / b
+    wk = (Cp_e / 2) * b
+
+    return wk, sk
 
 
 def round_to_multiple(value, multiple: float = 1, precision: int = 6):

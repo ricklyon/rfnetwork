@@ -5,7 +5,7 @@ import sys
 import numpy as np 
 import matplotlib.pyplot as plt 
 import pyvista as pv
-from scipy import optimize
+
 
 import rfnetwork as rfn
 
@@ -35,59 +35,17 @@ f2 = 1.6e9
 b = 0.06
 
 g = rfn.utils.chebyshev_prototype(5, ripple=0.25)
+
 Ck, Cmk = rfn.utils.combline_sections_nb(g, f1, f2, er=er, h=0.25)
 
 Cmk = (Cmk * 0.85)
 
-# from https://ieeexplore.ieee.org/document/1124973
-Cfp = 0.4407
 
-t = 0.001
-w = 0.02
+wk, sk = rfn.utils.synthesize_combline_stripline(Ck, Cmk, b, er)
 
-s = 0.01
-er = 3.66
-
-tb = t / b
-sb = s / b
-
-# from https://ieeexplore.ieee.org/document/1124973
-Cfe = (2 / np.pi) * np.log( 1 + np.tanh(np.pi * s / (2 * b)))
-Cfo = (2 / np.pi) * np.log( 1 + (1 / np.tanh(np.pi * s / (2 * b))))
-
-rfn.utils.coupled_sline_fringing_cap(s, b, er)
-
-
-
-def Cab_error(sp, target_Cab):
-   Cf_o, Cf_e = rfn.utils.coupled_sline_fringing_cap(sp, b, er)
-   # normalized Cab
-   Cab = (Cf_o - Cf_e) / (e0 * er)
-   # return error between realized interline capacitance and target value
-   return Cab - target_Cab
-
-# determine spacings using the capacitance between lines Cmk
-sk = np.zeros_like(Cmk)
-wk = np.ones_like(Ck) * (b / 2)
-
-for m in range(5):
-    for i, cmk in enumerate(Cmk):
-        sk[i] = optimize.least_squares(Cab_error, x0=b*0.5, args=(cmk,), bounds=(0.001, b)).x[0]
-
-    # even mode fringing capacitance for each space between lines, width is arbitrary here
-    Cf_e = np.array([
-        rfn.utils.coupled_sline_fringing_cap(s, b, er)[1] for i, s in enumerate(sk)
-    ]) / (e0 * er)
-
-    # fringing capacitance on the outer edges (not between the two lines), figure 5.05-10b, for t=0
-    Cf = 0.4407
-    # Ck is the even mode capacitance Ce. Use equation 5.05-25 to determine the per unit length parallel plate 
-    # capacitance for each line. Normalized by eps
-    Cf_eps_left = np.concatenate([[Cf], Cf_e])
-    Cf_eps_right = np.concatenate([Cf_e, [Cf]])
-    Cp_e = (Ck / 2) - Cf_eps_left - Cf_eps_right
-    # determine width using parallel plate capacitance Cp_e = 2w / b
-    wk = (Cp_e / 2) * b
+# values that work
+ref_wk = np.array([0.02266854, 0.02478139, 0.02500937, 0.02477977, 0.02266854])
+ref_sk = np.array([0.01674886, 0.01947338, 0.01947338, 0.01674886])
 
 
 wk = wk[1:-1]
