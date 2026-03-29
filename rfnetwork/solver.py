@@ -1912,6 +1912,9 @@ class FDTD_Solver():
         vmin: float = None, 
         vmax: float = None, 
         point_size: float = 10, 
+        axes: Axes = None,
+        plotter: pv.Plotter = None,
+        **kwargs
     ) -> pv.Plotter:
         """
         Plot FDTD coefficients overlayed on the model geometry.
@@ -1948,7 +1951,17 @@ class FDTD_Solver():
 
         point_size : float, default: 10
             size of points representing coefficient values
-        
+
+        axes : matplotlib.axes.Axes
+            matplotlib axes object. If provided, a screenshot is taken of the rendered image and 
+            drawn in the the axes. 
+
+        plotter : pv.Plotter, optional
+            pyvista Plotter object
+
+        **kwargs :
+            remaining kwargs are passed to render().
+
         Returns
         -------
         pv.Plotter
@@ -1956,9 +1969,12 @@ class FDTD_Solver():
         """
         self.check_mesh()
 
-        plotter = self.render()
+        if plotter is None:
+            plotter = pv.Plotter(off_screen=bool(axes is not None))
 
-        # 
+        plotter = self.render(plotter=plotter, **kwargs)
+
+        # position of surface on which the coefficients will be plotted
         full_pos = [0] * 3
         axis_i = dict(x=0, y=1, z=2)[axis]
         full_pos[axis_i] = position
@@ -2009,7 +2025,12 @@ class FDTD_Solver():
         plotter.add_scalar_bar(
             title=f"{field}, {value}\n", vertical=False, label_font_size=11, title_font_size=14
         )
-        
+
+        if axes is not None:
+            img = plotter.screenshot()
+            axes.imshow(img)
+            axes.set_axis_off()
+
         return plotter
     
     def line_probe_values(self, name: str) -> np.ndarray:
@@ -2726,7 +2747,7 @@ class FDTD_Solver():
                 # frame index to the monitor data
                 if init_time is not None:
                     # time step in simulation
-                    n = init_time * 1e-12 / self.dt
+                    n = np.around(init_time * 1e-12 / self.dt)
                     # frame index
                     init_frame = int(n / n_step)
                 else:

@@ -188,10 +188,16 @@ integration_line2 = pv.Line((x_end + feed_len, tap_loc, -b/  2), (x_end + feed_l
 s.add_lumped_port(1, port1_face, integration_line=integration_line1)
 s.add_lumped_port(2, port2_face, integration_line=integration_line2)
 
+cpos = pv.CameraPosition(
+    position=(xmax/2 + 0.5, -0.5, 1.1),
+    focal_point=(xmax/2, 0.4, 0),
+    viewup=(0, 0.0, 1.0),
+)
+
+fig, ax = plt.subplots()
 # render the model before generating the mesh to check for any obvious errors
-plotter = s.render(show_mesh=False, show_rulers=False)
-# plotter.camera_position = "xy"
-plotter.show()
+s.render(show_mesh=False, show_rulers=False, axes=ax, camera_position=cpos)
+
 
 # mesh with a minimum grid cell size of 5mils. This is fairly coarse for line spacings of 15mils and 
 # requires edge correction
@@ -231,9 +237,8 @@ for i, ln in enumerate(lines):
 # to check the edge correction was set up properly, plot the FDTD coefficients of the H field normal to the conductor
 # surface (hz in this case). The fields at the edge vary asymptotically along the x direction, so plot the hz_x1 or 
 # hz_x2 fields. 
-p = s.plot_coefficients("hz_x1", "b", "z", position=0, point_size=15, cmap="brg")
-p.camera_position = "xy"
-p.show()
+fig, ax = plt.subplots()
+s.plot_coefficients("hz_x1", "b", "z", position=0, point_size=15, cmap="brg", camera_position = "xy", axes=ax, zoom=1.5)
 
 # %%
 # Solve and Plot S-parameters
