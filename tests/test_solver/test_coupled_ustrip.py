@@ -71,7 +71,7 @@ class TestCoupledUStrip(unittest.TestCase):
                 (ms_x[0], ms_y + ms_w/2, sub_h),
                 (ms_x[0], ms_y + ms_w/2, 0),
             ])
-            s.add_lumped_port(i+1, port_face, integration_axis="z-")
+            s.add_lumped_port(i+1, port_face, integration_line="z-")
 
         # assign PML layers, omitting the x- side near the ports
         s.assign_PML_boundaries("x+", "z+", "y-", "y+", n_pml=5)
@@ -85,12 +85,12 @@ class TestCoupledUStrip(unittest.TestCase):
             p1 = (ms_x[0], ms_y + ms_w/2, sub_h)
             p2 = (ms_x[1], ms_y + ms_w/2, sub_h)
 
-            s.edge_correction(p1, p2, integration_axis="y+")
+            s.edge_correction(p1, p2, integration_line="y+")
 
             p1 = (ms_x[0], ms_y - ms_w/2, sub_h)
             p2 = (ms_x[1], ms_y - ms_w/2, sub_h)
 
-            s.edge_correction(p1, p2, integration_axis="y-")
+            s.edge_correction(p1, p2, integration_line="y-")
 
         # create voltage waveform. Time units are in seconds
         vsrc = 1e-2 * s.gaussian_modulated_source(f0=10e9, width=200e-12, t0=160e-12, t_len=400e-12)

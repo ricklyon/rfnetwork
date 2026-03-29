@@ -88,7 +88,7 @@ class TestMicroStrip(unittest.TestCase):
         s.add_conductor(ms1_trace, style=dict(color="gold"))
 
         int_axis = ["x-", "y-", "z-"][normal_axis]
-        s.add_lumped_port(1, port1_face, integration_axis=int_axis)
+        s.add_lumped_port(1, port1_face, integration_line=int_axis)
 
         pml_side = ["x", "y", "z"][len_axis]
         s.assign_PML_boundaries(f"{pml_side}+", n_pml=10)

@@ -71,21 +71,21 @@ class TestDipole(unittest.TestCase):
             s.edge_correction(
                 (0, ms_y[0], ms_z[0]), 
                 (0, ms_y[0], ms_z[1]), 
-                integration_axis="y-"
+                integration_line="y-"
             )
 
             # right edge
             s.edge_correction(
                 (0, ms_y[1], ms_z[0]), 
                 (0, ms_y[1], ms_z[1]), 
-                integration_axis="y+"
+                integration_line="y+"
             )
 
             # top/lower edge
             s.edge_correction(
                 (0, ms_y[0], ms_z[i]), 
                 (0, ms_y[1], ms_z[i]), 
-                integration_axis=("z-" if i == 0 else "z+")
+                integration_line=("z-" if i == 0 else "z+")
             )
 
         vsrc = s.gaussian_source(width=50e-12, t0=40e-12, t_len=600e-12)
