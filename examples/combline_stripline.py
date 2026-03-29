@@ -1,141 +1,169 @@
+"""
+Combline Filter
+===============
 
+Simulate a bandpass interdigital filter implemented with stripline resonators. 
+
+This follows the design process outlined in section 10.06 of [1], using a feed tap instead of a impedance transformer.
+The two extra coupled lines in the reference design were used to transform the impedance at the ends of the reactive 
+elements. This leads to very small line spacings if attempted with thin stripline. The feed tap approach drops the
+outer resonators and avoids the issue of small spacings, but does require some manual tuning. 
+
+[1] G. L. Matthaei, Microwave Filters, Impedance-Matching Networks, and Coupling Structures, 1980
+
+"""
 from pathlib import Path
-import sys
-
 import numpy as np 
 import matplotlib.pyplot as plt 
 import pyvista as pv
 
-
+from np_struct import ldarray
 import rfnetwork as rfn
 
-
-
-# pv.set_jupyter_backend("trame")
-np.set_printoptions(suppress=True)
-
-# plt.style.use('ggplot')
-# Set the font family to serif, with "Times New Roman" as the preferred serif font
-plt.rcParams["font.family"] = "serif"
-plt.rcParams["font.serif"] = ["Times New Roman"] + plt.rcParams["font.serif"]
-
+# set the pyvista backend
+import sys
+pv.set_jupyter_backend("trame")
 sys.argv = sys.argv[0:1]
 
+# set matplotlib style
+plt.style.use(rfn.DEFAULT_STYLE)
+
 dir_ = Path(__file__).parent
+np.set_printoptions(suppress=True)
 
-e0 = rfn.const.e0
-c0 = rfn.const.c0
-eta0 = rfn.const.eta0
+# %%
+# Design Parameters 
+# ------------------------
+# sphinx_gallery_thumbnail_number = -2
 
-er = 3.66
+er = 3.66  # dielectric constant
+b = 0.06  # substrate height, inches
 
+# cutoff frequencies
 f1 = 1.1e9
 f2 = 1.6e9
 
-b = 0.06
+# 50 ohm trace width
+w50 = 0.035
 
-g = rfn.utils.chebyshev_prototype(5, ripple=0.25)
-
-Ck, Cmk = rfn.utils.combline_sections_nb(g, f1, f2, er=er, h=0.25)
-
-Cmk = (Cmk * 0.85)
-
-
-wk, sk = rfn.utils.synthesize_combline_stripline(Ck, Cmk, b, er)
-
-# values that work
-ref_wk = np.array([0.02266854, 0.02478139, 0.02500937, 0.02477977, 0.02266854])
-ref_sk = np.array([0.01674886, 0.01947338, 0.01947338, 0.01674886])
-
-
-wk = wk[1:-1]
-sk = sk[1:-1]
-K = len(wk)
-
-# y coordinates of the bottom and top edge of each line
-ymax = rfn.const.c0_in / (np.sqrt(f1 * f2) * np.sqrt(er) * 4)
-
-y0 = 0.095
-y1 = ymax - y0
+# tap location of feed, distance from the shorted end of the first resonator.
+tap_loc = 0.31
+# length of feed 
+feed_len = 0.12
+# size of vias used to short ends of the resonators
 via_size = 0.02
 
-w50 = 0.035
-feed_y = 0.31
-feed_len = 0.12
+# filter order (must be odd)
+N = 5
+
+# quarter wave resonator length, inches
+resonator_length = rfn.const.c0_in / (np.sqrt(f1 * f2) * np.sqrt(er) * 4)
+
+# compensation for fringing fields on open-circuited ends of resonators. The design reference used 0.216", but the
+# side walls were closer. 
+line_foreshortening = 0.095
+
+# the tap on the outer resonators loads them and requires the length to be manually tuned. I couldn't find a good
+# reference on this. The inner resonators are slightly adjusted to optimize the filter response.
+resonator_length_tune = np.array([0.065, 0.01, -0.005, 0.01, 0.065])
+
+# filter prototype values
+g = rfn.utils.chebyshev_prototype(N, ripple=0.25)
+
+# get even mode capacitance for each line (Ck), and the inter-line capacitance Cmk. Cmk is not the same thing as 
+# the odd mode capacitance. h is a free parameter used to adjust the line widths.
+Ck, Cmk = rfn.utils.combline_sections_nb(g, f1, f2, er=er, h=0.25)
+
+# The filter synthesis equations in the reference were intended for rectangular bars. When used for stripline in a 
+# narrow dielectric, they seem to overestimate the required inter-line capacitance. I've checked that the even/odd
+# mode impedance used to derive the spacing is correct, so I suspect the reference equations more than the equations
+# used to derive the spacing from the inter-line capacitance.
+Cmk = (Cmk * 0.85)
+
+# derive the line width and spacing from the line capacitances
+wk, sk = rfn.utils.synthesize_combline_stripline(Ck, Cmk, b, er)
+
+# we are using a tap instead of the outer lines to transform the impedance, so drop the outer resonators.
+wk = wk[1:-1]
+sk = sk[1:-1]
+
+print("wk", wk)
+print("sk", sk)
 
 
-print(sk)
-print(wk)
+# %%
+# Build Filter Model
+# ------------------------
 
-# x coordinates of the left and right edge of each line
-x0_k = np.zeros(K)
-x1_k = np.zeros(K)
-y0_k = np.zeros(K)
-y1_k = np.zeros(K)
+# upper location where lines are shorted to the side wall in the reference design, lower short location is 0
+ymax = resonator_length
 
-for i in range(K):
-    if i % 2: # if odd
-        y0_k[i] = y0
-        y1_k[i] = ymax
-    else: # if even
-        y0_k[i] = 0
-        y1_k[i] = y1
+# lower and upper points of open-circuited ends of the nominal resonator lines
+y0 = line_foreshortening
+y1 = ymax - line_foreshortening
 
-x0_k[0] = 0.1 + feed_len
-x1_k[0] = x0_k[0] + wk[0]
+# x location of left side of first resonator
+x_start = 0.1 + feed_len
 
-for i in range(1, K):
-    x0_k[i] = x1_k[i-1] + sk[i-1]
-    x1_k[i] = x0_k[i] + wk[i]
+# x location of right side of last resonator
+x_end = x_start + np.sum(wk) + np.sum(sk)
+# extent of solve box along x axis
+xmax = x_end + feed_len + 0.1
 
-y1_k[0] += 0.065
-y0_k[1] += 0.01
-y1_k[2] -= 0.005
-y0_k[3] += 0.01
-y1_k[4] += 0.065
-
-sbox_w = x1_k[-1] + 0.1 + feed_len
+# the reference design used a side wall to short the resonators, we are using vias, so add a bit of a buffer between
+# the resonator ends and the side wall. 
 sbox_len = ymax + 0.15
-sbox_h = b
-substrate = pv.Cube(center=(sbox_w/2, sbox_len/2 - (0.15/2), 0), x_length=sbox_w, y_length=sbox_len, z_length=sbox_h)
-sbox =      pv.Cube(center=(sbox_w/2, sbox_len/2 - (0.15/2), 0), x_length=sbox_w, y_length=sbox_len, z_length=sbox_h)
 
+# initialize model
+substrate = pv.Cube(center=(xmax/2, sbox_len/2 - (0.15 / 2), 0), x_length=xmax, y_length=sbox_len, z_length=b)
+sbox =      pv.Cube(center=(xmax/2, sbox_len/2 - (0.15 / 2), 0), x_length=xmax, y_length=sbox_len, z_length=b)
 s = rfn.FDTD_Solver(sbox)
 s.add_dielectric(substrate, er=er, loss_tan=0.003, f0=np.sqrt(f1 * f2), style=dict(opacity=0.0))
 
-# add resonators. Skip the first and last line as these are impedance transformers and we're using the tap instead
-for i in range(K):
-    line = pv.Rectangle([
-        (x0_k[i], y0_k[i], 0),
-        (x1_k[i], y0_k[i], 0),
-        (x1_k[i], y1_k[i], 0),
-    ])
+# create resonators with the shorting vias
+x0_i = x_start
+# save lines for edge correction
+lines = []
 
+for i in range(N):
+    
+    # bottom of first line (0, even) is shorted, top of second line (1, odd) is shorted.
+    # top of first line (0, even) is open, bottom of second line (1, odd) is open
+    if i % 2 == 0:
+        y0_i = 0
+        # adjust for tuned length on the open-circuited end of the line
+        y1_i = y1 + resonator_length_tune[i]
+    else:
+        y0_i = y0 + resonator_length_tune[i]
+        y1_i = ymax
+
+    # create resonator line
+    x1_i = x0_i + wk[i]
+    line = pv.Rectangle([(x0_i, y0_i, 0), (x1_i, y0_i, 0), (x1_i, y1_i, 0)])
     s.add_conductor(line, style=dict(color="gold"))
 
-    # add shorting vias, bottom of resonator if odd, top otherwise
-    if i % 2:
-        via = pv.Box(
-            (x0_k[i], x1_k[i], y1_k[i], y1_k[i] + via_size, -sbox_h/2, sbox_h/2)
-        )
-    else:
-        via = pv.Box(
-            (x0_k[i], x1_k[i], y0_k[i] - via_size, y0_k[i], -sbox_h/2, sbox_h/2)
-        )
-
-
+    # add shorting vias, bottom of resonator if even, top if odd
+    via_y = (y0_i - via_size, y0_i) if i % 2 == 0 else (y1_i, y1_i + via_size)
+    via = pv.Box((x0_i, x1_i, *via_y, -b / 2, b / 2))
     s.add_conductor(via, style=dict(color="gold", opacity=0.6))
 
+    # increment edge for next resonator
+    if i < (N - 1):
+        x0_i = (x1_i + sk[i])
+
+    lines.append(line)
+
+# add feed taps and lumped ports
 feed_1 = pv.Rectangle([
-        (x0_k[0] - feed_len, feed_y-w50/2, 0),
-        (x0_k[0] - feed_len, feed_y+w50/2, 0),
-        (x0_k[0], feed_y+w50/2, 0),
+        (x_start - feed_len, tap_loc - w50 / 2, 0),
+        (x_start - feed_len, tap_loc + w50/ 2, 0),
+        (x_start, tap_loc + w50 / 2, 0),
 ])
 
 feed_2 = pv.Rectangle([
-        (x1_k[-1] + feed_len, feed_y-w50/2, 0),
-        (x1_k[-1] + feed_len, feed_y+w50/2, 0),
-        (x1_k[-1], feed_y+w50/2, 0),
+        (x_end + feed_len, tap_loc - w50 / 2, 0),
+        (x_end + feed_len, tap_loc + w50 / 2, 0),
+        (x_end, tap_loc + w50 / 2, 0),
 ])
 
 s.add_conductor(feed_1, style=dict(color="gold"))
@@ -143,121 +171,103 @@ s.add_conductor(feed_2, style=dict(color="gold"))
 
 
 port1_face = pv.Rectangle([
-    (x0_k[0] - feed_len, feed_y-w50/2, -sbox_h/2),
-    (x0_k[0] - feed_len, feed_y+w50/2, -sbox_h/2),
-    (x0_k[0] - feed_len, feed_y+w50/2, sbox_h/2),
+    (x_start - feed_len, tap_loc - w50 / 2, -b/2),
+    (x_start - feed_len, tap_loc + w50 / 2, -b/2),
+    (x_start - feed_len, tap_loc + w50 / 2, b/2),
 ])
 
 port2_face = pv.Rectangle([
-    (x1_k[-1] + feed_len, feed_y-w50/2, -sbox_h/2),
-    (x1_k[-1] + feed_len, feed_y+w50/2, -sbox_h/2),
-    (x1_k[-1] + feed_len, feed_y+w50/2, sbox_h/2),
+    (x_end + feed_len, tap_loc - w50 / 2, -b/2),
+    (x_end + feed_len, tap_loc + w50 / 2, -b/2),
+    (x_end + feed_len, tap_loc + w50 / 2, b/2),
 ])
 
-integration_line1 = pv.Line((x0_k[0] - feed_len, feed_y, -sbox_h/2), (x0_k[0] - feed_len, feed_y, 0))
-integration_line2 = pv.Line((x1_k[-1] + feed_len, feed_y, -sbox_h/2), (x1_k[-1] + feed_len, feed_y, 0))
+# integration lines for the ports extend from the bottom of the dielectric to the middle where the lines are.
+integration_line1 = pv.Line((x_start - feed_len, tap_loc, -b / 2), (x_start - feed_len, tap_loc, 0))
+integration_line2 = pv.Line((x_end + feed_len, tap_loc, -b/  2), (x_end + feed_len, tap_loc, 0))
 s.add_lumped_port(1, port1_face, integration_line=integration_line1)
 s.add_lumped_port(2, port2_face, integration_line=integration_line2)
 
-plotter = s.render(show_probes=False, show_mesh=False)
-plotter.camera_position = "xy"
+# render the model before generating the mesh to check for any obvious errors
+plotter = s.render(show_mesh=False, show_rulers=False)
+# plotter.camera_position = "xy"
 plotter.show()
 
+# mesh with a minimum grid cell size of 5mils. This is fairly coarse for line spacings of 15mils and 
+# requires edge correction
 s.generate_mesh(d0 = 0.02, d_edge = 0.005)
 
-s.pos_to_idx((x0_k[0], y0_k[0], 0))
+# %%
+# Apply Edge Correction
+# ------------------------
 
-for i in range(K):
-    if i == 0:
-        s.edge_correction(
-            (x0_k[i], y0_k[i], 0), 
-            (x0_k[i], feed_y-w50/2, 0), 
-            integration_line="x-"
-        )
-        s.edge_correction(
-            (x0_k[i], y1_k[i], 0), 
-            (x0_k[i], feed_y+w50/2, 0), 
-            integration_line="x-"
-        )
-    else:
-        s.edge_correction(
-            (x0_k[i], y0_k[i], 0), 
-            (x0_k[i], y1_k[i], 0), 
-            integration_line="x-"
-        )
+# define lines for edge correction, vertical edges of all resonators. The two outer resonators are a bit tricky
+# because of the tap.
+for i, ln in enumerate(lines):
 
-    if i == (K - 1):
-        s.edge_correction(
-            (x1_k[i], y0_k[i], 0), 
-            (x1_k[i], feed_y-w50/2, 0), 
-            integration_line="x+"
-        )
-        s.edge_correction(
-            (x1_k[i], feed_y+w50/2, 0), 
-            (x1_k[i], y1_k[i], 0), 
-            integration_line="x+"
-        )
-    else:
-        s.edge_correction(
-            (x1_k[i], y0_k[i], 0), 
-            (x1_k[i], y1_k[i], 0), 
-            integration_line="x+"
-        )
+    p0, p1 = np.min(ln.points, axis=0), np.max(ln.points, axis=0)
 
+    x0, x1 = p0[0], p1[0]
+    y0, y1 = p0[1], p1[1]
+    
+    # apply correction to both sides of resonator. The integration lines point away from the edge, so the left
+    # edge at x0, it points along negative x. For the right edge at x1, it points along positive x.
+    for j, (x, integration_line) in enumerate(zip((x0, x1), ("x-", "x+"))):
+        # apply edge correction to the outer edge of the first and last resonator, but avoid the feed.
+        # split into two edge correction lines.
+        if (i == 0 and j == 0) or (i == (N -1 ) and j == 1):
+            s.edge_correction(
+                (x, y0, 0), (x, tap_loc - w50 / 2, 0), integration_line
+            )
+            s.edge_correction(
+                (x, tap_loc + w50 / 2, 0), (x, y1, 0), integration_line
+            )
+        # apply correction to edges normally if they don't have the feed tap 
+        else:
+            s.edge_correction(
+                (x, y0, 0), (x, y1, 0), integration_line
+            )
 
-# plotter = s.render(show_probes=False)
-# plotter.camera_position = "xy"
-# plotter.show()
-# print(s.Nx * s.Ny * s.Nz / 1e3, "kcells")
+# to check the edge correction was set up properly, plot the FDTD coefficients of the H field normal to the conductor
+# surface (hz in this case). The fields at the edge vary asymptotically along the x direction, so plot the hz_x1 or 
+# hz_x2 fields. 
+p = s.plot_coefficients("hz_x1", "b", "z", position=0, point_size=15, cmap="brg")
+p.camera_position = "xy"
+p.show()
 
+# %%
+# Solve and Plot S-parameters
+# ---------------------------
 
-# p = s.plot_coefficients("hz_x1", "b", "z", 0, point_size=15, cmap="brg")
-# p.camera_position = "xy"
-# p.show()
-
-# s.add_field_monitor("mon1", "e_total", "z", 0, 100)
-# s.add_field_monitor("mon1", "ey", "z", sub_h, 5)
-# s.add_field_monitor("mon2", "ey", "z", sub_h, 15)
-# s.add_field_monitor("mon3", "ex", "z", sub_h, 10)
-
-pulse_n = 50000
-# # width of half pulse in time
-# t_half = (s.dt * 100)
-# # center of the pulse in time
-# t0 = (s.dt * 400)
-
-# vsrc = 1e-2 * s.gaussian_source(s.dt * 300, t0= s.dt * 200, t_len = s.dt * pulse_n)
-vsrc = 1e-2 * s.gaussian_source(width=s.dt * 1000, t0=s.dt * 600, t_len = pulse_n * s.dt)
-
-# t = np.linspace(0, s.dt * pulse_n, pulse_n)
-# vsrc = 1e-2 * (np.sin(2* np.pi * f0 * (t)) * np.exp(-((t - t0) / t_half)**2)).astype(np.float32)
-plt.plot(vsrc)
-
-frequency: np.ndarray = np.arange(0.5e9, 3e9, 2e6)
+# create excitation pulse. Run a large number of time steps so the energy has time to either exit through the
+# ports or dissipate.
+pulse_n = 50000  
+vsrc = 1e-2 * s.gaussian_source(width=200e-12, t0=130e-12, t_len = pulse_n * s.dt)
 
 s.assign_excitation(vsrc, 1)
 s.solve(n_threads=4)
-self = s
 
-
-# p = s.plot_monitor(["mon1"], camera_position="xy", opacity=0.8, gif_setup=None)
-# p.show(title="EM Solver")
-# # # p.camera_position = "xy"
-# # p.show(title="EM Solver")
-
-
+frequency = np.arange(0.5e9, 3e9, 2e6)
+# downsample the time domain data before applying the DFT to speed things up
 sdata = s.get_sparameters(frequency, 1, downsample=True)
-S11 = sdata[:, 0]
-S21 = sdata[:, 1]
+S11 = sdata.sel(b=1)
+S21 = sdata.sel(b=2)
 
+# load data simulated with finer mesh to check convergence, pulse_n=150k, d_edge = 0.0025
+sdata_ref = ldarray.load(dir_ / "data/combline_fine_mesh.npy")
+S11_ref = sdata_ref.sel(b=1)
+S21_ref = sdata_ref.sel(b=2)
 
-fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(6, 9), height_ratios=[1, 2], constrained_layout=True)
+fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(6, 9), height_ratios=[1, 2])
 
 rfn.plots.draw_smithchart(ax2)
 ax2.plot(S11.real, S11.imag)
 
 ax1.plot(frequency / 1e9, rfn.conv.db20_lin(S11))
 ax1.plot(frequency / 1e9, rfn.conv.db20_lin(S21))
+ax1.plot(frequency / 1e9, rfn.conv.db20_lin(S11_ref), linestyle=":")
+ax1.plot(frequency / 1e9, rfn.conv.db20_lin(S21_ref), linestyle=":")
+
 ax1.set_xlabel("Frequency [GHz]")
 ax1.set_xticks(np.arange(0.6, 2.6, 0.2))
 ax1.set_xlim([0.6, 2.4])
