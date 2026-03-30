@@ -716,3 +716,38 @@ def round_to_multiple(value, multiple: float = 1, precision: int = 6):
     """
     return np.around(np.around(value / multiple) * multiple, precision)
 
+
+def eng_format(x, precision: int = 3, zero: float = 1e-20) -> str:
+    """
+    Format a scalar in engineering notation. Drops the imaginary part if complex.
+    """
+
+    # handle lists, tuples or numpy arrays with one value
+    x = np.atleast_1d(x).item()
+
+    if x is None:
+        return ""
+    
+    if isinstance(x, (str, Path)):
+        return str(x)
+
+    if np.abs(x) < zero:
+        return "0"
+    
+    if not np.isfinite(x):
+        return "nan"
+    
+    if isinstance(x, complex):
+        x = np.real(x)
+    
+    exponent = int(np.floor(np.log10(abs(x)) // 3 * 3))
+    # value on the left of the exponent, trim trailing zeros on the right side of the decimal
+    fraction = f"{x / (10**exponent):.{precision}f}".rstrip("0").rstrip(".")
+
+    # if exponent is 3 or less, just return a floating point number with no exponent
+    if np.abs(exponent) <= 3:
+        return f"{x:.3f}".rstrip("0").rstrip(".")
+    # otherwise return engineering notation
+    else:
+        return f"{fraction}e{exponent}"
+    
