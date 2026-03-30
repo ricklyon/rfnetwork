@@ -89,12 +89,32 @@ class Component(object):
                 raise KeyError(f"Invalid state key, {k}.")
             
             self._state[k] = deepcopy(v)
-        
+
+    def format_state(self, threshold: int = 100, **kwargs):
+        """
+        Get a string value of all the state variables.
+        """
+        state_str = ", ".join([f"{k}: {utils.eng_format(v)}" for k, v in self.state.items()])
+
+        # truncate long strings
+        if len(state_str) > threshold:
+            state_str = state_str[:threshold] + "..."
+
+        return state_str
+
     def __or__(self, other):
         """ 
         Allows port to be indexed with the syntax: component|2 
         """
         return (self, int(other))
+    
+    def __repr__(self):
+        return str(self)
+    
+    def __str__(self):
+        """ Print the state variables """
+        module_name = self.__class__.__module__ + "." + self.__class__.__name__ 
+        return f"<{module_name} ({self.format_state()}) {self.n_ports} ports>"
     
     def equals(self, other) -> bool:
         """
@@ -546,6 +566,19 @@ class Component_SnP(Component):
         sdata, _ = self._get_file_data()
         return sdata.coords["frequency"]
 
+    def format_state(self, threshold: int = 100, **kwargs):
+        """
+        Get a string value of the active file.
+        """
+
+        state_str =  ", ".join([f"{k}: {Path(self.file[v].name)}" for k, v in self.state.items()])
+    
+        # truncate long strings
+        if len(state_str) > threshold:
+            state_str = state_str[:threshold] + "..."
+
+        return state_str
+    
     def _get_file_data(self) -> Tuple[ldarray, ldarray]:
         """
         Read the touchstone data for the current state.
