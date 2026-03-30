@@ -188,3 +188,5 @@ ax.set_ylabel("Impedance [Ohm]")
 ax.legend(["Odd Mode", "Even Mode", "Ref Odd", "Ref Even"])
 mplm.line_marker(x = 10, axes=ax)
 ax.set_title("Odd/Even Impedance of Coupled Microstrip")
+
+plt.show()

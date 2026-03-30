@@ -178,3 +178,4 @@ ax.plot(ads_nf[:,0], ads_nf[:, 1], '--', label='ADS')
 ax.legend()
 ax.set_title('QPL9503 Non-Iso Unbalanced NF', fontsize="medium")
 ax.set_ylim([0, 5]);
+plt.show()

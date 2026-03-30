@@ -131,4 +131,5 @@ tuners = [
 #
 
 # print tuned values (unless tune was canceled, then this just shows the initial values)
-print(bpf.state)
+# the component values can also be queried with the components dictionary of the Network object
+bpf.print_state()

@@ -170,4 +170,6 @@ tuners = [
 # .. image:: ../_static/img/tuning_window.png
 #
 
+plt.show()
+
 

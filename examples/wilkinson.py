@@ -190,5 +190,5 @@ plt.show()
 # .. image:: ../_static/img/wilkinson.gif
 
 # To generate the full s-parameter matrix, each port needs to be solved individually.
-gif_setup = dict(file=dir_ / "../docs/_static/img/wilkinson.gif", fps=15, step_ps=5)
+gif_setup = dict(file = dir_ / "../docs/_static/img/wilkinson.gif", fps=15, step_ps=5)
 p = s.plot_monitor(["mon1"], camera_position="xy", vmax=30, vmin=0, gif_setup=gif_setup)

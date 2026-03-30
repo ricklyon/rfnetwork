@@ -20,6 +20,13 @@ import mpl_markers as mplm
 # set matplotlib style
 plt.style.use(rfn.DEFAULT_STYLE)
 
+try:
+    dir_ = Path(__file__).parent
+except:
+    dir_ = Path().cwd() / "examples"
+
+DATA_DIR = dir_ / r"data/PD55008E_S_parameter"
+
 # frequency range for plots
 frequency = np.arange(350, 550, 5) * 1e6 
 f0 = 440e6 # design frequency
@@ -31,8 +38,6 @@ def smithchart_marker(ax, fc: float, **properties):
     return mplm.line_marker(
         idx=f_idx, axes=ax, xline=False, yformatter=lambda x, y, idx: f"{frequency[idx]/1e6:.0f}MHz", **properties
 )
-
-DATA_DIR = Path("data/PD55008E_S_parameter")
 
 pa_8w = rfn.Component_SnP(
     file={
@@ -177,7 +182,7 @@ smithchart_marker(axes["s22"], f0, lines=lines2, ylabel=False)
 smithchart_marker(axes["s22"], f0, lines=ln_s22)
 
 
-im = plt.imread("data/img/pa_tuning.png")
+im = plt.imread(dir_ / "data/img/pa_tuning.png")
 axes["im"].imshow(im)
 axes["im"].set_axis_off()
 
@@ -222,3 +227,4 @@ f_gain = np.arange(300, 600, 5) * 1e6
 
 n.plot(11, 22, 21, fmt="db", frequency=f_gain)
 mplm.line_marker(x=f0/1e9)
+plt.show()
