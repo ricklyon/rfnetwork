@@ -166,16 +166,17 @@ class Network(Component, metaclass=NetworkMeta):
         """
         return {k: v.state for k, v in self.components.items()}
     
-    def format_state(self, tabs: str = "", verbose: bool = False):
+    def format_state(self, tabs: str = "", verbose: bool = False) -> str:
         """
         Get a string value of the state variables from all components
         """
         if verbose:
             comp_list = []
             for k, v in self.components.items():
+
                 # get the state of the sub-component
                 state_str = v.format_state(tabs=tabs + "   ", verbose=True)
-                # wrap component states in ()
+                # wrap sub-network states in ()
                 if not isinstance(v, Network):
                     state_str = f"({state_str})"
                 # append to list with a new line
@@ -188,7 +189,7 @@ class Network(Component, metaclass=NetworkMeta):
         
     def print_state(self):
         """ Print the state of all component variables. """
-        
+
         print(self.format_state(verbose=True))
 
     @property

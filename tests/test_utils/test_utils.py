@@ -3,10 +3,6 @@ import numpy as np
 from pathlib import Path
 
 import rfnetwork as rfn
-import matplotlib.pyplot as plt
-
-
-DATA_DIR = Path(__file__).parent.parent / "data"
 
 
 class TestUtils(unittest.TestCase):
@@ -50,6 +46,36 @@ class TestUtils(unittest.TestCase):
         # table 10.06-2
         np.testing.assert_array_almost_equal(
             Cmk, [1.647, 1.115, 1.056, 1.044, 1.056, 1.115, 1.647], decimal=2
+        )
+
+    def test_eng_formatter(self):
+
+        self.assertEqual(
+            rfn.utils.eng_formatter([10000000000, 0.02, 11e8]), '[10e9 0.02 1.1e9]'
+        )
+
+        self.assertEqual(
+            rfn.utils.eng_formatter([0, 0.0223e-9]), '[0 22.3e-12]'
+        )
+
+        self.assertEqual(
+            rfn.utils.eng_formatter(None), 'None'
+        )
+
+        self.assertEqual(
+            rfn.utils.eng_formatter(10.005e-8), '100.05e-9'
+        )
+
+        self.assertEqual(
+            rfn.utils.eng_formatter(5555555), '5.556e6'
+        )
+
+        self.assertEqual(
+            rfn.utils.eng_formatter(2e7 +0.01j), '(20e6+0.01j)'
+        )
+
+        self.assertEqual(
+            rfn.utils.eng_formatter([2e7 +0.01j, 2e-4j]), '[(20e6+0.01j) (0+200e-6j)]'
         )
 
 if __name__ == "__main__":

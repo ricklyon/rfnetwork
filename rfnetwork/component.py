@@ -90,17 +90,11 @@ class Component(object):
             
             self._state[k] = deepcopy(v)
 
-    def format_state(self, threshold: int = 100, **kwargs):
+    def format_state(self, **kwargs) -> str:
         """
         Get a string value of all the state variables.
         """
-        state_str = ", ".join([f"{k}: {utils.eng_format(v)}" for k, v in self.state.items()])
-
-        # truncate long strings
-        if len(state_str) > threshold:
-            state_str = state_str[:threshold] + "..."
-
-        return state_str
+        return ", ".join([f"{k}: {utils.eng_formatter(v)}" for k, v in self.state.items()])
 
     def __or__(self, other):
         """ 
@@ -114,7 +108,14 @@ class Component(object):
     def __str__(self):
         """ Print the state variables """
         module_name = self.__class__.__module__ + "." + self.__class__.__name__ 
-        return f"<{module_name} ({self.format_state()}) {self.n_ports} ports>"
+        state_str = self.format_state()
+
+        # truncate long strings
+        threshold = 50
+        if len(state_str) > threshold:
+            state_str = state_str[:threshold] + "..."
+
+        return f"<{module_name} ({state_str}) {self.n_ports} ports>"
     
     def equals(self, other) -> bool:
         """
@@ -566,18 +567,11 @@ class Component_SnP(Component):
         sdata, _ = self._get_file_data()
         return sdata.coords["frequency"]
 
-    def format_state(self, threshold: int = 100, **kwargs):
+    def format_state(self, **kwargs) -> str:
         """
         Get a string value of the active file.
         """
-
-        state_str =  ", ".join([f"{k}: {Path(self.file[v].name)}" for k, v in self.state.items()])
-    
-        # truncate long strings
-        if len(state_str) > threshold:
-            state_str = state_str[:threshold] + "..."
-
-        return state_str
+        return ", ".join([f"{k}: {Path(self.file[v].name)}" for k, v in self.state.items()])
     
     def _get_file_data(self) -> Tuple[ldarray, ldarray]:
         """
