@@ -16,7 +16,7 @@ plt.style.use(rfn.DEFAULT_STYLE)
 try:
     dir_ = Path(__file__).parent
 except:
-    dir_ = Path().cwd() / "examples"
+    dir_ = Path().cwd()
 
 DATA_DIR = dir_ / 'data'
 
