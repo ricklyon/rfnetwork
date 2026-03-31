@@ -5,7 +5,7 @@ Dipole Antenna
 Simulate dipole antenna and plot far-field gain.
 """
 
-# sphinx_gallery_thumbnail_number = -3
+# sphinx_gallery_thumbnail_number = -1
 
 import numpy as np 
 import matplotlib.pyplot as plt 

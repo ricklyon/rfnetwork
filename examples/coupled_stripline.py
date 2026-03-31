@@ -1,11 +1,11 @@
 """
-Coupled Microstrip Lines
-============
+Coupled Stripline
+=================
 
 Analyze even and odd mode impedance of coupled strip lines.
 """
 
-# sphinx_gallery_thumbnail_number = 1
+# sphinx_gallery_thumbnail_number = 3
 
 import numpy as np 
 import matplotlib.pyplot as plt 

@@ -5,7 +5,7 @@ Filters
 Examples of basic, lumped element filter.
 """
 
-# sphinx_gallery_thumbnail_number = -1
+# sphinx_gallery_thumbnail_number = -2
 
 import rfnetwork as rfn
 import numpy as np
