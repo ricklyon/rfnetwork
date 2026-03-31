@@ -14,7 +14,6 @@ build/
 _autosummary/
 auto_examples/
 docs/sg_execution_times.rst
-examples/data/
 *.ipynb_checkpoints
 **/debug/
 *.gif
