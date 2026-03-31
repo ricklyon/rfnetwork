@@ -243,3 +243,4 @@ b.plot(42, 62, 72, ref=32, fmt="ang", frequency=frequency, axes=ax2)
 b.plot(13, 14, 16, ref=17, fmt="ang", frequency=frequency, axes=ax3)
 
 fig.tight_layout()
+plt.show()

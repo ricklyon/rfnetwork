@@ -13,7 +13,7 @@ np.set_printoptions(suppress=True)
 DATA_DIR = Path(__file__).parent.parent / "data"
 
 
-class TestCore(unittest.TestCase):
+class TestFilters(unittest.TestCase):
 
     @parameterized.expand(
         list(range(1, 11))

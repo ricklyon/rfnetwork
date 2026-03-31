@@ -53,8 +53,8 @@ fig, ax = plt.subplots(1, 1, figsize=(10, 7))
 
 for n in n_list:
     # build lowpass filter network
-    fn = bpf = rfn.elements.LumpedElementFilter.from_chebyshev(fc, btype="lowpass", n=n)
-    sdata = fn.evaluate(frequency)["s"]
+    lpf = rfn.elements.LumpedElementFilter.from_chebyshev(fc, btype="lowpass", n=n)
+    sdata = lpf.evaluate(frequency)["s"]
     ax.plot((frequency / fc) - 1, -rfn.conv.db20_lin(sdata.sel(b=2, a=1)), linewidth=2)
 
 # plot formatting
@@ -131,5 +131,4 @@ tuners = [
 #
 
 # print tuned values (unless tune was canceled, then this just shows the initial values)
-# the component values can also be queried with the components dictionary of the Network object
 bpf.print_state()
