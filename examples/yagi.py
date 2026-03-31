@@ -5,7 +5,7 @@ Yagi Antenna
 Simulate UHF Yagi antenna and plot far-field gain.
 """
 
-# sphinx_gallery_thumbnail_number = -2
+# sphinx_gallery_thumbnail_number = -3
 
 from pathlib import Path
 import numpy as np 
@@ -120,7 +120,9 @@ theta_cut = rfn.conv.db10_lin(
     s.get_farfield_gain(theta=np.arange(-180, 181, 2), phi=0).sel(polarization="thetapol")
 )
 
-fig, (ax1, ax2) = plt.subplots(1, 2, subplot_kw=dict(projection="polar"), figsize=(8, 4))
+fig1, ax1 = plt.subplots(subplot_kw=dict(projection="polar"))
+fig2, ax2 = plt.subplots(subplot_kw=dict(projection="polar"))
+
 theta_rad = np.deg2rad(theta_cut.coords["theta"])
 phi_rad = np.deg2rad(phi_cut.coords["phi"])
 
