@@ -8,4 +8,4 @@ from . tuning import TunerGroup
 from . solver import FDTD_Solver
 from . import utils
 from . import math
-from . styles import *
+from . styles import DEFAULT_STYLE
