@@ -49,7 +49,7 @@ fc = 150e6
 frequency = np.logspace(0, 11, 5000)
 n_list = [1, 3, 5, 7, 9]
 
-fig, ax = plt.subplots(1, 1, figsize=(10, 7))
+fig, ax = plt.subplots(1, 1, figsize=(8, 5))
 
 for n in n_list:
     # build lowpass filter network
@@ -63,16 +63,10 @@ ax.set_xscale("log")
 ax.set_xlim([10e-2, 10])
 ax.grid(True)
 base_xticks = np.array([1, 2, 3, 5, 7])
-xticks = np.concatenate([
-        base_xticks * 1e-2, base_xticks * 1e-1, base_xticks, [10]
-])
+xticks = np.concatenate([base_xticks * 1e-2, base_xticks * 1e-1, base_xticks, [10]])
 ax.set_xticks(xticks)
+ax.set_xticklabels([f"{x:.2f}" for x in xticks], fontsize=9)
 
-ax.set_xticklabels(
-    xticks,
-    fontsize=10
-)
-ax.xaxis.set_major_formatter(lambda x, pos: f"{x:.2f}")
 ax.legend([f"n={n}" for n in n_list])
 ax.set_xlabel(r"$|\frac{\omega}{\omega_c}| - 1$", fontsize=13)
 ax.set_ylabel("Attenuation [dB]")
