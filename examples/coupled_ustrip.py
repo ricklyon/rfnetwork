@@ -5,6 +5,8 @@ Coupled Microstrip Lines
 Analyze even and odd mode impedance of coupled microstrip lines.
 """
 
+# sphinx_gallery_thumbnail_number = -2
+
 import numpy as np 
 import matplotlib.pyplot as plt 
 from rfnetwork import const, conv, utils
@@ -20,7 +22,6 @@ frequency = np.arange(5e9, 15e9, 10e6)
 # %%
 # Design Parameters 
 # ------------------------
-# sphinx_gallery_thumbnail_number = -2
 
 ms_w = 0.03  # trace width
 ms_sp = 0.005  # trace spacing

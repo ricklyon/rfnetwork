@@ -5,6 +5,8 @@ Yagi Antenna
 Simulate UHF Yagi antenna and plot far-field gain.
 """
 
+# sphinx_gallery_thumbnail_number = -2
+
 from pathlib import Path
 import numpy as np 
 import matplotlib.pyplot as plt 
@@ -25,7 +27,6 @@ except:
 # %%
 # User defined Parameters [inches]
 # ------------------------
-# sphinx_gallery_thumbnail_number = -1
 
 f0 = 440e6
 lam0 = rfn.const.c0_in / f0

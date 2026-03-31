@@ -5,6 +5,8 @@ Wilkinson Combiner
 Create a 3D model of a Wilkinson combiner.
 """
 
+# sphinx_gallery_thumbnail_number = 1
+
 import numpy as np 
 import matplotlib.pyplot as plt 
 from rfnetwork import const, conv, utils
@@ -26,7 +28,6 @@ except:
 # %%
 # Design Parameters 
 # ------------------------
-# sphinx_gallery_thumbnail_number = 1
 
 # values are in inches
 ms_w = 0.043  # 50 ohms trace width

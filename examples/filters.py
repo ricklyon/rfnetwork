@@ -5,6 +5,8 @@ Filters
 Examples of basic, lumped element filter.
 """
 
+# sphinx_gallery_thumbnail_number = -1
+
 import rfnetwork as rfn
 import numpy as np
 import matplotlib.pyplot as plt
@@ -15,8 +17,6 @@ plt.style.use(rfn.DEFAULT_STYLE)
 # %%
 # Bandstop Filter
 # ----------------
-# sphinx_gallery_thumbnail_number = -1
-#
 
 bsf = rfn.elements.LumpedElementFilter.from_chebyshev(fc=(70e6, 150e6), btype="bandstop", n=3)
 

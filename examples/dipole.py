@@ -5,6 +5,8 @@ Dipole Antenna
 Simulate dipole antenna and plot far-field gain.
 """
 
+# sphinx_gallery_thumbnail_number = -3
+
 import numpy as np 
 import matplotlib.pyplot as plt 
 from rfnetwork import const, conv
@@ -19,7 +21,6 @@ plt.style.use(rfn.DEFAULT_STYLE)
 # %%
 # User defined Parameters [inches]
 # ------------------------
-# sphinx_gallery_thumbnail_number = -1
 
 # trace width
 ms_w = 0.030

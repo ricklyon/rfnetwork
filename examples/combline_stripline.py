@@ -12,6 +12,9 @@ outer resonators and avoids the issue of small spacings, but does require some m
 [1] G. L. Matthaei, Microwave Filters, Impedance-Matching Networks, and Coupling Structures, 1980
 
 """
+
+# sphinx_gallery_thumbnail_number = 1
+
 from pathlib import Path
 import numpy as np 
 import matplotlib.pyplot as plt 
@@ -31,7 +34,7 @@ except:
 # %%
 # Design Parameters 
 # ------------------------
-# sphinx_gallery_thumbnail_number = 1
+
 
 er = 3.66  # dielectric constant
 b = 0.06  # substrate height, inches

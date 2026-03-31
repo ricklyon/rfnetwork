@@ -11,6 +11,8 @@ conjugately matched at the output rather than being matched for optimal output p
 
 """
 
+# sphinx_gallery_thumbnail_number = -3
+
 import rfnetwork as rfn
 from pathlib import Path
 import numpy as np
@@ -61,11 +63,7 @@ pa_8w.plot();
 # %%
 # Matching Network
 # ----------------
-# 
 # Build a matching network, with the input and output networks contained in their own ``Component`` class.
-#
-# sphinx_gallery_thumbnail_number = -3
-
 
 # 50 ohm microstrip model, substrate is from the amplifier evaluation board.
 ms50 = rfn.elements.MSLine(
