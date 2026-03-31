@@ -105,8 +105,8 @@ def ifft(Xw: ldarray):
     missing_f = np.arange(0, f0, fstep)
 
     # create zero frequency term by extrapolating lowest value
-    b_dims = [None] * len(data.shape[1:])
-    missing_data = np.broadcast_to(missing_data[:, *b_dims], (missing_fnum,) + data.shape[1:])
+    b_dims = [None] + ([None] * len(data.shape[1:]))
+    missing_data = np.broadcast_to(missing_data[b_dims], (missing_fnum,) + data.shape[1:])
     data_full = np.concatenate((missing_data, data), axis=0)
 
     # full frequency array
