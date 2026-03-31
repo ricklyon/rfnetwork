@@ -198,7 +198,6 @@ fig, ax = plt.subplots()
 # render the model before generating the mesh to check for any obvious errors
 s.render(show_mesh=False, show_rulers=False, axes=ax, camera_position=cpos)
 
-
 # mesh with a minimum grid cell size of 5mils. This is fairly coarse for line spacings of 15mils and 
 # requires edge correction
 s.generate_mesh(d0 = 0.02, d_edge = 0.005)
@@ -237,8 +236,13 @@ for i, ln in enumerate(lines):
 # to check the edge correction was set up properly, plot the FDTD coefficients of the H field normal to the conductor
 # surface (hz in this case). The fields at the edge vary asymptotically along the x direction, so plot the hz_x1 or 
 # hz_x2 fields. 
+cpos = pv.CameraPosition(
+    position=(xmax/2, tap_loc, 1),
+    focal_point=(xmax/2, tap_loc, 0),
+    viewup=(0, 1, 0),
+)
 fig, ax = plt.subplots()
-s.plot_coefficients("hz_x1", "b", "z", position=0, point_size=15, cmap="brg", camera_position = "xy", axes=ax, zoom=1.5)
+s.plot_coefficients("hz_x1", "b", "z", position=0, point_size=15, cmap="brg", camera_position = cpos, axes=ax, zoom=3)
 
 # %%
 # Solve and Plot S-parameters
