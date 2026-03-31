@@ -11,9 +11,14 @@ import numpy as np
 import matplotlib.pyplot as plt
 import mpl_markers as mplm
 
-np.set_printoptions(suppress=True, threshold=12)
+# set matplotlib style
+plt.style.use(rfn.DEFAULT_STYLE)
 
-dir_ = Path().cwd()# / 'examples'
+try:
+    dir_ = Path(__file__).parent
+except:
+    dir_ = Path().cwd()
+
 DATA_DIR = dir_ / "data/PD55008E_S_parameter"
 
 # frequency range for plots
@@ -118,7 +123,6 @@ lines1 = n.plot_probe(
 
 
 ln_s11 = n.plot(11, fmt="smith", tune=True, axes=axes["s11"], frequency=frequency)
-axes["s11"].legend(fontsize=8)
 
 smithchart_marker(axes["s11"], f0, lines=lines1, ylabel=False)
 smithchart_marker(axes["s11"], f0, lines=ln_s11)
@@ -132,11 +136,9 @@ lines2 = n.plot_probe(
 )
 
 ln_s22 = n.plot(22, fmt="smith", tune=True, axes=axes["s22"], frequency=frequency) 
-axes["s22"].legend(fontsize=8)
 
 smithchart_marker(axes["s22"], f0, lines=lines2, ylabel=False)
 smithchart_marker(axes["s22"], f0, lines=ln_s22)
-
 
 im = plt.imread(dir_ / "data/img/pa_tuning.png")
 axes["im"].imshow(im)
@@ -151,22 +153,23 @@ fig.tight_layout()
 #
 
 tuners = [
-    dict(component="m_in.c1", variable="value", lower=1, upper=30, label="C1 [pF]"),
-    dict(component="m_in.ms1", variable="length", lower=0.1, upper=2, label="MS1 [in]"),
-    dict(component="m_in.c2", variable="value", lower=10, upper=80, label="C2 [pF]"),
-    dict(component="m_in.ms2", variable="length", lower=0.1, upper=1, label="MS2 [in]"),
-    dict(component="m_in.r1", variable="value", lower=0.1, upper=5, label="R1 [ohms]"),
-    dict(component="m_out.ms3", variable="length", lower=0.1, upper=1, label="MS3 [in]"),
-    dict(component="m_out.c4", variable="value", lower=10, upper=100, label="C3 [pF]"),
-    dict(component="m_out.ms4", variable="length", lower=0.1, upper=2, label="MS2 [in]"),
+    dict(component="m_in.c1", variable="value", label="C1 [pF]"),
+    dict(component="m_in.ms1", variable="length", label="MS1 [in]"),
+    dict(component="m_in.c2", variable="value", label="C2 [pF]"),
+    dict(component="m_in.ms2", variable="length", label="MS2 [in]"),
+    dict(component="m_in.r1", variable="value", label="R1 [ohms]"),
+    dict(component="m_out.ms3", variable="length", label="MS3 [in]"),
+    dict(component="m_out.c4", variable="value", label="C3 [pF]"),
+    dict(component="m_out.ms4", variable="length", label="MS2 [in]"),
     dict(component="m_out.c4", variable="value", lower=5, upper=30, label="C4 [pF]"),
 ]
-
 # start the tuner (this is disabled for the readthedocs runner)
 # n.tune(tuners)
 
 # %%
 # .. image:: ../_static/img/tuning_window.png
 #
+
+plt.show()
 
 

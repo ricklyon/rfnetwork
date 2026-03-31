@@ -1,0 +1,46 @@
+# based on: https://github.com/matplotlib/matplotlib/blob/main/lib/matplotlib/mpl-data/stylelib/ggplot.mplstyle
+
+patch.linewidth: 0.5
+patch.facecolor: 348ABD  # blue
+patch.edgecolor: EEEEEE
+patch.antialiased: True
+
+font.size: 10.0
+
+axes.facecolor: white
+axes.edgecolor: E5E5E5
+axes.linewidth: 1
+axes.grid: True
+axes.titlesize: large
+axes.labelsize: medium
+axes.labelcolor: 555555
+axes.axisbelow: True       # grid/ticks are below elements (e.g., lines, text)
+axes.xmargin : 0
+
+axes.prop_cycle: cycler('color', ['348ABD', 'E24A33', 'tab:green', 'tab:purple', 'tab:brown', 'tab:pink', 'tab:gray', 'tab:olive', 'tab:cyan'])
+# #E24A33 : red
+# #348ABD : blue
+
+xtick.color: 555555
+xtick.direction: inout
+xtick.labelsize: small
+
+ytick.color: 555555
+ytick.direction: inout
+ytick.labelsize: small
+
+grid.color: E5E5E5
+grid.linestyle: -    # solid line
+
+figure.facecolor: white
+figure.edgecolor: 0.50
+
+font.family : serif
+font.serif : Times New Roman, Times, DejaVu Serif
+
+legend.fontsize: small
+legend.loc: upper right
+legend.frameon: True
+legend.framealpha: 0.9
+legend.labelcolor: 555555
+legend.edgecolor: black

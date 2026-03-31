@@ -5,6 +5,8 @@ Wilkinson Combiner
 Create a 3D model of a Wilkinson combiner.
 """
 
+# sphinx_gallery_thumbnail_number = 1
+
 import numpy as np 
 import matplotlib.pyplot as plt 
 from rfnetwork import const, conv, utils
@@ -15,15 +17,17 @@ from pathlib import Path
 import rfnetwork as rfn
 import mpl_markers as mplm
 
-dir_ = Path().cwd()
+# set matplotlib style
+plt.style.use(rfn.DEFAULT_STYLE)
 
-# pv.set_jupyter_backend("trame")
-# sys.argv = sys.argv[0:1]
+try:
+    dir_ = Path(__file__).parent
+except:
+    dir_ = Path().cwd()
 
 # %%
 # Design Parameters 
 # ------------------------
-# sphinx_gallery_thumbnail_number = 1
 
 # values are in inches
 ms_w = 0.043  # 50 ohms trace width
@@ -121,7 +125,7 @@ resistor = pv.Rectangle([
     (radius - 0.01, gap/2, sub_h),
     (radius + 0.01, gap/2, sub_h),
 ])
-s.add_resistor(resistor, 100, integration_axis="y+")
+s.add_resistor(resistor, 100, integration_line="y+")
 
 # assign PML boundary on top face
 s.assign_PML_boundaries("z+", n_pml=5)
@@ -177,7 +181,7 @@ wilk.plot(21, 31, fmt="ang_unwrap", axes=ax3)
 mplm.line_marker(x=f0/1e9, axes=ax2)
 mplm.line_marker(x=f0/1e9, axes=ax3)
 fig.tight_layout()
-
+plt.show()
 
 # %%
 # Visualize Fields
@@ -187,5 +191,5 @@ fig.tight_layout()
 # .. image:: ../_static/img/wilkinson.gif
 
 # To generate the full s-parameter matrix, each port needs to be solved individually.
-gif_setup = dict(file=dir_ / "../docs/_static/img/wilkinson.gif", fps=15, step_ps=5)
+gif_setup = dict(file = dir_ / "../docs/_static/img/wilkinson.gif", fps=15, step_ps=5)
 p = s.plot_monitor(["mon1"], camera_position="xy", vmax=30, vmin=0, gif_setup=gif_setup)

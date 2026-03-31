@@ -1,11 +1,14 @@
 
 
 import numpy as np
+import matplotlib.pyplot as plt
 
 from PySide6 import QtCore
 import sys
 from typing import Callable
-from PySide6.QtWidgets import (QWidget, QLineEdit, QSlider, QGridLayout, QLabel, QVBoxLayout)
+from PySide6.QtWidgets import (
+    QWidget, QLineEdit, QSlider, QGridLayout, QLabel, QVBoxLayout, QPushButton, QHBoxLayout, QApplication
+)
 
 def round_to_multiple(value, multiple=1):
     """ 
@@ -50,9 +53,10 @@ class TunerThread(QtCore.QThread):
         self.mutex = QtCore.QMutex()
         self.queue = []
         self.plot = plot
+        self._terminate = False
         super().__init__()
 
-    @QtCore.Slot(str)
+    @QtCore.Slot()
     def push(self):
         """
         Request a plot update
@@ -60,15 +64,20 @@ class TunerThread(QtCore.QThread):
 
         self._wait.wakeAll()
 
+    @QtCore.Slot()
+    def terminate(self):
+        self._terminate = True
+        self._wait.wakeAll()
+
     def run(self):
 
-        while 1:
+        while not self._terminate:
+            
             self.mutex.lock()
             self._wait.wait(self.mutex)
             self.mutex.unlock()
 
             self.plot()
-
     
 class DoubleSlider(QSlider):
 
@@ -127,28 +136,31 @@ class FloatTuner(QWidget):
         initial: float, 
         callback: Callable, 
         processor: QtCore.QThread,
+        multiplier: float,
         component: str = None,
     ):
         super(FloatTuner, self).__init__()
         name = QLabel(label)
 
         self.variable = variable
+        self.multiplier = multiplier
+        self.initial = initial
 
         self.processor = processor
-        
-        self.lower_limit = QLineEdit(str(lower))
-        self.lower_limit.setFixedWidth(50)
-
-        self.upper_limit = QLineEdit(str(upper))
-        self.upper_limit.setFixedWidth(50)
         
         self.value = QLineEdit(str(initial))
         self.value.setFixedWidth(50)
 
-        self.step = (upper - lower) / 100
+        self.step = (upper - lower) / 200
         self.slider = DoubleSlider(self.step, QtCore.Qt.Horizontal)
-        self.slider.setValue(initial)
         self.slider.setBounds(lower, upper, self.step)
+        self.slider.setValue(initial)
+
+        self.lower_limit = QLineEdit(str(round_to_multiple(lower, self.step)))
+        self.lower_limit.setFixedWidth(50)
+
+        self.upper_limit = QLineEdit(str(round_to_multiple(upper, self.step)))
+        self.upper_limit.setFixedWidth(50)
         
         self.setFixedWidth(500)
 
@@ -184,6 +196,7 @@ class FloatTuner(QWidget):
         self.slider.setValue(value)
         value = self.slider.value()
         self.value.setText(str(value))
+        
 
     def slider_value_changed(self, value):
         """
@@ -195,7 +208,7 @@ class FloatTuner(QWidget):
         if np.abs(value - prev_value) > (self.step / 2):
             self.value.setText(str(value))
             # notify the calling method that the variable has changed
-            self.callback(**{self.variable : value})
+            self.callback(**{self.variable : value * self.multiplier})
             # issue a plot update
             self.processor.push()
 
@@ -207,6 +220,12 @@ class FloatTuner(QWidget):
         max_ = float(self.upper_limit.text())
         self.step = (max_ - min_) / 100
         self.slider.setBounds(min_, max_, self.step)
+
+    def reset(self):
+        """ Reset to initial value"""
+        self.slider_value_changed(self.initial)
+        self.slider.setValue(self.initial)
+
 
 
 class TunerGroup(QWidget):
@@ -226,5 +245,50 @@ class TunerGroup(QWidget):
             self.tuners.append(FloatTuner(**config, processor=self.processor))
             mainLayout.addWidget(self.tuners[i], i)
 
+        button_layout = QHBoxLayout()
+        # reset button
+        reset_button = QPushButton("Reset")
+        # write button
+        write_button = QPushButton("Save and Exit")
+        # cancel 
+        cancel_button = QPushButton("Cancel")
+
+        button_layout.addWidget(reset_button)
+        button_layout.addWidget(write_button)
+        button_layout.addWidget(cancel_button)
+        button_layout.setSpacing(15)
+
+        mainLayout.addLayout(button_layout)
+
         mainLayout.setSpacing(1)
         self.setLayout(mainLayout)
+
+        reset_button.clicked.connect(self.reset)
+        write_button.clicked.connect(self.write)
+        cancel_button.clicked.connect(self.cancel)
+
+    def reset(self):
+        """ Reset all tuners to initial values. """
+        [t.reset() for t in self.tuners]
+
+    def write(self):
+        """ Leave currently configured values and exit """
+        self.closeEvent()
+
+    def cancel(self):
+        """ Reset to initial values and exit """
+        self.reset()
+        self.closeEvent()
+
+    def closeEvent(self, event = None):
+        
+        if event:
+            event.accept()
+
+        self.processor.terminate()
+        self.processor.wait()
+        QApplication.quit()
+        plt.close("all")
+
+
+

@@ -89,12 +89,33 @@ class Component(object):
                 raise KeyError(f"Invalid state key, {k}.")
             
             self._state[k] = deepcopy(v)
-        
+
+    def format_state(self, **kwargs) -> str:
+        """
+        Get a string value of all the state variables.
+        """
+        return ", ".join([f"{k}: {utils.eng_formatter(v)}" for k, v in self.state.items()])
+
     def __or__(self, other):
         """ 
         Allows port to be indexed with the syntax: component|2 
         """
         return (self, int(other))
+    
+    def __repr__(self):
+        return str(self)
+    
+    def __str__(self):
+        """ Print the state variables """
+        module_name = self.__class__.__module__ + "." + self.__class__.__name__ 
+        state_str = self.format_state()
+
+        # truncate long strings
+        threshold = 50
+        if len(state_str) > threshold:
+            state_str = state_str[:threshold] + "..."
+
+        return f"<{module_name} ({state_str}) {self.n_ports} ports>"
     
     def equals(self, other) -> bool:
         """
@@ -281,6 +302,8 @@ class Component(object):
             - "lower" : Floating point lower bound of tuner.
             - "upper" : Floating point upper bound of tuner.
             - "label" : Label for tuner.
+            - "multiplier" : multiply the tuner by this value before sending it to the update function, 
+            default is 1.
             - "component" : If tuning a network, the component designator must be specified for each tuned variable. 
             Supports nested Networks by using a "." between sub-networks. For example "m_in.c1" would point to the 
             "c1" component of the "m_in" sub-network.
@@ -301,15 +324,34 @@ class Component(object):
         for config in tuners:
 
             # drill down to a sub-component if this is a network
-            if "component" in config:
+            if "component" in config.keys():
                 component = self
                 for c in config["component"].split("."):
                     component = component[c]
             else:
                 component = self
 
-            config["callback"] = component.set_state
-            config["initial"] = component.state[config["variable"]]
+            # set default values
+            if "variable" not in config.keys():
+                config["variable"] = "value"
+
+            if "multiplier" not in config.keys():
+                config["multiplier"] = 1
+
+            if "callback" not in config.keys():
+                config["callback"] = component.set_state
+
+            if "initial" not in config.keys():
+                # multiplier is applied to the config values, use the inverse multiplier to convert the
+                # state variable to the config value
+                config["initial"] = component.state[config["variable"]] / config["multiplier"] 
+
+            if "upper" not in config.keys():
+                config["upper"] = config["initial"] * 1.5
+
+            if "lower" not in config.keys():
+                config["lower"] = config["initial"] / 1.5
+
 
         for ax in self._tune["axes"]:
             mplm.init_axes(ax)
@@ -445,6 +487,17 @@ class Component(object):
             ret_data["n"] = ldarray(ndata, coords=dict(frequency=frequency, b=port_a, a=port_a))
 
         return ret_data
+    
+    def evaluate_s(self, frequency: np.ndarray = None) -> ldarray:
+        """
+        Computes the component s-matrix data
+
+        Parameters
+        ----------
+        frequency : np.ndarray, optional
+            Frequency vector to compute data over.
+        """
+        return self.evaluate(frequency)["s"]
 
 
 class Component_SnP(Component):
@@ -514,6 +567,12 @@ class Component_SnP(Component):
         sdata, _ = self._get_file_data()
         return sdata.coords["frequency"]
 
+    def format_state(self, **kwargs) -> str:
+        """
+        Get a string value of the active file.
+        """
+        return ", ".join([f"{k}: {Path(self.file[v].name)}" for k, v in self.state.items()])
+    
     def _get_file_data(self) -> Tuple[ldarray, ldarray]:
         """
         Read the touchstone data for the current state.

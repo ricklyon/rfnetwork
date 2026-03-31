@@ -23,7 +23,7 @@ dependencies = [
     "mpl-markers", 
     "pyside6", 
     "pyvista",
-    "imageio"
+    "imageio",
 ]
 requires-python = ">=3.9"
 
@@ -33,6 +33,9 @@ dev = [
     "pytest", 
     "parameterized", 
     "ipykernel", 
+    "trame",
+    "trame-vtk",
+    "trame-vuetify"
 ]
 
 docs = [

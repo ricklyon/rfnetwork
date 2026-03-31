@@ -30,7 +30,7 @@ class FDTD_Solver():
         self.bounding_box = bounding_box
         self.dielectric = dict()
         self.conductor = dict()
-        self.lumped_element = dict()
+        self.lumped_elements = dict()
 
         self.pml_boundaries = []
 
@@ -38,6 +38,7 @@ class FDTD_Solver():
         self.farfield = dict()
         self.probes = dict()
         self.ports = []
+        self.ports_inv = []
         
         self._n_pml = None
         self._auto_name_counter = 0
@@ -50,6 +51,11 @@ class FDTD_Solver():
 
         self._meshed = False
         self._solved = False
+        self._time = None
+
+    @property
+    def time(self):
+        return self._time
 
     def invalidate_mesh(self):
         self._meshed = False
@@ -144,7 +150,7 @@ class FDTD_Solver():
         self, 
         number: int, 
         face: pv.PolyData, 
-        integration_axis: str, 
+        integration_line: str, 
         r0: float = 50, 
         name: str = None
     ):
@@ -157,19 +163,99 @@ class FDTD_Solver():
             port number
         face : pv.PolyData
             pyvista PolyData object of 2D face. Must be aligned with the cartesian axis
-        integration_axis : str, {"x+", "x-", "y+", "y-", "z+", "z-"}
+        integration_line : str, {"x+", "x-", "y+", "y-", "z+", "z-"}
             axis that the port voltage is evaluated across.
         r0 : float, default: 50
             port impedance
         """
-        self._add_object(
-            self.lumped_element, 
-            face, 
-            properties=dict(integration_axis=integration_axis, r=r0, port=number, src=None), 
-            name=name
-        )
 
-    def add_resistor(self, face: pv.PolyData, value: float, integration_axis: str, name: str = None):
+        # integration line is defined by two points
+        if isinstance(integration_line, pv.PolyData):
+            
+            if len(integration_line.points) != 2:
+                raise ValueError("Integration line must contain only 2 points.")
+            
+            f_p0, f_p1 = integration_line.points
+            f_axis = np.argmax(np.abs(f_p1 - f_p0))
+
+            # check that line is on port face
+            if not np.all(utils_mesh.is_point_in_surface(integration_line.points, face)):
+                raise ValueError("Integration line must lie on the lumped element or port face.")
+            
+            # check that line is on a cartesian axis
+            if np.count_nonzero(np.abs(f_p1 - f_p0) < self._tol) != 2:
+                raise ValueError("Integration line must be aligned with the cartesian axes.")
+
+            # direction of integration, positive if second point is more positive than first along the integration
+            # axis
+            f_dir = 1 if f_p1[f_axis] > f_p0[f_axis] else -1
+
+            # string values for axis and direction
+            s_axis = ["x", "y", "z"][f_axis]
+            s_dir = "+" if f_dir == 1 else "-"
+            integration_axis = f"{s_axis}{s_dir}"
+
+            # face end points along the integration axis, face0 is the starting point of the line, face1 is the end
+            f_face0, f_face1 = np.min(face.points[:, f_axis]), np.max(face.points[:, f_axis]) 
+            if f_dir == -1:
+                f_face0, f_face1 = f_face1, f_face0
+
+            # check that starting point of integration line is on the face edge
+            if np.abs((f_face0 - f_p0[f_axis])) > self._tol:
+                raise ValueError("Integration line must start on face edge.")
+            
+            # if line stop before meeting the top edge of the face, split the face into two sections
+            if not np.abs((f_face0 - f_p1[f_axis])) > self._tol:
+                raise ValueError("Use axis notation for integration lines that span the full face")
+
+            # split the face into two sections, the main section will contain the integration line,
+            # the secondary will capture the remaining part of the face. split_face_idx is the
+            # axis indices of the secondary axis.
+            fmin, fmax = np.min(face.points, axis=0), np.max(face.points, axis=0)
+
+            def build_face(f_lower, f_upper):
+                corners = np.array([fmin, fmax, fmax]) 
+                corners[0, f_axis] = f_lower
+                corners[1, f_axis] = f_lower
+                corners[2, f_axis] = f_upper
+
+                return pv.Rectangle(tuple(corners))
+
+            if f_dir == -1:
+                face_pri = build_face(f_p1[f_axis], f_p0[f_axis])
+                face_sec = build_face(fmin[f_axis], f_p1[f_axis])
+
+            else:
+                face_pri = build_face(f_p0[f_axis], f_p1[f_axis])
+                face_sec = build_face(f_p1[f_axis], fmax[f_axis])
+
+            # add primary port, resistance is doubled because the inverted port is in parallel with it
+            self._add_object(
+                self.lumped_elements, 
+                face_pri, 
+                properties=dict(integration_line=integration_axis, r=r0 * 2, port=number), 
+                name=name
+            )
+
+            # integration axis of the inverted secondary port points the opposite direction as the primary, towards
+            # the end point of the integration line
+            integration_axis_inv = integration_axis[0] + "-" if f_dir == 1 else "+"
+            self._add_object(
+                self.lumped_elements, 
+                face_sec, 
+                properties=dict(integration_line=integration_axis_inv, r=r0 * 2, port=-number), 
+                name=name
+            )
+
+        else:
+            self._add_object(
+                self.lumped_elements, 
+                face, 
+                properties=dict(integration_line=integration_line, r=r0, port=number), 
+                name=name
+            )
+
+    def add_resistor(self, face: pv.PolyData, value: float, integration_line: str, name: str = None):
         """
         Attach a resistive element to a face.
 
@@ -179,14 +265,14 @@ class FDTD_Solver():
             pyvista PolyData object of 2D face
         value : pv.PolyData
             resistance in Ohms
-        integration_axis : str, {"x+", "x-", "y+", "y-", "z+", "z-"}
+        integration_line : str, {"x+", "x-", "y+", "y-", "z+", "z-"}
             axis and direction that the port voltage is evaluated along.
         """
         
         self._add_object(
-            self.lumped_element, 
+            self.lumped_elements, 
             face, 
-            properties=dict(integration_axis=integration_axis, r=value, port=None), 
+            properties=dict(integration_line=integration_line, r=value, port=None), 
             name=name
         )
 
@@ -283,7 +369,7 @@ class FDTD_Solver():
 
         # conductor objects and lumped ports
         cond_objects = [cond["obj"] for cond in self.conductor.values()] 
-        lumped_ele_objects = [ele["obj"] for ele in self.lumped_element.values()]
+        lumped_ele_objects = [ele["obj"] for ele in self.lumped_elements.values()]
 
         # substrate objects
         sub_objects = [self.bounding_box] + [sub["obj"] for sub in self.dielectric.values()]
@@ -752,20 +838,24 @@ class FDTD_Solver():
         Initialize lumped elements, including lumped ports.
         """
         # get the lumped element faces that are assigned as port terminations
-        port_faces = [element for element in self.lumped_element.values() if element["port"] is not None]
-        self.ports = [None] * len(port_faces)
+        ports = [element for element in self.lumped_elements.values() if element["port"] is not None]
+
+        n_ports = max([abs(element["port"]) for element in ports])
+
+        self.ports = [None] * n_ports
+        self.ports_inv = [None] * n_ports
         
         d_cells = [conv.m_in(d) for d in self.d_cells]
         dh_cells = [conv.m_in(d) for d in self.dh_cells]
         
         # element = self.lumped_element["obj_2"]
-        for name, element in self.lumped_element.items():
+        for name, element in self.lumped_elements.items():
 
             face = element["obj"]
             # total resistance
             r = element["r"]
             # voltage integration direction 
-            integration_axis = element["integration_axis"]
+            integration_line = element["integration_line"]
             port = element["port"]
     
             if face.n_cells > 1 or face.faces[0] != 4:
@@ -776,18 +866,19 @@ class FDTD_Solver():
     
             # get width of pec in cell units
             idx_d = p2 - p1
+            # normal axis to the port face.
+            n_axis = np.argmin(idx_d)
     
             if np.count_nonzero(idx_d) != 2:
                 raise ValueError("Port face must be on cartesian grid, and must be 2D.")
             
-            # normal axis to the port face.
-            n_axis = np.argmin(idx_d)
-            # axis along integration direction
-            f_axis = dict(x=0, y=1, z=2)[integration_axis[0]]
+            # axis parallel to integration line
+            f_axis = dict(x=0, y=1, z=2)[integration_line[0]]
+            # direction of integration
+            f_dir = {"+": 1, "-": -1}[integration_line[1]]
+
             # axis along width of port
             w_axis = [ax for ax in [0, 1, 2] if ax != f_axis and ax != n_axis][0]
-            # direction of integration
-            f_dir = {"+": 1, "-": -1}[integration_axis[1]]
 
             # check that port faces are at least 2 cells wide. The two end points are not included, requiring
             # at least one field component in the center of the face
@@ -841,6 +932,7 @@ class FDTD_Solver():
             # number of components along integration axis. Component is in the middle of cell along the integration
             # axis 
             nf = (p2 - p1)[f_axis]
+
             # resistance of each cell is spilt so the combined resistance of all cells equals r
             r_cell = r * (nw) / nf
 
@@ -855,9 +947,12 @@ class FDTD_Solver():
             self.Cb[f"e{fa}_{na}"][efield_idx] = 1 / (denom)
             
             if port is not None:
+
+                group = self.ports if port > 0 else self.ports_inv
+
                 # assign face as a port if specified. resistive element acts as the port termination.
                 # direction indicates the voltage integration direction from higher voltage to lower.
-                self.ports[port - 1] = dict(
+                group[abs(port) - 1] = dict(
                     idx = efield_idx, 
                     Vs_a = f_dir / (denom * rterm * nf), 
                     field = f"e{fa}", 
@@ -882,7 +977,7 @@ class FDTD_Solver():
                     build_idx(fpos1[n_axis] + 0.001, fpos2[w_axis] + 0.001, fpos_n),
                 ])
 
-                self.add_current_probe(f"port{port}", current_face)
+                self.add_current_probe(f"port_{port}", current_face)
 
 
     def _init_PML(self, side: str):
@@ -1021,14 +1116,33 @@ class FDTD_Solver():
         self.invalidate_solution()
         self.check_mesh()
 
+        # check that waveforms all have identical lengths
+        if self._time is not None:
+            if len(self._time) != len(waveform):
+                raise ValueError("All excitations must have identical lengths.")
+        else:
+            self._time = np.arange(0, self.dt * len(waveform), self.dt)
+
         for p in np.atleast_1d(ports):
             self.ports[p-1]["src"] = waveform.astype(np.float32)
+
+            # assign the inverted version of the waveform to the secondary port, if present. The integration
+            # axis points in the opposite direction as the primary which will flip the sign and we don't need
+            # to do it here.
+            if self.ports_inv[p-1] is not None:
+                self.ports_inv[p-1]["src"] = waveform.astype(np.float32)
 
     def reset_excitations(self):
         """ Remove excitations from all ports. """
         
+        self._time = None
+
         for p in self.ports:
             p["src"] = None
+
+        for p in self.ports_inv:
+            if p is not None:
+                p["src"] = None
 
 
     def solve(self, n_threads: int = 4, show_progress: bool = True):
@@ -1145,11 +1259,17 @@ class FDTD_Solver():
         probes = []
         # initialize sources. Sources act like probes, but the values are input to the 
         # field grid before being replaced by the actual component value.
-        src_ports = [p for p in self.ports if p["src"] is not None]  # ports with excitations
+
         # iterate over all ports with excitations applied
-        for port in src_ports:
+        for port in (self.ports + self.ports_inv):
+
+            if port is None:
+                continue
 
             idx, Vs_a, field, src = port["idx"], port["Vs_a"], port["field"], port["src"]
+
+            if src is None:
+                src = np.zeros(Nt, dtype=dtype_, order="C")
 
             # convert slice indices to a list of values
             idx_list = [list(np.arange(v.start, v.stop)) if isinstance(v, slice) else [v] for v in idx]
@@ -1162,7 +1282,7 @@ class FDTD_Solver():
                         values=np.array(Vs_a_flt[j] * src, dtype=dtype_, order="C"), 
                         field=int(list(self.fshape.keys()).index(field)),
                         idx=[int(id) for id in idx_j],
-                        is_source=int(1)
+                        is_source=int(port["src"] is not None)
                     )
                 )
 
@@ -1230,18 +1350,24 @@ class FDTD_Solver():
         # get the voltages at each source components
         src_v = [s["values"] for s in probes]
         # move the measured source voltages back to the class variable for the associated port
-        cur_source = 0
-        for port in src_ports:
-            # get the number of components associated with this port
+        probe_i = 0 # counter for the current probe
+        for port in (self.ports + self.ports_inv):
+
+            if port is None:
+                continue
+
+            # get the number of probes associated with this port
             src_len = port["Vs_a"].size
             src_shape = port["Vs_a"].shape
 
-            port["values"] = np.array(src_v[cur_source: cur_source + src_len]).reshape(src_shape + (Nt,))
-            cur_source += src_len
+            # assemble the port values into a single matrix for this port
+            port["values"] = np.array(src_v[probe_i: probe_i + src_len]).reshape(src_shape + (Nt,))
+            # increment 
+            probe_i += src_len
 
         # move probe values to the class variable
         for i, (k, p) in enumerate(self.probes.items()):
-            self.probes[k]["values"] = probes[i + cur_source]["values"]
+            self.probes[k]["values"] = probes[i + probe_i]["values"]
 
         self._solved = True
 
@@ -1320,7 +1446,7 @@ class FDTD_Solver():
                 frequency=np.atleast_1d(frequency) if frequency is not None else None
             )
 
-    def add_farfield_monitor(self, ff_box: pv.PolyData, frequency: np.ndarray):
+    def add_farfield_monitor(self, frequency: np.ndarray, padding: int = 2):
         """
         Configure far field monitors
 
@@ -1332,30 +1458,30 @@ class FDTD_Solver():
             far-field captures. Monitors will not be added for faces on the edges of the solve boundary.
         frequency : np.ndarray | float
             frequencies in Hz of the far-field monitors.
+        padding : int, default: 3
+            number of grid cells to place between PML boundaries and far-field integration surface
 
         """
         self.check_mesh()
 
-        # grid indices of each face at grid edges
-        ffn_x, ffn_y, ffn_z = self.pos_to_idx(np.min(ff_box.points, axis=0), "edge")
-        ffp_x, ffp_y, ffp_z = self.pos_to_idx(np.max(ff_box.points, axis=0), "edge")
+        # integration surfaces are not added to faces without PML. If no side has PML the
+        # farfield result will be zero.
+        if not len(self.pml_boundaries):
+            raise ValueError("No radiation or PML boundaries found. Unable to create farfield monitor.")
 
-        # edge indices at the monitor planes. The cell indices within each face can use the 
-        # the edge index slices since the last index is not inclusive when indexing cells.
-        ff_idx = np.array([[ffn_x, ffp_x], [ffn_y, ffp_y], [ffn_z, ffp_z]])
-        self.farfield["idx"] = ff_idx
-        # pos_to_idx returns index of edge greater or equal to the position
-        ff_idx[:, 1] -= 1
+        sbox_bounds = np.column_stack([self.sbox_min, self.sbox_max])
 
-        # position in meters of surfaces
-        self.farfield["surf_pos"] = np.zeros_like(ff_idx, dtype=np.float64)
+        # indices of the farfield faces on each axis and side
+        ff_idx = np.zeros_like(sbox_bounds, dtype=np.int64)
+        # pos of the farfield faces in inches
+        ff_pos = np.zeros_like(sbox_bounds)
+
+        # position in meters of farfield surface
+        self.farfield["surf_pos"] = np.zeros_like(sbox_bounds, dtype=np.float64)
 
         # cell positions and widths on each surface as a meshgrid, meters
         self.farfield["cell_pos"] = [None] * 3
         self.farfield["cell_w"] = [None] * 3
-
-        self.farfield["box"] = ff_box.copy()
-        self.farfield["frequency"] = np.atleast_1d(frequency)
 
         for axis in range(3):
 
@@ -1363,33 +1489,28 @@ class FDTD_Solver():
             axis_s = ("x", "y", "z")[axis]
             sf0, sf1 = [i for i in (0, 1, 2) if i != axis]
             sf0_s, sf1_s = [a for a in ("x", "y", "z") if a != axis_s]
-
-            # grid cell positions are the same for both sides of the face
-            self.farfield["cell_pos"][axis] =  np.meshgrid(
-                conv.m_in(self.g_cells[sf0][ff_idx[sf0, 0]: ff_idx[sf0, 1]]), 
-                conv.m_in(self.g_cells[sf1][ff_idx[sf1, 0]: ff_idx[sf1, 1]]), 
-                indexing="ij"
-            )
-
-            # grid cell widths, same for both sides
-            self.farfield["cell_w"][axis] = np.meshgrid(
-                conv.m_in(self.d_cells[sf0][ff_idx[sf0, 0]: ff_idx[sf0, 1]]), 
-                conv.m_in(self.d_cells[sf1][ff_idx[sf1, 0]: ff_idx[sf1, 1]]), 
-                indexing="ij"
-            )
             
             # for each face on either side of the far-field box
             for j, side in enumerate(["n", "p"]):
+                
+                pml_name = axis_s + ("-" if side == "n" else "+")
+                # if face has no PML boundary, the boundary condition is PEC, place surface on boundary edge
+                if pml_name not in self.pml_boundaries:
+                    print("skip")
+                    ff_idx[axis, j] = 0 if j == 0 else len(self.g_edges[axis]) - 1
+                else:
+                    # set the position of farfield integration surface by index value in the grid
+                    if side == "n":
+                        ff_idx[axis, j] = self._n_pml + padding
+                    else:
+                        ff_idx[axis, j] = len(self.g_edges[axis]) - self._n_pml - 1 - padding
 
-                # edge index and the position of the surface along the normal axis
-                surf_idx = ff_idx[axis, j]
-
-                # monitor values are all zero if surface is at the solve boundary, skip monitor
-                if surf_idx < 1 or surf_idx >= len(self.g_edges[axis]) -1:
-                    continue
-
+                # integration face position, inches
+                surf_idx = ff_idx[axis, j] 
                 surf_pos_in = self.g_edges[axis][surf_idx]
-                # surface position in meters
+                ff_pos[axis, j] = surf_pos_in
+
+                # face position in meters
                 self.farfield["surf_pos"][axis, j] = conv.m_in(surf_pos_in)
                 
                 # add monitors for each surface field
@@ -1413,6 +1534,28 @@ class FDTD_Solver():
                         self.add_field_monitor(
                             f"ff_h{f_s}2_{side}{axis_s}", f"h{f_s}", axis_s, index=surf_idx+1, frequency=frequency
                         )
+
+        for axis in range(3):
+            
+            sf0, sf1 = [i for i in (0, 1, 2) if i != axis]
+
+            # grid cell positions are the same for both sides of the face
+            self.farfield["cell_pos"][axis] =  np.meshgrid(
+                conv.m_in(self.g_cells[sf0][ff_idx[sf0, 0]: ff_idx[sf0, 1]]), 
+                conv.m_in(self.g_cells[sf1][ff_idx[sf1, 0]: ff_idx[sf1, 1]]), 
+                indexing="ij"
+            )
+
+            # grid cell widths, same for both sides
+            self.farfield["cell_w"][axis] = np.meshgrid(
+                conv.m_in(self.d_cells[sf0][ff_idx[sf0, 0]: ff_idx[sf0, 1]]), 
+                conv.m_in(self.d_cells[sf1][ff_idx[sf1, 0]: ff_idx[sf1, 1]]), 
+                indexing="ij"
+            )
+
+        self.farfield["box"] = pv.Box(ff_pos.flatten())
+        self.farfield["frequency"] = np.atleast_1d(frequency)
+        self.farfield["idx"] = ff_idx
 
     def add_current_probe(self, name: str, face: pv.PolyData):
         """
@@ -1640,18 +1783,18 @@ class FDTD_Solver():
         -------
         pv.Plotter
         """
-        self.check_mesh()
-
-        gx, gy, gz = self.g_edges
-        gx_h, gy_h, gz_h = self.g_cells
-        
-        grid = pv.RectilinearGrid(gx, gy, gz)
         
         if plotter is None:
             plotter = pv.Plotter(off_screen=bool(axes is not None))
         
         # add grid
         if show_mesh:
+            self.check_mesh()
+
+            gx, gy, gz = self.g_edges
+            gx_h, gy_h, gz_h = self.g_cells
+            grid = pv.RectilinearGrid(gx, gy, gz)
+            
             # mesh is not easily viewed unless the parallel projection is used. This makes all the grid lines
             # along an axis line up if the camera is aligned with a cardinal plane.
             plotter.enable_parallel_projection()
@@ -1674,7 +1817,7 @@ class FDTD_Solver():
             plotter.add_mesh(cond["obj"], **cond["style"])
 
         # add lumped elements
-        for name, ele in self.lumped_element.items():
+        for name, ele in self.lumped_elements.items():
             plotter.add_mesh(ele["obj"], color="pink", opacity=0.3)
 
         if show_probes:
@@ -1769,6 +1912,9 @@ class FDTD_Solver():
         vmin: float = None, 
         vmax: float = None, 
         point_size: float = 10, 
+        axes: Axes = None,
+        plotter: pv.Plotter = None,
+        **kwargs
     ) -> pv.Plotter:
         """
         Plot FDTD coefficients overlayed on the model geometry.
@@ -1805,7 +1951,17 @@ class FDTD_Solver():
 
         point_size : float, default: 10
             size of points representing coefficient values
-        
+
+        axes : matplotlib.axes.Axes
+            matplotlib axes object. If provided, a screenshot is taken of the rendered image and 
+            drawn in the the axes. 
+
+        plotter : pv.Plotter, optional
+            pyvista Plotter object
+
+        **kwargs :
+            remaining kwargs are passed to render().
+
         Returns
         -------
         pv.Plotter
@@ -1813,9 +1969,12 @@ class FDTD_Solver():
         """
         self.check_mesh()
 
-        plotter = self.render()
+        if plotter is None:
+            plotter = pv.Plotter(off_screen=bool(axes is not None))
 
-        # 
+        plotter = self.render(plotter=plotter, **kwargs)
+
+        # position of surface on which the coefficients will be plotted
         full_pos = [0] * 3
         axis_i = dict(x=0, y=1, z=2)[axis]
         full_pos[axis_i] = position
@@ -1866,7 +2025,12 @@ class FDTD_Solver():
         plotter.add_scalar_bar(
             title=f"{field}, {value}\n", vertical=False, label_font_size=11, title_font_size=14
         )
-        
+
+        if axes is not None:
+            img = plotter.screenshot()
+            axes.imshow(img)
+            axes.set_axis_off()
+
         return plotter
     
     def line_probe_values(self, name: str) -> np.ndarray:
@@ -1886,7 +2050,7 @@ class FDTD_Solver():
 
         return np.sum([p["values"] * p["d"] for k, p in self.probes.items() if k[:len(name)] == name], axis=0)
 
-    def get_sparameters(self, frequency: np.ndarray, source_port: int = 1, downsample: bool = True) -> ldarray:
+    def get_sparameters(self, frequency: np.ndarray, source_port: int = 1, downsample: bool = False) -> ldarray:
         """
         Returns a column of the s-parameter matrix for solutions that have an excitation applied to a single port.
 
@@ -1947,7 +2111,7 @@ class FDTD_Solver():
         for i, p in enumerate(self.ports):
 
             # voltage generated by termination due the current through it. 
-            ip = self.vi_probe_values(f"port{i+1}")
+            ip = self.vi_probe_values(f"port_{i+1}")
 
             # h-fields are 1/2 time step ahead of the e-fields. Dely current so they are at the same time step
             I_term[i] = utils.dtft(ip, frequency, 1 / self.dt, downsample) #* np.exp(-1j * frequency * 2 * np.pi * (self.dt / 2))
@@ -1983,7 +2147,7 @@ class FDTD_Solver():
             s_column, coords=dict(frequency=frequency, b=np.arange(1, nports + 1))
         )
     
-    def edge_correction(self, p1: tuple, p2: tuple, integration_axis: str, CFe: float = None, CFh: float = 1):
+    def edge_correction(self, p1: tuple, p2: tuple, integration_line: str, CFe: float = None, CFh: float = 1):
         """
         Analytic correction factors for singularities at PEC surface edges. 
 
@@ -1993,7 +2157,7 @@ class FDTD_Solver():
             coordinates of first end point of PEC edge to apply the correction to.
         p2 : tuple
             coordinates of second PEC edge end point
-        integration_axis : {"x+", "x-", "y-", "y+", "z-", "z+"}
+        integration_line : {"x+", "x-", "y-", "y+", "z-", "z+"}
             perpendicular direction pointing away from the edge along which the fields vary asymptotically.
             This should be in the plane of the PEC surface.
         
@@ -2015,9 +2179,9 @@ class FDTD_Solver():
         e_axis = np.argmax(edge_len)
 
         # axis parallel to fields pointing into the PEC edge
-        f_axis = dict(x=0, y=1, z=2)[integration_axis[0]]
+        f_axis = dict(x=0, y=1, z=2)[integration_line[0]]
         # direction pointing away from edge
-        f_dir = {"+": 1, "-": 0}[integration_axis[1]]
+        f_dir = {"+": 1, "-": 0}[integration_line[1]]
 
         # check that integration axis is perpendicular to edge axis
         if e_axis == f_axis:
@@ -2583,7 +2747,7 @@ class FDTD_Solver():
                 # frame index to the monitor data
                 if init_time is not None:
                     # time step in simulation
-                    n = init_time * 1e-12 / self.dt
+                    n = np.around(init_time * 1e-12 / self.dt)
                     # frame index
                     init_frame = int(n / n_step)
                 else:
@@ -2814,7 +2978,7 @@ class FDTD_Solver():
                 title="Time [ps]",
                 interaction_event="always",
                 style="modern",
-                fmt="%0.2f"
+                # fmt=lambda x: f"{x:.2f}"
             )
         else:
             # round starting point to nearest ps
@@ -2827,7 +2991,7 @@ class FDTD_Solver():
                 title="Phase [deg]",
                 interaction_event="always",
                 style="modern",
-                fmt="%0.0f"
+                # fmt=lambda x: f"{x:.2f}"
             )
             
 

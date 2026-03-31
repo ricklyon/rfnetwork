@@ -3,7 +3,11 @@ from pathlib import Path
 import numpy as np
 from scipy.special import ellipk
 from scipy import signal
-from .core.units import const
+from np_struct import ldarray
+from scipy import optimize
+
+from .core.units import const, conv
+
 
 
 def dtft(xn: np.ndarray, frequency: np.ndarray, fs: float, downsample: bool = False) -> np.ndarray:
@@ -34,13 +38,12 @@ def dtft(xn: np.ndarray, frequency: np.ndarray, fs: float, downsample: bool = Fa
     # determine whether downsample can be used. The sampling rate must be at least twice the downsampled rate
     downsample_apply = downsample and (len(xn) / downsample_factor) > 100 and fs > (frs * 2)
 
-    # In most cases 1 / dt is much greater than the highest frequency of interest and the DTFT can be made much faster
+    # In most cases 1 / dt is much greater than the highest frequency of interest and the DTFT can be made faster
     # by down-sampling. 
     if downsample_apply:
         # create lowpass filter that removes all frequency content above frs/2
-        sos = signal.butter(20, frs/2.5, btype="lowpass", output="sos", fs = fs)
-        # apply filter, then downsample the signal. The downsampling will leave aliases, but at much higher frequencies
-        # than the DTFT will be evaluated.
+        sos = signal.butter(20, frs / 2.5, btype="lowpass", output="sos", fs = fs)
+        # apply filter, then downsample the signal. 
         xn = signal.sosfiltfilt(sos, xn)[::downsample_factor]
         fs = frs
 
@@ -65,6 +68,87 @@ def dtft(xn: np.ndarray, frequency: np.ndarray, fs: float, downsample: bool = Fa
         Xw *= downsample_factor
 
     return Xw
+
+
+def ifft(Xw: ldarray):
+    """
+    Computes the inverse fft on complex-valued data over a positive frequency range. Data should extend down to near 
+    DC for accurate results.
+
+    Parameters:
+    -----------
+    Xw : np.ndarray
+        frequency domain data defined over the positive frequency range. 
+        Data should extend down in frequency to the step size of frequency. For example, if the frequency 
+        step is 10MHz, the lowest data point should be at 10MHz.
+
+    Returns
+    -------
+    time : np.ndarray
+        time vector in seconds
+    xt : np.ndarray
+        time domain data, with time as the first dimension followed by the remaining dimensions of Xw
+    """
+
+    data = Xw.transpose(("frequency", ...))
+    frequency = Xw.coords["frequency"]
+    
+    # frequency step size
+    f0, f1 = frequency[:2]
+    fstep = f1 - f0
+
+    # count out many data points are missing between 0Hz and the first data point (assumes data does
+    # not contain a 0hz term)
+    missing_fnum = int((f0 - fstep) / fstep) + 1
+
+    missing_data = np.zeros(missing_fnum, dtype=np.complex128)
+    missing_f = np.arange(0, f0, fstep)
+
+    # create zero frequency term by extrapolating lowest value
+    b_dims = [None] * len(data.shape[1:])
+    missing_data = np.broadcast_to(missing_data[:, *b_dims], (missing_fnum,) + data.shape[1:])
+    data_full = np.concatenate((missing_data, data), axis=0)
+
+    # full frequency array
+    data_f = np.concatenate((missing_f, frequency))
+
+    # mirror the data around the y-axis to generate negative frequency terms for full spectrum
+    # do not flip 0 freq term
+    data_flip = np.flip(np.conjugate(data_full[1:]), axis=0)
+
+    # numpy ifft requires the values sorted in frequency as:
+    # [0, ..., np.pi, -np.pi, ...]
+    ifft_spectrum = np.concatenate((data_full, data_flip), axis=0)
+
+    # number of samples
+    n = len(ifft_spectrum)
+
+    # the frequency points are f = k * (fs /N). fs is samples per second, dividing this by N (samples), gives units s^-1
+    # where N is the number of samples and k is 0, 1... N
+    # this means the sample rate is fs = f_1 * N
+    fs = f0 * n
+    ds = 1 / fs
+
+    # casual time is t >= 0. the length n includes samples < 0, so the length of the casual time is half of n
+    t_casual = np.arange(0, (ds * (n / 2)), ds)
+
+    # check that the frequency map from fftfreq matches the data freq
+    fft_freq = np.fft.fftfreq(n, d=ds)
+    assert np.max(fft_freq[: len(data_f)] - data_f) < 1e-3
+
+    # compute inverse FFT
+    xt = np.fft.ifft(ifft_spectrum, axis=0).real
+    # center the spectrum at 0s, move negative time samples to the beginning
+    xt = np.fft.fftshift(xt, axes=0)
+    # time vector, with 0s in the middle
+    time = np.concatenate((-np.flip(t_casual)[:-1], t_casual))
+    
+    # data coordinates excluding frequency
+    d_coords = {k: data.coords[k] for k in data.coords.keys() if k != "frequency"}
+                
+    return ldarray(
+        xt, coords = dict(time=time, **d_coords)
+    )
 
 def n_ports_from_snp(path: str) -> int:
     """
@@ -111,22 +195,31 @@ def ms_z_to_width(z: float, er: float, d: float) -> float:
         return wd12 * d
 
 
-def coupled_sline_impedance(w: float, s: float, b: float, er: float):
+def coupled_sline_impedance(w: float, s: float, b: float, er: float, t: float = 0):
     """
     Odd and even mode impedance for coupled stripline. Units of w, s and b are arbitrary.
-
-    Assumes that thickness is zero.
     """
+
+    # this version in Modern RF and Microwave Filter Design section 3.7.1, Protap Pramanick
+    # seems to be more accurate for the even mode than Matthaei
+    Ae = (np.log(2) + np.log(1 + np.tanh(np.pi * s / (2 * b)))) / (2 * np.pi * np.log(2))
+    Ao = (np.log(2) + np.log(1 + ( 1 / np.tanh(np.pi * s / (2 * b))))) / (2 * np.pi * np.log(2))
+
+    Cf = 2 * np.log((2 * b - t) / (b - t)) - (t / b) * ((t * (2 * b - t)) / (b - t)**2)
+
+    Z0_e = (30 * np.pi * (b - t)) / (np.sqrt(er) * (w + Ae * b * Cf))
+    Z0_o = (30 * np.pi * (b - t)) / (np.sqrt(er) * (w + Ao * b * Cf))
+
     # reference odd, even mode impedances.
     # page 174 in Matthaei, even and odd mode impedances of coupled strip line
-    k_e = np.tanh((np.pi / 2) * (w / b)) * np.tanh((np.pi / 2) * (w + s) / b)
-    kp_e = np.sqrt(1 - (k_e **2))
+    # k_e = np.tanh((np.pi / 2) * (w / b)) * np.tanh((np.pi / 2) * (w + s) / b)
+    # kp_e = np.sqrt(1 - (k_e **2))
 
-    k_o = np.tanh((np.pi / 2) * (w / b)) * (1 / np.tanh((np.pi / 2) * (w + s) / b))
-    kp_o = np.sqrt(1 - (k_o **2))
+    # k_o = np.tanh((np.pi / 2) * (w / b)) * (1 / np.tanh((np.pi / 2) * (w + s) / b))
+    # kp_o = np.sqrt(1 - (k_o **2))
 
-    Z0_e = ((30 * np.pi) / (np.sqrt(er))) * (ellipk(kp_e) / ellipk(k_e))
-    Z0_o = ((30 * np.pi) / (np.sqrt(er))) * (ellipk(kp_o) / ellipk(k_o))
+    # Z0_e = ((30 * np.pi) / (np.sqrt(er))) * (ellipk(kp_e) / ellipk(k_e))
+    # Z0_o = ((30 * np.pi) / (np.sqrt(er))) * (ellipk(kp_o) / ellipk(k_o))
 
     # mutual capacitance
     # Z0_e = 1 / vp*Ce
@@ -135,18 +228,43 @@ def coupled_sline_impedance(w: float, s: float, b: float, er: float):
 
     return Z0_o, Z0_e
 
+def coupled_sline_fringing_cap(s: float, b: float, er: float):
+    # from https://ieeexplore.ieee.org/document/1124973
+    Cfe = (2 / np.pi) * np.log( 1 + np.tanh(np.pi * s / (2 * b)))
+    Cfo = (2 / np.pi) * np.log( 1 + (1 / np.tanh(np.pi * s / (2 * b))))
 
+    # this method returns the same result but requires the width
+    # Z0_o, Z0_e = coupled_sline_impedance(w, s, b, er)
+    # vp = const.c0 / np.sqrt(er)
+    # Ce = 1 / (Z0_e * vp * eps)
+    # Co = 1 / (Z0_o * vp * eps)
 
-def coupled_sline_fringing_cap(w: float, s: float, b: float, er: float):
+    # # parallel plate capacitance, normalized by epsilon
+    # Cp = 2 * w / (b)
+    # # fringing capacitance on the outer edges (not between the two lines), figure 5.05-10b, for t=0.
+    # # or Balanis Advanced Engineering Electromagnetics, 2nd edition, equation 8-201
+    # # Cf = (2 / np.pi) * np.log((1 / (1 - t/b) + 1)) - (t / (np.pi * b)) * np.log((1 / (1 - t/b)**2 - 1))
+    # Cf = 0.44
+    # # solve for even and odd fringing capacitances, equation 5.05-24 and 5.05-25
+    # Cf_e = (Ce / 2) - Cp - Cf
+    # Cf_o = (Co / 2) - Cp - Cf
+
+    # return unnormalized values
+    eps = er * const.e0
+    return Cfo * eps, Cfe * eps
+
+def coupled_sline_fringing_cap_old(w: float, s: float, b: float, er: float):
     """
     Odd and even mode fringing capacitance for edge coupled stripline, per unit length [m].
-    See equations 5.05-24 and 5.05-25 (page 201) and Figure 5.05-13. Units of w, s, and b are arbitrary.
+    See equations 5.05-24 and 5.05-25 (page 201) and Figure 5.05-13, Matthaei. Units of w, s, and b are arbitrary.
 
     Fringing capacitance is a weak function of the trace width. Assumes that both traces are the same width,
     but very little difference is seen in asymmetrical lines.
 
     Assumes that thickness is zero.
     """
+    eps = er * const.e0
+
     Z0_o, Z0_e = coupled_sline_impedance(w, s, b, er)
 
     # even ad odd mode capacitances, normalized by epsilon
@@ -155,42 +273,180 @@ def coupled_sline_fringing_cap(w: float, s: float, b: float, er: float):
     # Co = Ca + 2 Cab
     # Ce = Ca = Cb
     vp = const.c0 / np.sqrt(er)
-    Ce = 1 / (Z0_e * vp * const.e0 * er)
-    Co = 1 / (Z0_o * vp * const.e0 * er)
+    Ce = 1 / (Z0_e * vp * eps)
+    Co = 1 / (Z0_o * vp * eps)
 
     # parallel plate capacitance, normalized by epsilon
     Cp = 2 * w / (b)
     # fringing capacitance on the outer edges (not between the two lines), figure 5.05-10b, for t=0.
     # or Balanis Advanced Engineering Electromagnetics, 2nd edition, equation 8-201
+    # Cf = (2 / np.pi) * np.log((1 / (1 - t/b) + 1)) - (t / (np.pi * b)) * np.log((1 / (1 - t/b)**2 - 1))
     Cf = 0.44
     # solve for even and odd fringing capacitances, equation 5.05-24 and 5.05-25
     Cf_e = (Ce / 2) - Cp - Cf
     Cf_o = (Co / 2) - Cp - Cf
 
     # return unnormalized capacitance in farads
-    eps = er * const.e0
+    
     return Cf_o * eps, Cf_e * eps
 
 
-def ustrip_impedance(w: float, h: float, er: float):
+def ustrip_impedance(w: float, h: float, er: float, frequency: np.ndarray = 1e9, t: float = 0.0013) -> tuple:
     """
     Microstrip impedance and effective permittivity for thin microstrip lines
+
+    Parameters
+    ----------
+    w : float, optional
+        Width of microstrip trace in inches.
+    h : float
+        Substrate thickness in inches
+    er : float | list
+        Dielectric constant of substrate. Supports single values or a list for each frequency. 
+    frequency : list, optional
+        Array of frequencies in Hz.
+    t : float, optional
+        Copper thickness in inches, defaults to 1oz copper (1.3 mils).
+
+    Returns
+    -------
+    Z0 : float | np.ndarray
+        characteristic line impedance at each frequency
+
+    eps_eff : float | np.ndarray
+        effective permittivity at each frequency
+
+    References
+    ----------
+    [1] Design-Data-for-Microstrip-Transmission-Lines-on-RT-duroid-Laminates, Rogers Corporation, 2013
     """
 
-    if (w / h) < 1:
-        er_eff = ((er + 1) / 2) + ((er - 1) / 2) * ((1 + 12 * (h / w))**(-0.5) + 0.04 * (1 - (w / h)**2))
-        zc = (const.eta0 / (2 * np.pi * np.sqrt(er_eff))) * np.log((8 * h / w) + 0.25 * (w / h))
-    else:
-        er_eff = ((er + 1) / 2) + ((er - 1) / 2) * ((1 + 12 * (h / w))**(-0.5))
-        zc = (const.eta0 / (np.sqrt(er_eff))) * ((w / h) + 1.393  + 0.677 * np.log((w / h) + 1.444))**(-1)
+    f_isscalar = np.isscalar(frequency)
+    frequency = np.atleast_1d(frequency)
+    f_ghz = frequency / 1e9
 
-    return zc, er_eff
+    # B is in mm
+    B = conv.mm_mil(h * 1e3)
+    T = t / h
+    U = w / h
+    eta = 376.73
+
+    U1 = U + (T * np.log(1 + ((4 * np.e) / T) * (np.tanh((6.517 * U) ** (1 / 2))) ** 2)) / np.pi
+    Ur = U + ((U1 - U) * (1 + 1 / (np.cosh((er - 1) ** 0.5)))) / 2
+
+    Au = 1 + (np.log((Ur**4 + (Ur**2 / 2704)) / (Ur**4 + 0.432))) / 49 + np.log((Ur / 18.1) ** 3 + 1) / 18.7
+    Ber = 0.564 * ((er - 0.9) / (er + 3)) ** 0.053
+
+    Y = (er + 1) / 2 + ((er - 1) / 2) * (1 + (10 / Ur)) ** (-Au * Ber)
+
+    def Z01(x):
+        return (
+            eta * np.log((6 + (2 * np.pi - 6) * np.exp(-((30.666 / x) ** 0.7528))) / x + ((4 / (x**2)) + 1) ** 0.5)
+        ) / (2 * np.pi)
+
+    Z0 = Z01(Ur) / (Y**0.5)
+    eff = Y * (Z01(U1) / Z01(Ur)) ** 2
+
+    P1 = 0.27488 + U * (0.6315 + 0.525 * (0.0157 * f_ghz * B + 1) ** -20) - 0.06583 * np.e ** (-8.7513 * U)
+    P2 = 0.33622 * (1 - np.e ** (-0.03442 * er))
+    P3 = 0.0363 * np.e ** (-4.6 * U) * (1 - np.e ** (-(((f_ghz * B) / 38.7) ** 4.97)))
+    P4 = 2.751 * (1 - np.e ** (-((er / 15.916) ** 8))) + 1
+
+    P = P1 * P2 * (f_ghz * B * (0.1844 + P3 * P4)) ** 1.5763
+
+    eff_f = er - ((er - eff) / (1 + P))
+    Z0_f = Z0 * (eff / eff_f) ** 0.5 * ((eff_f - 1) / (eff - 1))
+
+    # return values to scalar values if frequency was a scalar
+    if f_isscalar:
+        Z0_f, eff_f = Z0_f.item(), eff_f.item()
+
+    return Z0_f, eff_f
 
 
-def ustrip_fringing_cap(w, h, er):
+def coupled_ustrip_impedance(
+    w: float, h: float, s: float, er: float, frequency: np.ndarray = 1e9, t: float = 0.0013
+) -> tuple:
+    """
+    Coupled microstrip line impedance for odd and even modes. See section 3.8.2 in [1], but be aware there are typos.
+    Another good reference with the same equations: https://qucs.github.io/tech/node77.html.
+
+    Parameters
+    ----------
+    w : float, optional
+        Width of microstrip traces in inches.
+    h : float
+        Substrate thickness in inches
+    s : float
+        trace spacing in inches
+    er : float
+        Dielectric constant of substrate.
+    frequency : float | list, default: 1 GHz
+        frequencies in Hz.
+    t : float, optional
+        Copper thickness in inches, defaults to 1oz copper (1.3 mils).
+
+    Returns
+    -------
+    Zo : float | np.ndarray
+        Odd mode impedance
+
+    Ze : float | np.ndarray
+        Even mode impedance
+
+    References
+    ----------
+    [1] P. Pramanick and P. Bhartia, Modern RF and Microwave Filter Design. Norwood, MA, USA: Artech House, 2016. 
+    
+    """
+
+    u = w / h
+    g = s / h
+
+    ZL, eps_eff = ustrip_impedance(w, h, er, frequency, t)
+
+    v = (u * (20 + g**2) / (10 + g**2)) + g * np.exp(-g)
+    a_e = 1 + (1 / 49) * np.log((v**4 + (v / 52)**2) / (v**4 + 0.432)) + (1 / 18.7) * np.log(1 + (v / 18.1)**3)
+    b_e = 0.564 * ((er - 0.9) / (er + 3))**0.053
+
+    a0 = 0.7287 * (eps_eff - (er + 1) / 2) * ( 1 - np.exp(-0.179 * u))
+    b0 = 0.747 * er / (0.15 + er)
+    c0 = b0 - (b0 - 0.207) * np.exp(-0.414 * u)
+    d0 = 0.593 + 0.694 * np.exp(-0.562 * u)
+
+    # even and odd mode effective permittivity
+    eps_e = (er + 1) / 2 + (er - 1) / 2 * (1 + (10 / v)) ** (-a_e * b_e)
+    eps_o = (((er + 1) / 2) + a0 - eps_eff) * np.exp(-c0 * (g ** d0)) + eps_eff
+
+    # static even mode impedance
+    Q1 = 0.8695 * u **(0.194)
+    Q2 = 1 + 0.7519* g + 0.189 * g ** 2.31
+    Q3 = 0.1975 + (16.6 + (8.4 / g) **6)**(-0.387) + (np.log((g**10) / (1 + (g / 3.4)**10)) / 241)
+    Q4 = (2 * Q1) / (Q2 * ((u **-Q3) * np.exp(-g) + (2 - np.exp(-g) * u ** (-Q3))))
+    Ze = (ZL * np.sqrt(eps_eff / eps_e)) / (1 - Q4 * ( ZL / const.eta0) * np.sqrt(eps_eff))
+
+    # static odd mode impedance
+    Q5 = 1.794 + 1.14 * np.log(1 + 0.638 / (g + 0.517 * g ** 2.43))
+    Q6 = 0.2305 + (np.log(g**10 / (1 + (g / 5.8) ** 10)) / 281.3) + (np.log(1 + 0.598 * g ** (1.154)) / 5.1)
+    Q7 = (10 + 190 * g**2) / (1 + 82.3 * g **3)
+    Q8 = np.exp(-6.5 - 0.95 * np.log(g) - (g / 0.15) ** 5)
+    Q9 = np.log(Q7) * (Q8 + 1 / 16.5)
+    Q10 = (Q2 * Q4 - Q5 * np.exp(np.log(u) * Q6 * u ** (-Q9))) / Q2
+    Zo = (ZL * np.sqrt(eps_eff / eps_o)) / (1 - Q10 * ( ZL / const.eta0) * np.sqrt(eps_eff))
+
+    # TODO: implement the impedance equations with frequency dispersion.
+
+    return Zo, Ze
+
+
+def ustrip_fringing_cap(w: float, h: float, er: float):
     """
     Fringing capacitance from edge of uncoupled microstrip line, per unit length [m].
     This is a weak function of the width of the line.
+
+    References
+    ----------
+    [1] Microstrip Filters for RF/Microwave Applications. Jia-Sheng Hong, M. J. Lancaster
     """
     # characteristic impedance and effective epsilon
     zc, er_eff  = ustrip_impedance(w, h, er)
@@ -200,8 +456,7 @@ def ustrip_fringing_cap(w, h, er):
     # uncoupled fringe capacitance
     Cf = ((np.sqrt(er_eff) / (const.c0 * zc)) - Cp) / 2
 
-    # fringing capacitance seems to be a bit high, reduced empirically 
-    return Cf * 0.9
+    return Cf
 
 
 def coupled_ustrip_fringing_cap(w: float, s: float, h: float, er: float):
@@ -210,6 +465,10 @@ def coupled_ustrip_fringing_cap(w: float, s: float, h: float, er: float):
     See microstrip_coupled_capacitance.pdf in docs/solver
 
     Assumes that thickness is zero.
+
+    References
+    ----------
+    [1] Microstrip Filters for RF/Microwave Applications. Jia-Sheng Hong, M. J. Lancaster
     """
     # uncoupled fringing capacitance
     Cf = ustrip_fringing_cap(w, h, er)
@@ -246,87 +505,58 @@ def coupled_ustrip_cap(w: float, s: float, h: float, er: float):
 
     return Co, Ce
 
-
-def coupled_ustrip_impedance(w: float, s: float, h: float, er: float):
+def butterworth_prototype(n: int):
     """
-    Odd and even mode total capacitance for edge coupled microstrip line, per unit length [m].
-    See microstrip_coupled_capacitance.pdf in docs/solver
-    """
+    Prototype values for maximally flat low-pass filter. See section 3.2.1 in [1]. Values include
+    the normalized source and load resistance.
 
-    # total even and odd mode coupled capacitance
-    Co, Ce = coupled_ustrip_cap(w, s, h, er)
-    # coupled capacitance in air
-    Co_a, Ce_a = coupled_ustrip_cap(w, s, h, 1)
-
-    Zo = 1 / (const.c0 * np.sqrt(Co * Co_a))
-    Ze = 1 / (const.c0 * np.sqrt(Ce * Ce_a))
-
-    return Zo, Ze
-
-
-def lp_filter_prototype(n: int, ripple: float = 0.5):
-    """
-    Normalized element values for equal ripple low-pass filter prototypes. See Table 8.4 in [1].
-    
     Parameters
     ----------
     n : int
-        filter order (1-10). Odd n will be matched to 50 ohms, while even n requires an impedance match.
-    ripple : float, default: 0.5
-        pass-band ripple. Supported values are 0.5 and 3.0 dB.
-
-    Returns
-    -------
-    list
-        list of n+1 element values. The last value is the normalized resistive load.
+        filter order.
 
     References
     ----------
-    [1] Pozar, David M. Microwave Engineering. 4th ed., Wiley, 2011.
+    [1] Microstrip Filters for RF/Microwave Applications. Jia-Sheng Hong, M. J. Lancaster
 
     """
-    lp_table = {
-        "0.0" : {
-            1: [2.0000, 1.0000],
-            2: [1.4142, 1.4142, 1.0000],
-            3: [1.0000, 2.0000, 1.0000, 1.0000],
-            4: [0.7654, 1.8478, 1.8478, 0.7654, 1.0000],
-            5: [0.6180, 1.6180, 2.0000, 1.6180, 0.6180, 1.0000],
-            6: [0.5176, 1.4142, 1.9318, 1.9318, 1.4142, 0.5176, 1.0000],
-            7: [0.4450, 1.2470, 1.8019, 2.0000, 1.8019, 1.2470, 0.4450, 1.0000],
-            8: [0.3902, 1.1111, 1.6629, 1.9615, 1.9615, 1.6629, 1.1111, 0.3902, 1.0000],
-            9: [0.3473, 1.0000, 1.5321, 1.8794, 2.0000, 1.8794, 1.5321, 1.0000, 0.3473, 1.0000],
-            10: [0.3129, 0.9080, 1.4142, 1.7820, 1.9754, 1.9754, 1.7820, 1.4142, 0.9080, 0.3129, 1.0000]
-        },
-        # 0.5dB Ripple.
-        "0.5" : {
-            1: [0.6986, 1.0000],
-            2: [1.4029, 0.7071, 1.9841],
-            3: [1.5963, 1.0967, 1.5963, 1.0000],
-            4: [1.6703, 1.1926, 2.3661, 0.8419, 1.9841],
-            5: [1.7058, 1.2296, 2.5408, 1.2296, 1.7058, 1.0000],
-            6: [1.7254, 1.2479, 2.6064, 1.3137, 2.4758, 0.8696, 1.9841],
-            7: [1.7372, 1.2583, 2.6381, 1.3444, 2.6381, 1.2583, 1.7372, 1.0000],
-            8: [1.7451, 1.2647, 2.6564, 1.3590, 2.6964, 1.3389, 2.5093, 0.8796, 1.9841],
-            9: [1.7504, 1.2690, 2.6678, 1.3673, 2.7239, 1.3673, 2.6678, 1.2690, 1.7504, 1.0000],
-            10: [1.7543, 1.2721, 2.6754, 1.3725, 2.7392, 1.3806, 2.7231, 1.3485, 2.5239, 0.8842, 1.9841]
-        },
-        # 3.0dB Ripple.
-        "3.0" : {
-            1: [1.9953, 1.0000],
-            2: [3.1013, 0.5339, 5.8095],
-            3: [3.3487, 0.7117, 3.3487, 1.0000],
-            4: [3.4389, 0.7483, 4.3471, 0.5920, 5.8095],
-            5: [3.4817, 0.7618, 4.5381, 0.7618, 3.4817, 1.0000],
-            6: [3.5045, 0.7685, 4.6061, 0.7929, 4.4641, 0.6033, 5.8095],
-            7: [3.5182, 0.7723, 4.6386, 0.8039, 4.6386, 0.7723, 3.518, 1.0000],
-            8: [3.5277, 0.7745, 4.6575, 0.8089, 4.6990, 0.8018, 4.499, 0.6073, 5.8095],
-            9: [3.5340, 0.7760, 4.6692, 0.8118, 4.7272, 0.8118, 4.669, 0.7760, 3.5340, 1.0000],
-            10: [3.5384, 0.7771, 4.6768, 0.8136, 4.7425, 0.816, 4.726, 0.8051, 4.5142, 0.6091, 5.8095]
-        }
-    }
 
-    return lp_table[f"{ripple:.1f}"][n]
+    g_i = [float(2 * np.sin(((2 * i - 1) * np.pi) / (2 * n))) for i in range(1, n + 1)]
+
+    return [1] + g_i + [1]
+
+def chebyshev_prototype(n: int, ripple: float):
+    """
+    Prototype values for chebyshev low-pass filter. See section 3.2.1 in [1]. Values include
+    the normalized source and load resistance.
+
+    Parameters
+    ----------
+    n : int
+        filter order.
+    ripple : float
+        passband ripple in dB
+
+    References
+    ----------
+    [1] Microstrip Filters for RF/Microwave Applications. Jia-Sheng Hong, M. J. Lancaster
+
+    """
+    beta = np.log(1 / np.tanh(ripple / 17.37))
+    gamma = np.sinh(beta / (2 * n))
+
+    g = [1] * (n + 2)
+
+    g[1] = (2 / gamma) * np.sin(np.pi / (2 * n))
+
+    for i in range(2, n + 1):
+        g[i] = (1 / g[i - 1]) * (
+            4 * np.sin(((2 * i - 1) * np.pi) / (2 * n)) * np.sin(((2 * i - 3) * np.pi) / (2 * n))
+        ) / (gamma **2 + np.sin(((i - 1) * np.pi) / n) ** 2)
+
+    g[n + 1] = 1 if (n % 2) else (1 / np.tanh(beta / 4))**2
+
+    return [float(i) for i in g]
 
 
 
@@ -424,6 +654,61 @@ def combline_sections_wb(g: list, f1: float, f2: float, er: float, h: float, wp:
     return Ck, Cmk
 
 
+def synthesize_combline_stripline(Ck: list, Cmk: list, b: float, er: float) -> tuple:
+    """
+    Synthesize a stripline combline filter with thin traces (t=0). 
+
+    Parameters
+    ----------
+    Ck : array_like
+        list of even mode capacitances for each line, normalized by epsilon. 
+    Cmk : array_like
+        list of inter-line capacitances, normalized by epsilon. Should have length one less than Ck.
+    b : float
+        substrate height, width and spacing will be returned in the same units as b.
+    er : float
+        relative permittivity of substrate
+    
+    Returns
+    -------
+    wk : np.ndarray
+        line widths, in same units as b
+    sk : np.ndarray
+        edge to edge line spacings
+    """
+    eps = er * const.e0
+
+    def Cab_error(sp, target_Cab):
+        """ 
+        error between realized interline capacitance Cab and target value for lines with the given spacing.
+        target_Cab is normalized by epsilon
+        """
+        Cf_o, Cf_e = coupled_sline_fringing_cap(sp, b, er)
+        # normalized by epsilon
+        Cab = (Cf_o - Cf_e) / eps
+        return Cab - target_Cab
+
+    # determine spacings using the capacitance between lines Cmk
+    sk = np.zeros_like(Cmk)
+    for i, cmk in enumerate(Cmk):
+        sk[i] = optimize.least_squares(Cab_error, x0=b*0.5, args=(cmk,), bounds=(0.0001, b*2)).x[0]
+
+    # even mode fringing capacitance for each space between lines, normalized by epsilon
+    Cf_e = np.array([coupled_sline_fringing_cap(s, b, er)[1] for s in sk]) / eps
+
+    # fringing capacitance on the outer edges (not between the two lines), figure 5.05-10b, for t=0
+    Cf = 0.4407
+    # Ck is the even mode capacitance Ce. Use equation 5.05-25 to determine the per unit length parallel plate 
+    # capacitance for each line. Normalized by eps
+    Cf_eps_left = np.concatenate([[Cf], Cf_e])
+    Cf_eps_right = np.concatenate([Cf_e, [Cf]])
+    Cp_e = (Ck / 2) - Cf_eps_left - Cf_eps_right
+    # determine width using parallel plate capacitance Cp_e = 2w / b
+    wk = (Cp_e / 2) * b
+
+    return wk, sk
+
+
 def round_to_multiple(value, multiple: float = 1, precision: int = 6):
     """ 
     Rounds value to nearest multiple. Multiple can be greater or less than 1.
@@ -431,3 +716,45 @@ def round_to_multiple(value, multiple: float = 1, precision: int = 6):
     """
     return np.around(np.around(value / multiple) * multiple, precision)
 
+
+def eng_formatter(value, precision: int = 3, zero: float = 1e-20) -> str:
+    """
+    Format a scalar in engineering notation. Drops the imaginary part if complex.
+    """
+    # handle lists, tuples or numpy arrays with one value
+    value = np.atleast_1d(value)
+
+    # call numpy formatter on arrays
+    if value.size > 1:
+        with np.printoptions(formatter={'all': eng_formatter}):
+            return str(value)
+    
+    x = value.item()
+
+    # handle complex type
+    if np.issubdtype(value.dtype, np.complexfloating):
+        return "(" + eng_formatter(x.real) + "+" + eng_formatter(x.imag) + "j)"
+    
+    # if value is not float or integer type, pass formatting through. 
+    if not (np.issubdtype(value.dtype, np.integer) or np.issubdtype(value.dtype, np.floating)):
+        return str(value.item())
+    
+    # handle zero and non-finite numbers
+    if np.abs(x) < zero:
+        return "0"
+    if not np.isfinite(x):
+        return "nan"
+    
+    # get exponent as a multiple of 3
+    exponent = np.floor(np.log10(np.abs(x)) // 3 * 3)
+
+    # value on the left of the exponent, trim trailing zeros on the right side of the decimal
+    fraction = f"{x / (10 ** exponent):.{precision}f}".rstrip("0").rstrip(".")
+
+    # if exponent is 3 or less, just return a floating point number with no exponent
+    if np.abs(exponent) <= 3:
+        return f"{x:.3f}".rstrip("0").rstrip(".")
+    # otherwise return engineering notation
+    else:
+        return f"{fraction}e{int(exponent)}"
+    

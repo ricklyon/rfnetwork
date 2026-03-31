@@ -1,3 +1,5 @@
+from . import styles
+from . styles import DEFAULT_STYLE
 from . core.units import const, conv
 from . component import Component, Component_SnP, Component_Data
 from . network import Network

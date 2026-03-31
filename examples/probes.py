@@ -11,13 +11,23 @@ conjugately matched at the output rather than being matched for optimal output p
 
 """
 
+# sphinx_gallery_thumbnail_number = -3
+
 import rfnetwork as rfn
 from pathlib import Path
 import numpy as np
 import matplotlib.pyplot as plt
 import mpl_markers as mplm
 
-np.set_printoptions(suppress=True, threshold=12)
+# set matplotlib style
+plt.style.use(rfn.DEFAULT_STYLE)
+
+try:
+    dir_ = Path(__file__).parent
+except:
+    dir_ = Path().cwd()
+
+DATA_DIR = dir_ / r"data/PD55008E_S_parameter"
 
 # frequency range for plots
 frequency = np.arange(350, 550, 5) * 1e6 
@@ -30,8 +40,6 @@ def smithchart_marker(ax, fc: float, **properties):
     return mplm.line_marker(
         idx=f_idx, axes=ax, xline=False, yformatter=lambda x, y, idx: f"{frequency[idx]/1e6:.0f}MHz", **properties
 )
-
-DATA_DIR = Path("data/PD55008E_S_parameter")
 
 pa_8w = rfn.Component_SnP(
     file={
@@ -55,11 +63,7 @@ pa_8w.plot();
 # %%
 # Matching Network
 # ----------------
-# 
 # Build a matching network, with the input and output networks contained in their own ``Component`` class.
-#
-# sphinx_gallery_thumbnail_number = -3
-
 
 # 50 ohm microstrip model, substrate is from the amplifier evaluation board.
 ms50 = rfn.elements.MSLine(
@@ -176,7 +180,7 @@ smithchart_marker(axes["s22"], f0, lines=lines2, ylabel=False)
 smithchart_marker(axes["s22"], f0, lines=ln_s22)
 
 
-im = plt.imread("data/img/pa_tuning.png")
+im = plt.imread(dir_ / "data/img/pa_tuning.png")
 axes["im"].imshow(im)
 axes["im"].set_axis_off()
 
@@ -221,3 +225,4 @@ f_gain = np.arange(300, 600, 5) * 1e6
 
 n.plot(11, 22, 21, fmt="db", frequency=f_gain)
 mplm.line_marker(x=f0/1e9)
+plt.show()

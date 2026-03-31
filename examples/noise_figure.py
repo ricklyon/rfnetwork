@@ -10,7 +10,15 @@ from pathlib import Path
 import numpy as np
 import matplotlib.pyplot as plt
 
-DATA_DIR = Path.cwd() / 'data'
+# set matplotlib style
+plt.style.use(rfn.DEFAULT_STYLE)
+
+try:
+    dir_ = Path(__file__).parent
+except:
+    dir_ = Path().cwd()
+
+DATA_DIR = dir_ / 'data'
 
 line50 = rfn.elements.Line(z0=50)
 line70p7 = rfn.elements.Line(z0=70.7)
@@ -170,3 +178,4 @@ ax.plot(ads_nf[:,0], ads_nf[:, 1], '--', label='ADS')
 ax.legend()
 ax.set_title('QPL9503 Non-Iso Unbalanced NF', fontsize="medium")
 ax.set_ylim([0, 5]);
+plt.show()

@@ -165,6 +165,32 @@ class Network(Component, metaclass=NetworkMeta):
         Return state of all component variables.
         """
         return {k: v.state for k, v in self.components.items()}
+    
+    def format_state(self, tabs: str = "", verbose: bool = False) -> str:
+        """
+        Get a string value of the state variables from all components
+        """
+        if verbose:
+            comp_list = []
+            for k, v in self.components.items():
+
+                # get the state of the sub-component
+                state_str = v.format_state(tabs=tabs + "   ", verbose=True)
+                # wrap sub-network states in ()
+                if not isinstance(v, Network):
+                    state_str = f"({state_str})"
+                # append to list with a new line
+                comp_list += [f"\n{tabs}{k}: {state_str}"]
+
+            return "".join(comp_list)
+
+        else:
+            return ", ".join([k for k in self.components.keys()])
+        
+    def print_state(self):
+        """ Print the state of all component variables. """
+
+        print(self.format_state(verbose=True))
 
     @property
     def frequency(self) -> np.ndarray:

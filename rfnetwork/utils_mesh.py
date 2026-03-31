@@ -214,7 +214,6 @@ def is_point_in_surface(points, obj, tolerance=0.001):
     # for each face in the object
     for f in range(n_faces):
 
-
         face_vertices = vertices[f]
         face_edges = edges[f]
 

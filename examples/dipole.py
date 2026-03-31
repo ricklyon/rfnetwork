@@ -5,6 +5,8 @@ Dipole Antenna
 Simulate dipole antenna and plot far-field gain.
 """
 
+# sphinx_gallery_thumbnail_number = -1
+
 import numpy as np 
 import matplotlib.pyplot as plt 
 from rfnetwork import const, conv
@@ -13,11 +15,12 @@ import pyvista as pv
 import rfnetwork as rfn
 import mpl_markers as mplm
 
+# set matplotlib style
+plt.style.use(rfn.DEFAULT_STYLE)
 
 # %%
 # User defined Parameters [inches]
 # ------------------------
-# sphinx_gallery_thumbnail_number = -1
 
 # trace width
 ms_w = 0.030
@@ -67,14 +70,6 @@ port1_face = pv.Rectangle([
     (0, ms_y[1], -gap/2)
 ])
 
-# box to collect near-field equivalent currents used in the near-field to far-field conversion
-ff_box_d = (sbox_w / 2) - 0.2
-ff_box_h = (sbox_h / 2) - 0.2
-ff_bounds = np.array([(-ff_box_d, ff_box_d), (-ff_box_d, ff_box_d), (-ff_box_h, ff_box_h)])
-ff_box = pv.Box(
-    bounds = ff_bounds.flatten()
-)
-
 s = rfn.FDTD_Solver(sbox)
 s.add_conductor(ms_upper, ms_lower, style=dict(color="gold"))
 s.add_lumped_port(1, port1_face, "z-")
@@ -84,7 +79,7 @@ s.assign_PML_boundaries("x-", "x+", "y-", "y+", "z+", "z-", n_pml=5)
 s.generate_mesh(d0 = 0.02, d_edge=0.01)
 
 # setup wide-band far-field monitor
-s.add_farfield_monitor(ff_box, frequency=np.arange(4, 42, 2) * 1e9)
+s.add_farfield_monitor(frequency=np.arange(4, 42, 2) * 1e9)
 # near-field monitor
 # s.add_field_monitor("e_tot", "e_total", "y", 0, n_step=10)
 
@@ -95,21 +90,21 @@ for i, ms_z in enumerate((ms1_z, ms2_z)):
     s.edge_correction(
         (0, ms_y[0], ms_z[0]), 
         (0, ms_y[0], ms_z[1]), 
-        integration_axis="y-"
+        integration_line="y-"
     )
 
     # right edge
     s.edge_correction(
         (0, ms_y[1], ms_z[0]), 
         (0, ms_y[1], ms_z[1]), 
-        integration_axis="y+"
+        integration_line="y+"
     )
 
     # top/lower edge
     s.edge_correction(
         (0, ms_y[0], ms_z[i]), 
         (0, ms_y[1], ms_z[i]), 
-        integration_axis=("z-" if i == 0 else "z+")
+        integration_line=("z-" if i == 0 else "z+")
     )
 
 
@@ -196,7 +191,6 @@ ax.set_ylim([-20, 0])
 ax.set_xlabel("Frequency [GHz]")
 ax.set_ylabel("[dB]")
 ax.legend(["S11"])
-ax.grid()
 
 # %%
 # Plot Input Impedance
@@ -205,7 +199,7 @@ ax.grid()
 fig, ax = plt.subplots()
 ax2 = ax.twinx()
 ln1 = ax.plot(frequency / 1e9, conv.z_gamma(S11).real, label=r"Re($Z_{in}$)")
-ln2 = ax2.plot(frequency / 1e9, conv.z_gamma(S11).imag, color="tab:orange", label=r"Im($Z_{in}$)")
+ln2 = ax2.plot(frequency / 1e9, conv.z_gamma(S11).imag, color="C1", label=r"Im($Z_{in}$)")
 mplm.line_marker(x = 10, axes=ax)
 ax.grid()
 
