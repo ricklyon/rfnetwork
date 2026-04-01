@@ -19,7 +19,7 @@ class FDTD_Solver():
     FDTD EM Solver for PCB geometries.
     """
 
-    def __init__(self, bounding_box: pv.PolyData):
+    def __init__(self, bounding_box: pv.PolyData, grid: pv.RectilinearGrid = None):
         """
         Parameters
         ----------
@@ -27,6 +27,9 @@ class FDTD_Solver():
             box enclosing the solution space. 
         """
 
+        if grid is not None:
+            self.grid = grid
+        
         self.bounding_box = bounding_box
         self.dielectric = dict()
         self.conductor = dict()
@@ -333,7 +336,7 @@ class FDTD_Solver():
         
         return tuple(idx)
     
-    def generate_mesh(self, d0: float, d_edge: float = None):
+    def generate_mesh(self, d0: float = None, d_edge: float = None):
         """
         Generate the grid and FDTD coefficients for the model geometry.
 
@@ -472,8 +475,82 @@ class FDTD_Solver():
 
         return all_points
 
-    def _init_grid(self, d0: float, d_edge: float = None):
-        """ Create model grid. """
+    def _init_grid(self, d0: float = None, d_edge: float = None):
+        """ Initialize model grid. """
+
+        dtype_ = np.float32
+
+        if self.grid is None:
+            self._create_grid(d0, d_edge)
+
+        gx, gy, gz = self.grid.x, self.grid.y, self.grid.z
+        dx, dy, dz = np.diff(gx).astype(dtype_), np.diff(gy).astype(dtype_), np.diff(gz).astype(dtype_)
+
+        self.n_cells = len(dx), len(dy), len(dz)  
+        self.Nx, self.Ny, self.Nz = self.n_cells
+        self.dx, self.dy, self.dz = dx, dy, dz
+        
+        # locations of cell centers
+        gx_h = (gx[1:] + gx[:-1]) / 2
+        gy_h = (gy[1:] + gy[:-1]) / 2
+        gz_h = (gz[1:] + gz[:-1]) / 2
+
+        # half cell lengths between h components
+        dx_h = (dx[1:] + dx[:-1]) / 2
+        dy_h = (dy[1:] + dy[:-1]) / 2
+        dz_h = (dz[1:] + dz[:-1]) / 2
+
+        self.g_edges = gx, gy, gz
+        self.g_cells = gx_h, gy_h, gz_h
+        self.d_cells = dx, dy, dz
+        self.dh_cells = dx_h, dy_h, dz_h
+        self.dx_h, self.dy_h, self.dz_h = dx_h, dy_h, dz_h
+
+        self.eps = np.ones(self.n_cells) * e0
+        self.sigma = np.zeros(self.n_cells)
+
+        # locations of all field components in grid
+        self.floc = dict(
+            ex=(gx_h, gy, gz),
+            ey=(gx, gy_h, gz),
+            ez=(gx, gy, gz_h),
+            hx=(gx, gy_h, gz_h),
+            hy=(gx_h, gy, gz_h),
+            hz=(gx_h, gy_h, gz)
+        )
+
+        # field shapes
+        Nx, Ny, Nz = self.n_cells
+        self.fshape = dict(
+            ex=(Nx, Ny+1, Nz+1),
+            ey=(Nx+1, Ny, Nz+1),
+            ez=(Nx+1, Ny+1, Nz),
+            hx=(Nx+1, Ny, Nz),
+            hy=(Nx, Ny+1, Nz),
+            hz=(Nx, Ny, Nz+1)
+        )
+
+        # pad the combined cell widths
+        # so edge components are assigned zero width
+        dx_hp = np.pad(dx_h, (1, 1))
+        dy_hp = np.pad(dy_h, (1, 1))
+        dz_hp = np.pad(dz_h, (1, 1))
+        # cell widths along the direction of the component
+        self.fcell_w = dict(
+            ex=(dx, dy_hp, dz_hp),
+            ey=(dx_hp, dy, dz_hp),
+            ez=(dx_hp, dy_hp, dz),
+            hx=(dx_hp, dy, dz),
+            hy=(dx, dy_hp, dz),
+            hz=(dx, dy, dz_hp)
+        )
+
+
+    def _create_grid(self, d0: float, d_edge: float = None):
+        """ Create model grid """
+
+        if d0 is None:
+            raise ValueError("d0 must be provided")
         
         if d_edge is not None and d_edge > (d0 / 1.5):
             raise ValueError("d_edge must be less than d0.")
@@ -556,70 +633,9 @@ class FDTD_Solver():
             # flatten list of lists of subcell widths
             mesh_cells_d[axis] = list(itertools.chain(*graded_subcells_d))
 
-        
         gx, gy, gz = [np.around(np.concatenate([[self.sbox_min[i]], self.sbox_min[i] + np.cumsum(mesh_cells_d[i])]), decimals=self._places) for i in range(3)]
-        dx, dy, dz = np.diff(gx).astype(dtype_), np.diff(gy).astype(dtype_), np.diff(gz).astype(dtype_)
 
-        self.n_cells = len(dx), len(dy), len(dz)  
-        self.grid_mesh = pv.RectilinearGrid(gx.astype(dtype_), gy.astype(dtype_), gz.astype(dtype_))
-
-        self.Nx, self.Ny, self.Nz = self.n_cells
-        self.dx, self.dy, self.dz = dx, dy, dz
-        
-        # locations of cell centers
-        gx_h = (gx[1:] + gx[:-1]) / 2
-        gy_h = (gy[1:] + gy[:-1]) / 2
-        gz_h = (gz[1:] + gz[:-1]) / 2
-
-        # half cell lengths between h components
-        dx_h = (dx[1:] + dx[:-1]) / 2
-        dy_h = (dy[1:] + dy[:-1]) / 2
-        dz_h = (dz[1:] + dz[:-1]) / 2
-
-        self.g_edges = gx, gy, gz
-        self.g_cells = gx_h, gy_h, gz_h
-        self.d_cells = dx, dy, dz
-        self.dh_cells = dx_h, dy_h, dz_h
-        self.dx_h, self.dy_h, self.dz_h = dx_h, dy_h, dz_h
-
-        self.eps = np.ones(self.n_cells) * e0
-        self.sigma = np.zeros(self.n_cells)
-
-        # locations of all field components in grid
-        self.floc = dict(
-            ex=(gx_h, gy, gz),
-            ey=(gx, gy_h, gz),
-            ez=(gx, gy, gz_h),
-            hx=(gx, gy_h, gz_h),
-            hy=(gx_h, gy, gz_h),
-            hz=(gx_h, gy_h, gz)
-        )
-
-        # field shapes
-        Nx, Ny, Nz = self.n_cells
-        self.fshape = dict(
-            ex=(Nx, Ny+1, Nz+1),
-            ey=(Nx+1, Ny, Nz+1),
-            ez=(Nx+1, Ny+1, Nz),
-            hx=(Nx+1, Ny, Nz),
-            hy=(Nx, Ny+1, Nz),
-            hz=(Nx, Ny, Nz+1)
-        )
-
-        # pad the combined cell widths
-        # so edge components are assigned zero width
-        dx_hp = np.pad(dx_h, (1, 1))
-        dy_hp = np.pad(dy_h, (1, 1))
-        dz_hp = np.pad(dz_h, (1, 1))
-        # cell widths along the direction of the component
-        self.fcell_w = dict(
-            ex=(dx, dy_hp, dz_hp),
-            ey=(dx_hp, dy, dz_hp),
-            ez=(dx_hp, dy_hp, dz),
-            hx=(dx_hp, dy, dz),
-            hy=(dx, dy_hp, dz),
-            hz=(dx, dy, dz_hp)
-        )
+        self.grid = pv.RectilinearGrid(gx.astype(dtype_), gy.astype(dtype_), gz.astype(dtype_))
 
     def _init_dielectrics(self):
 
@@ -1067,6 +1083,53 @@ class FDTD_Solver():
             self.Da[f"{h}_{axis}"][tuple(h_idx)] = (2 * u0 - (sigma_m * dt)) / (2 * u0 + (sigma_m * dt))
             self.Db[f"{h}_{axis}1"][tuple(h_idx)] = (2 * dt) / ((2 * u0 + (sigma_m * dt))) 
             self.Db[f"{h}_{axis}2"][tuple(h_idx)] = (2 * dt) / ((2 * u0 + (sigma_m * dt))) 
+
+    def set_layer_mask(self, z_pos: float, image: np.ndarray, sigma = 1e6):
+
+        image = image.astype(np.int32)
+
+        # epsilon at each field component
+        e_eps = dict(ex=self.eps_ex, ey=self.eps_ey, ez=self.eps_ez)
+
+        # split component field names
+        e_split = dict(ex=("ex_y", "ex_z"), ey=("ey_z", "ey_x"), ez=("ez_x", "ez_y"))
+        
+        for field in ["ex", "ey"]:
+
+            # get the grid field locations
+            e_grid_points = np.meshgrid(*[self.floc[field][i] for i in range(3)], indexing="ij")
+
+            # get the surface index that matches the layer
+            layer_z_d = np.abs(e_grid_points[2] - z_pos)
+            if not np.any(layer_z_d < self._tol):
+                raise ValueError("layer_z does not match grid")
+            
+            # # get the grid positions at the surface
+            zidx = np.argmin(layer_z_d)
+            # e_grid_x, e_grid_y = e_grid_points[0][..., zidx], e_grid_points[1][..., zidx]
+
+            # get epsilon at the field location
+            eps = e_eps[field][..., zidx]
+
+            if field == "ex":
+                im_ex = (image[:, 1:]) | (image[:, :-1])
+                # pad zeros on non-updated edge components
+                pad = np.zeros((len(eps), 1))
+                im_e = np.column_stack([pad, im_ex, pad])
+
+            elif field == "ey":
+                im_ey = (image[1:]) | (image[:-1])
+                # pad zeros on non-updated edge components
+                pad = np.zeros((1, len(eps[0])))
+                im_e = np.vstack([pad, im_ey, pad])
+
+            # conductor coefficients
+            Ca_c = (2 * eps - (sigma * self.dt)) / (2 * eps + (sigma * self.dt))
+            Cb_c = (2 * self.dt) / ((2 * eps + (sigma * self.dt)))
+
+            for e_sp in e_split[field]:
+                self.Ca[e_sp][..., zidx] = np.where(im_e, Ca_c, self.Ca[e_sp][..., zidx])
+                self.Cb[e_sp][..., zidx] = np.where(im_e, Cb_c, self.Cb[e_sp][..., zidx])
 
 
     def gaussian_source(self, width: float, t0: float, t_len: float):
