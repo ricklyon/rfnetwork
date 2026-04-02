@@ -86,7 +86,7 @@ s.add_lumped_port(1, port1_face, "z-")
 s.assign_PML_boundaries("x-", "x+", "y-", "y+", "z+", "z-", n_pml=5)
 s.generate_mesh(d0 = 0.5, d_edge=0.1)
 
-# setup wide-band far-field monitor
+# setup far-field monitor
 s.add_farfield_monitor(frequency=f0)
 
 # show model rendering

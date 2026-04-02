@@ -1555,11 +1555,12 @@ class FDTD_Solver():
             
             # for each face on either side of the far-field box
             for j, side in enumerate(["n", "p"]):
-                
+                skipped = False
                 pml_name = axis_s + ("-" if side == "n" else "+")
                 # if face has no PML boundary, the boundary condition is PEC, place surface on boundary edge
                 if pml_name not in self.pml_boundaries:
-                    print("skip")
+                    # flag this side of the grid to prevent a field monitor from being attached.
+                    skipped = True
                     ff_idx[axis, j] = 0 if j == 0 else len(self.g_edges[axis]) - 1
                 else:
                     # set the position of farfield integration surface by index value in the grid
@@ -1575,6 +1576,10 @@ class FDTD_Solver():
 
                 # face position in meters
                 self.farfield["surf_pos"][axis, j] = conv.m_in(surf_pos_in)
+
+                # skip sides without field monitors
+                if skipped:
+                    continue
                 
                 # add monitors for each surface field
                 for f in (sf0, sf1):
