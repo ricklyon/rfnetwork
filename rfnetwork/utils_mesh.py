@@ -1,7 +1,12 @@
 
 from pathlib import Path
+import io
 import numpy as np
 from scipy.optimize import fsolve
+
+from PIL import Image
+
+import pygerber.gerberx3.api.v2 as pygb
 
 def blend_cell_widths(
     a: float, b: float, d: float, n_min: int = 1, tol: float = 0.0001, dtype_=np.float32
@@ -295,3 +300,22 @@ def is_point_in_surface(points, obj, tolerance=0.001):
 
     # return True if point is contained in any face of the surface
     return (np.sum(in_face, axis=0) > 0)
+
+
+def get_gerber_image(filepath: Path) -> np.ndarray:
+    """
+    Get the an image of a single layer gerber file. Pixels in a copper region are set to 1 in the returned array,
+    set to 0 outside copper regions.
+    """
+    # render gerber as raster image
+    gerber = pygb.GerberFile.from_file(filepath).parse()
+    buff = io.BytesIO()
+    gerber.render_raster(buff, image_format=pygb.ImageFormatEnum.PNG, color_scheme=pygb.ColorScheme.COPPER)
+    img_raw = np.array(Image.open(buff))
+
+    # copper region color in the raster image
+    gcolor = np.array(pygb.DEFAULT_COLOR_MAP[pygb.FileTypeEnum.COPPER].solid_region_color.as_rgb_int())
+    # if pixel is close to the copper color, set as 1, otherwise 0
+    img = np.where(np.sum(np.abs(img_raw - gcolor[None, None]), axis=-1) < 1, 1, 0)
+
+    return img
