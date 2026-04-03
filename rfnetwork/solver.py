@@ -1,4 +1,5 @@
 import itertools
+from pathlib import Path
 import time
 import numpy as np 
 import pyvista as pv
@@ -6,6 +7,7 @@ from copy import copy
 from np_struct import ldarray
 import sys
 from matplotlib.axes import Axes
+import skimage
 
 from rfnetwork import const, conv, utils, core, utils_mesh
 
@@ -19,21 +21,19 @@ class FDTD_Solver():
     FDTD EM Solver for PCB geometries.
     """
 
-    def __init__(self, bounding_box: pv.PolyData, grid: pv.RectilinearGrid = None):
+    def __init__(self, bounding_box: pv.PolyData):
         """
         Parameters
         ----------
         bounding_box: pv.PolyData
             box enclosing the solution space. 
         """
-
-        if grid is not None:
-            self.grid = grid
         
         self.bounding_box = bounding_box
-        self.dielectric = dict()
-        self.conductor = dict()
+        self.dielectrics = dict()
+        self.conductors = dict()
         self.lumped_elements = dict()
+        self.gbr_images = dict()
 
         self.pml_boundaries = []
 
@@ -42,6 +42,7 @@ class FDTD_Solver():
         self.probes = dict()
         self.ports = []
         self.ports_inv = []
+        
         
         self._n_pml = None
         self._auto_name_counter = 0
@@ -89,7 +90,7 @@ class FDTD_Solver():
             objects = [objects]
 
         # check that name is not used already
-        if name is not None and name in self.conductor.keys():
+        if name is not None and name in self.conductors.keys():
             raise ValueError(f"Duplicate conductor name: {name}")
 
         for i, obj in enumerate(objects):
@@ -130,7 +131,7 @@ class FDTD_Solver():
 
         """
         self._add_object(
-            self.dielectric, objects, properties=dict(er=er, loss_tan=loss_tan, f0=f0, style=style), name=name
+            self.dielectrics, objects, properties=dict(er=er, loss_tan=loss_tan, f0=f0, style=style), name=name
         )
 
     def add_conductor(self, *objects: pv.PolyData, sigma: float = 1e16, style: dict = dict(), name: str = None):
@@ -147,7 +148,7 @@ class FDTD_Solver():
             rendering style arguments passed into pv.Plotter.add_mesh()
 
         """
-        self._add_object(self.conductor, objects, properties=dict(sigma=sigma, style=style), name=name)
+        self._add_object(self.conductors, objects, properties=dict(sigma=sigma, style=style), name=name)
 
     def add_lumped_port(
         self, 
@@ -279,6 +280,30 @@ class FDTD_Solver():
             name=name
         )
 
+    def add_gerber_layer(
+        self,
+        filepath: Path,
+        board_size: tuple,
+        origin: tuple,
+        width_axis: str,
+        length_axis: str
+    ):
+        """
+        
+        """
+        # render gerber as raster image
+        img_raw = utils_mesh.get_gerber_image(filepath)
+
+        self.gbr_images[filepath.stem] = dict(
+            filepath=filepath,
+            board_size=board_size,
+            origin=origin,
+            width_axis=width_axis,
+            length_axis=length_axis,
+            normal_axis=[ax for ax in ("x", "y", "z") if ax not in (width_axis, length_axis)][0],
+            img = img_raw
+        )
+
     def assign_PML_boundaries(self, *sides: str, n_pml: float = 10):
         """
         Assign a PML boundary to sides of the solve box. All sides must have the same number of PML cells.
@@ -336,6 +361,7 @@ class FDTD_Solver():
         
         return tuple(idx)
     
+    
     def generate_mesh(self, d0: float = None, d_edge: float = None):
         """
         Generate the grid and FDTD coefficients for the model geometry.
@@ -365,17 +391,71 @@ class FDTD_Solver():
         self._init_lumped_elements()
         self.invalidate_solution()
 
+    def _get_points_from_gerbers(self):
+
+        hard_points = [list() for _ in range(3)]
+        soft_points = [list() for _ in range(3)]
+
+        hard_point_threshold = 0.05
+        soft_point_threshold = 0.02
+
+        for k, gbr in self.gbr_images.items():
+
+            origin = gbr["origin"]
+            board_size = gbr["board_size"]
+
+            # get edges in image
+            edges_raw = skimage.filters.sobel(gbr["img"]).T
+            edges = np.where(edges_raw > np.max(edges_raw) / 4, 1, 0)
+
+            # plt.imshow(edges.T, cmap="binary")
+            # plt.show()
+
+            im_ax0, im_ax1, im_ax2 = [
+                dict(x=0, y=1, z=2)[gbr[ax]] for ax in ("width_axis", "length_axis", "normal_axis")
+            ]
+
+            nx, ny = edges.shape
+            # image origin in the grid
+            im_x0 = origin[im_ax0]
+            im_y0 = origin[im_ax1]
+            # image physical size in inches
+            im_xsize, im_ysize = board_size
+
+            # physical coordinates of image
+            im_x = np.linspace(im_x0, im_x0 + im_xsize, nx)
+            im_y = np.linspace(im_y0, im_y0 + im_ysize, ny)
+
+            # count the number of edge pixels in each row (count along the columns)
+            edge_count_x = np.count_nonzero(edges, axis=1) / ny
+            # count the number of edge pixels in each column (count along the rows)
+            edge_count_y = np.count_nonzero(edges, axis=0) / nx
+
+            # hard points, force a mesh edge at these locations
+            hard_points[im_ax0] += list(im_x[edge_count_x > hard_point_threshold])
+            hard_points[im_ax1] += list(im_y[edge_count_y > hard_point_threshold])
+
+            # soft points, encourage a mesh edge at these locations
+            soft_points[im_ax0] += list(im_x[edge_count_x > soft_point_threshold])
+            soft_points[im_ax1] += list(im_y[edge_count_y > soft_point_threshold])
+
+            # add a single hard point at the layer position on the normal axis
+            
+            hard_points[im_ax2] += [origin[im_ax2]]
+
+        return hard_points, soft_points
+
     def _get_mesh_points(self, d_edge: float):
         """
         Compile all points defined by model geometry, as well as edge cells around geometry features.
         """
 
         # conductor objects and lumped ports
-        cond_objects = [cond["obj"] for cond in self.conductor.values()] 
+        cond_objects = [cond["obj"] for cond in self.conductors.values()] 
         lumped_ele_objects = [ele["obj"] for ele in self.lumped_elements.values()]
 
         # substrate objects
-        sub_objects = [self.bounding_box] + [sub["obj"] for sub in self.dielectric.values()]
+        sub_objects = [self.bounding_box] + [sub["obj"] for sub in self.dielectrics.values()]
 
         # get a list of 2x3 arrays, coordinates of each endpoint of the edges of the model objects
         obj_edges = []
@@ -422,12 +502,18 @@ class FDTD_Solver():
         # object vertices and points for the mesh around angled sections
         all_points = [np.array([]), np.array([]), np.array([])]
 
+        # add points from any gerber layers
+        gbr_hard_points, gbr_soft_points = self._get_points_from_gerbers()
+
         for axis in range(3):
             
             # object vertices
             hard_points = np.unique(obj_edges[..., axis].flatten())
-            # round points to tolerance
-            # hard_points[axis] = 
+
+            # add gerber vertices
+            hard_points = np.concatenate((hard_points, gbr_hard_points[axis]))
+            soft_points[axis] = np.concatenate((soft_points[axis], gbr_soft_points[axis]))
+
             # remove any conductor points that are less than d_edge away from other conductor points
             for i in range(len(hard_points)):
                 # remove by setting other values that are very close to this one equal. 
@@ -480,8 +566,7 @@ class FDTD_Solver():
 
         dtype_ = np.float32
 
-        if self.grid is None:
-            self._create_grid(d0, d_edge)
+        self._create_grid(d0, d_edge)
 
         gx, gy, gz = self.grid.x, self.grid.y, self.grid.z
         dx, dy, dz = np.diff(gx).astype(dtype_), np.diff(gy).astype(dtype_), np.diff(gz).astype(dtype_)
@@ -639,7 +724,7 @@ class FDTD_Solver():
 
     def _init_dielectrics(self):
 
-        for sub in self.dielectric.values():
+        for sub in self.dielectrics.values():
             if sub["obj"].n_cells > 6:
                 raise NotImplementedError("Only rectangular dielectrics are supported.")
         
@@ -671,7 +756,7 @@ class FDTD_Solver():
         # split component field names
         e_split = dict(ex=("ex_y", "ex_z"), ey=("ey_z", "ey_x"), ez=("ez_x", "ez_y"))
 
-        for cond in self.conductor.values():
+        for cond in self.conductors.values():
             obj = cond["obj"]
             sig = cond["sigma"]
 
@@ -856,6 +941,9 @@ class FDTD_Solver():
         # get the lumped element faces that are assigned as port terminations
         ports = [element for element in self.lumped_elements.values() if element["port"] is not None]
 
+        if not len(ports):
+            return
+        
         n_ports = max([abs(element["port"]) for element in ports])
 
         self.ports = [None] * n_ports
@@ -1877,11 +1965,11 @@ class FDTD_Solver():
         plotter.add_mesh(self.bounding_box, style="wireframe")
 
         # add substrates
-        for name, (sub) in self.dielectric.items():
+        for name, (sub) in self.dielectrics.items():
             plotter.add_mesh(sub["obj"], **sub["style"])
             
         # add pec
-        for name, cond in self.conductor.items():
+        for name, cond in self.conductors.items():
             plotter.add_mesh(cond["obj"], **cond["style"])
 
         # add lumped elements
