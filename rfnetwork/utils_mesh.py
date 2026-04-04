@@ -3,6 +3,7 @@ from pathlib import Path
 import io
 import numpy as np
 from scipy.optimize import fsolve
+from np_struct import ldarray
 
 from PIL import Image
 
@@ -304,7 +305,7 @@ def is_point_in_surface(points, obj, tolerance=0.001):
     return (np.sum(in_face, axis=0) > 0)
 
 
-def get_gerber_image(filepath: Path) -> np.ndarray:
+def get_gerber_image(filepath: Path, origin: tuple = None) -> np.ndarray:
     """
     Get the an image of a single layer gerber file. Pixels in a copper region are set to 1 in the returned array,
     and are set to 0 outside copper regions.
@@ -331,4 +332,29 @@ def get_gerber_image(filepath: Path) -> np.ndarray:
     width = conv.in_mm(float(gerber.get_info().width_mm))
     height = conv.in_mm(float(gerber.get_info().height_mm))
 
-    return img, (width, height)
+    nx, ny = img.shape
+
+    # size of each pixel along both axis
+    pxl_len_x = width / nx
+    pxl_len_y = height / ny
+
+    if origin is None:
+        origin = (0, 0)
+
+    # location of center of first and last pixel along x
+    xmin = origin[0]
+    xmax = origin[0] + (width) - (pxl_len_x / 2)
+    # location of center of first and last pixel and y
+    ymin = origin[1]
+    ymax = origin[1] + (height) - (pxl_len_y / 2)
+
+    # create labeled array with physical coordinates of image. The coordinates are at the center of each
+    # pixel.
+    im_coords_x = np.linspace(xmin, xmax, nx)
+    im_coords_y = np.linspace(ymin, ymax, ny)
+
+    img = ldarray(
+        img, coords=dict(x=im_coords_x, y=im_coords_y, idx_precision=dict(x=pxl_len_x, y=pxl_len_y))
+    )
+
+    return img

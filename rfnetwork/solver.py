@@ -8,6 +8,7 @@ from np_struct import ldarray
 import sys
 from matplotlib.axes import Axes
 import skimage
+from scipy import ndimage, interpolate
 
 from rfnetwork import const, conv, utils, core, utils_mesh
 
@@ -296,8 +297,7 @@ class FDTD_Solver():
         filepath : Path
             path to gerber file (.gbr, .GTL, .G1, etc...)
         origin : tuple, default: (0, 0, 0)
-            origin in the global grid to place the center of the gerber image, inches. The center is used as the 
-            reference instead of a corner because the gerber may contain a margin that will offset the position.
+            origin in the global grid to place the bottom left corner of the gerber image, inches. 
         width_axis : str, default: "x"
             axis along the width of the gerber layer.
         length_axis : str, default: "y"
@@ -305,32 +305,14 @@ class FDTD_Solver():
         sigma : float, default: 1e16
             conductivity to assign to all copper regions of the layer.
         """
-        # render gerber as raster image
-        image, (len_x, len_y) = utils_mesh.get_gerber_image(filepath)
-        nx, ny = image.shape
-
-        # size of each pixel along both axis
-        pxl_len_x = len_x / nx
-        pxl_len_y = len_y / ny
 
         normal_axis = [ax for ax in ("x", "y", "z") if ax not in (width_axis, length_axis)][0]
+        # axis indices ordered by width, length, and normal
         g0, g1, g2 = [dict(x=0, y=1, z=2)[e] for e in (width_axis, length_axis, normal_axis)]
 
-        # location of center of first and last pixel along x
-        xmin = origin[g0] - (len_x / 2) + (pxl_len_x / 2)
-        xmax = origin[g0] + (len_x / 2) - (pxl_len_x / 2)
-        # location of center of first and last pixel and y
-        ymin = origin[g1] - (len_y / 2) + (pxl_len_y / 2)
-        ymax = origin[g1] + (len_y / 2) - (pxl_len_y / 2)
-
-        # create labeled array with physical coordinates of image. The coordiantes are at the center of each
-        # pixel.
-        im_coords_x = np.linspace(xmin, xmax, nx)
-        im_coords_y = np.linspace(ymin, ymax, ny)
-
-        image = ldarray(
-            image, coords=dict(x=im_coords_x, y=im_coords_y, idx_precision=dict(x=pxl_len_x, y=pxl_len_y))
-        )
+        # render gerber as raster image
+        gerber_origin = (origin[g0], origin[g1])
+        image = utils_mesh.get_gerber_image(filepath, origin=gerber_origin)
 
         # get edges
         edges_raw = skimage.filters.sobel(image)
@@ -435,8 +417,8 @@ class FDTD_Solver():
         for pml_side in self.pml_boundaries:
             self._init_PML(pml_side)
 
-        self._init_conductors()
         self._init_image_layers()
+        self._init_conductors() # allow conductors to override image layers
         self._init_lumped_elements()
         self.invalidate_solution()
 
@@ -450,7 +432,7 @@ class FDTD_Solver():
 
         # if percentage of pixels is above this value on a given row/column, 
         # the point is assigned as either a hard or soft mesh edge.
-        hard_point_threshold = 0.05  
+        hard_point_threshold = 0.04  
         soft_point_threshold = 0.02
 
         for k, gbr in self.gbr_images.items():
@@ -477,15 +459,15 @@ class FDTD_Solver():
             edge_count_y = np.count_nonzero(edges, axis=0) / nx
 
             # hard points, force a mesh edge at these locations
-            hard_points[im_ax0] = np.concatenate((hard_points[im_ax0], im_x[edge_count_x > hard_point_threshold]))
-            hard_points[im_ax1] = np.concatenate((hard_points[im_ax1], im_y[edge_count_y > hard_point_threshold]))
+            hard_points[im_ax0] = np.concatenate((hard_points[im_ax0], im_x[(edge_count_x > hard_point_threshold) & (edge_count_x < 0.8)]))
+            hard_points[im_ax1] = np.concatenate((hard_points[im_ax1], im_y[(edge_count_y > hard_point_threshold) & (edge_count_y < 0.8)]))
 
             # soft points, encourage a mesh edge at these locations
             soft_points[im_ax0] = np.concatenate((soft_points[im_ax0], im_x[edge_count_x > soft_point_threshold]))
             soft_points[im_ax1] = np.concatenate((soft_points[im_ax1], im_y[edge_count_y > soft_point_threshold]))
 
             # add a single hard point at the layer position on the normal axis
-            hard_points[im_ax2] += [origin[im_ax2]]
+            hard_points[im_ax2] = np.concatenate((hard_points[im_ax2], [origin[im_ax2]]))
 
         # add soft points around the hard points, one edge cell away
         for axis in range(3):
@@ -567,15 +549,15 @@ class FDTD_Solver():
             hard_points = np.concatenate((hard_points, gbr_hard_points[axis]))
             soft_points[axis] = np.concatenate((soft_points[axis], gbr_soft_points[axis]))
 
+            # add points for lumped elements
+            for obj in  (lumped_ele_objects + sub_objects):
+                hard_points = np.concatenate([hard_points, obj.points[:, axis]])
+
             # remove any conductor points that are less than d_edge away from other conductor points
             for i in range(len(hard_points)):
                 # remove by setting other values that are very close to this one equal. 
                 p = hard_points[i]
                 hard_points = np.where(np.abs(p - hard_points) < (d_edge * 0.8), p, hard_points)
-
-            # add points for substrates, bounding box, lumped elements
-            for obj in (sub_objects + lumped_ele_objects):
-                hard_points = np.concatenate([hard_points, obj.points[:, axis]])
 
             # remove redundant values
             hard_points = np.sort(np.unique(np.around(hard_points, decimals=self._places)))
@@ -602,8 +584,10 @@ class FDTD_Solver():
             soft_points[axis] = np.clip(soft_points[axis], self.sbox_min[axis], self.sbox_max[axis])
             hard_points = np.clip(hard_points, self.sbox_min[axis], self.sbox_max[axis])
 
+            all_points_axis = np.concatenate([hard_points, soft_points[axis]])
+
             # combine object points with soft points
-            all_points[axis] = np.concatenate([hard_points, soft_points[axis]])
+            all_points[axis] = all_points_axis
             # round to tolerance
             all_points[axis] = np.around(all_points[axis], decimals=self._places)
             # remove repeated values and sort
@@ -1012,66 +996,59 @@ class FDTD_Solver():
             g2_s = gbr["normal_axis"]
             # physical origin of the image in the grid
             origin = gbr["origin"]
-            # physical image bounds
-            g0_min, g0_max = np.min(image.coords["x"]), np.max(image.coords["x"])
-            g1_min, g1_max = np.min(image.coords["y"]), np.max(image.coords["y"])
+
             # axis strings as integers
             g0, g1, g2 = [dict(x=0, y=1, z=2)[e] for e in (g0_s, g1_s, g2_s)]
-
-            def build_idx(e_idx):
-                """ order the surface indices to xyz """
-                xyz_idx = [0] * 3
-
-                xyz_idx[g0] = e_idx[0]
-                xyz_idx[g1] = e_idx[1]
-                xyz_idx[g2] = e_idx[2]
-
-                return tuple(xyz_idx)
 
             # for each field along the 2 axes of the 2D image
             for axis_s in (g0_s, g1_s):
 
                 field = f"e{axis_s}"
-                # get the grid field locations
-                e_grid_0, e_grid_1 = np.meshgrid(*[self.floc[field][ax] for ax in (g0, g1)], indexing="ij")
 
                 # get the surface index on normal axis that matches the layer
                 n_dist = np.abs(self.floc[field][g2] - origin[g2])
                 if not np.any(n_dist < self._tol):
                     raise ValueError("Layer surface is not on a mesh edge!")
                 
-                # # get the grid positions at the surface
+                # get the grid positions at the surface
                 n_idx = np.argmin(n_dist)
 
-                eps = e_eps[field]
+                # create an index tuple that selects the position along the normal axis (g2) and leaves the other 
+                # two axis as is.
+                idx_at_g2 = [slice(None) for i in range(3)]
+                idx_at_g2[g2] = n_idx
+                idx_at_g2 = tuple(idx_at_g2)
 
-                # conductor coefficients
+                eps = e_eps[field][idx_at_g2]
+
+                # 2D grid of conductor coefficients at the image plane
                 Ca_c = (2 * eps - (sigma * self.dt)) / (2 * eps + (sigma * self.dt))
                 Cb_c = (2 * self.dt) / ((2 * eps + (sigma * self.dt)))
 
-                # e-field grid indices that the gerber layer starts and ends on, along width.
-                # ensure the start and and bounds are strictly inside the bounds of the gerber image.
-                e0_start = np.argmin(np.abs(e_grid_0[:, 0] - g0_min)) + 1
-                e0_end = np.argmin(np.abs(e_grid_0[:, 0] - g0_max)) - 1
-                # grid indices of image bounds, along length
-                e1_start = np.argmin(np.abs(e_grid_1[0] - g1_min)) + 1
-                e1_end = np.argmin(np.abs(e_grid_1[0] - g1_max)) - 1
+                # locations of e-field grid along width of image
+                e_g0, e_g1 = [self.floc[field][ax] for ax in (g0, g1)]
 
-                # walk through the physical grid and assign each field component based on its value in the image
-                # TODO: if this ever becomes noticeably slow, implement in C++
-                for i in np.arange(e0_start, e0_end):
-                    for j in np.arange(e1_start, e1_end):
-                        x, y = e_grid_0[i, j], e_grid_1[i, j]
+                # compute indices into the image grid at the e-field grid locations. 
+                im_g0, im_g1 = image.coords["x"], image.coords["y"]
 
-                        # if the pixel at this physical grid location is copper, set the coefficients, otherwise
-                        # ignore it.
-                        if (image.sel(x=x, y=y)):
-                            # get index into the coefficient grid, needs to be ordered xyz, and not by the surface axes
-                            idx = build_idx((i, j, n_idx))
-                            # assign both split field components
-                            for e_sp in e_split[field]:
-                                self.Ca[e_sp][idx] = Ca_c[idx]
-                                self.Cb[e_sp][idx] = Cb_c[idx]
+                e0_interp = interpolate.CubicSpline(im_g0, np.arange(0, len(im_g0)))
+                e0_im_pxl = e0_interp(e_g0)
+
+                e1_interp = interpolate.CubicSpline(im_g1, np.arange(0, len(im_g1)))
+                e1_im_pxl = e1_interp(e_g1)
+
+                # meshgrid of image pixel coordinates
+                im_pxl_m0, im_pxl_m1 = np.meshgrid(e0_im_pxl, e1_im_pxl, indexing="ij")
+                im_pxl_list = np.array([im_pxl_m0, im_pxl_m1])
+
+                # resample the image at the e-field grid locations, fill out of bound areas with 0 (no conductor)
+                i_img = ndimage.map_coordinates(image, im_pxl_list, order=1, mode="constant", cval=0)
+
+                # assign coefficients for values inside conductive regions of the image, for both split field 
+                # components.
+                for e_sp in e_split[field]:
+                    self.Ca[e_sp][idx_at_g2] = np.where(i_img, Ca_c, self.Ca[e_sp][idx_at_g2])
+                    self.Cb[e_sp][idx_at_g2] = np.where(i_img, Cb_c, self.Cb[e_sp][idx_at_g2])
 
             
     def _init_lumped_elements(self):
@@ -1311,53 +1288,6 @@ class FDTD_Solver():
             self.Da[f"{h}_{axis}"][tuple(h_idx)] = (2 * u0 - (sigma_m * dt)) / (2 * u0 + (sigma_m * dt))
             self.Db[f"{h}_{axis}1"][tuple(h_idx)] = (2 * dt) / ((2 * u0 + (sigma_m * dt))) 
             self.Db[f"{h}_{axis}2"][tuple(h_idx)] = (2 * dt) / ((2 * u0 + (sigma_m * dt))) 
-
-    def set_layer_mask(self, z_pos: float, image: np.ndarray, sigma = 1e6):
-
-        image = image.astype(np.int32)
-
-        # epsilon at each field component
-        e_eps = dict(ex=self.eps_ex, ey=self.eps_ey, ez=self.eps_ez)
-
-        # split component field names
-        e_split = dict(ex=("ex_y", "ex_z"), ey=("ey_z", "ey_x"), ez=("ez_x", "ez_y"))
-        
-        for field in ["ex", "ey"]:
-
-            # get the grid field locations
-            e_grid_points = np.meshgrid(*[self.floc[field][i] for i in range(3)], indexing="ij")
-
-            # get the surface index that matches the layer
-            layer_z_d = np.abs(e_grid_points[2] - z_pos)
-            if not np.any(layer_z_d < self._tol):
-                raise ValueError("layer_z does not match grid")
-            
-            # # get the grid positions at the surface
-            zidx = np.argmin(layer_z_d)
-            # e_grid_x, e_grid_y = e_grid_points[0][..., zidx], e_grid_points[1][..., zidx]
-
-            # get epsilon at the field location
-            eps = e_eps[field][..., zidx]
-
-            if field == "ex":
-                im_ex = (image[:, 1:]) | (image[:, :-1])
-                # pad zeros on non-updated edge components
-                pad = np.zeros((len(eps), 1))
-                im_e = np.column_stack([pad, im_ex, pad])
-
-            elif field == "ey":
-                im_ey = (image[1:]) | (image[:-1])
-                # pad zeros on non-updated edge components
-                pad = np.zeros((1, len(eps[0])))
-                im_e = np.vstack([pad, im_ey, pad])
-
-            # conductor coefficients
-            Ca_c = (2 * eps - (sigma * self.dt)) / (2 * eps + (sigma * self.dt))
-            Cb_c = (2 * self.dt) / ((2 * eps + (sigma * self.dt)))
-
-            for e_sp in e_split[field]:
-                self.Ca[e_sp][..., zidx] = np.where(im_e, Ca_c, self.Ca[e_sp][..., zidx])
-                self.Cb[e_sp][..., zidx] = np.where(im_e, Cb_c, self.Cb[e_sp][..., zidx])
 
 
     def gaussian_source(self, width: float, t0: float, t_len: float):
@@ -2188,6 +2118,8 @@ class FDTD_Solver():
         plotter.add_axes()
         plotter.camera_position = camera_position
         plotter.camera.zoom(zoom)
+
+        utils.setup_pv_plotter(plotter)
 
         if axes is not None:
             img = plotter.screenshot()
