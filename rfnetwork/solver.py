@@ -280,28 +280,61 @@ class FDTD_Solver():
             name=name
         )
 
-    def add_gerber_layer(
+    def add_image_layer(
         self,
         filepath: Path,
-        board_size: tuple,
+        dimensions: tuple,
         origin: tuple,
         width_axis: str,
-        length_axis: str
+        length_axis: str,
+        sigma: float = 1e16
     ):
         """
         
         """
         # render gerber as raster image
-        img_raw = utils_mesh.get_gerber_image(filepath)
+        image = utils_mesh.get_gerber_image(filepath)
+        nx, ny = image.shape
 
+        # size of each pixel along both axis
+        pxl_size = dimensions[0] / nx, dimensions[1] / ny
+
+        normal_axis = [ax for ax in ("x", "y", "z") if ax not in (width_axis, length_axis)][0]
+        g0, g1, g2 = [dict(x=0, y=1, z=2)[e] for e in (width_axis, length_axis, normal_axis)]
+
+        # create labeled array with physical coordinates of image. The coordiantes are at the center of each
+        # pixel.
+        im_coords_0 = np.linspace(
+            origin[g0] + (pxl_size[0] / 2), origin[g0] + (dimensions[0]) - (pxl_size[0] / 2), image.shape[0]
+        )
+
+        im_coords_1 = np.linspace(
+            origin[g1] + (pxl_size[1] / 2), origin[g1] + (dimensions[1]) - (pxl_size[1] / 2), image.shape[1]
+        )
+
+        image = ldarray(
+            image, coords=dict(x=im_coords_0, y=im_coords_1, idx_precision=dict(x=pxl_size[0], y=pxl_size[1]))
+        )
+
+        # get edges
+        edges_raw = skimage.filters.sobel(image)
+        edges = np.where(edges_raw > (np.max(edges_raw) / 4), 1, 0)
+
+        # the output of the edge filter can produce returns that a multiple cells wide, keep only the
+        # pixels that are on conductive regions
+        edges = ldarray(edges & image, coords=dict(**image.coords))
+
+        # save image and metadata
         self.gbr_images[filepath.stem] = dict(
             filepath=filepath,
-            board_size=board_size,
+            dimensions=dimensions,
             origin=origin,
             width_axis=width_axis,
             length_axis=length_axis,
-            normal_axis=[ax for ax in ("x", "y", "z") if ax not in (width_axis, length_axis)][0],
-            img = img_raw
+            normal_axis=normal_axis,
+            sigma=sigma,
+            img = image,
+            edges = edges
         )
 
     def assign_PML_boundaries(self, *sides: str, n_pml: float = 10):
@@ -388,25 +421,27 @@ class FDTD_Solver():
             self._init_PML(pml_side)
 
         self._init_conductors()
+        self._init_image_layers()
         self._init_lumped_elements()
         self.invalidate_solution()
 
-    def _get_points_from_gerbers(self):
+    def _get_points_from_img(self, d_edge):
+        """
+        Compile locations of all edges in a gerber image.
+        """
 
-        hard_points = [list() for _ in range(3)]
-        soft_points = [list() for _ in range(3)]
+        hard_points = [np.array([]) for _ in range(3)]
+        soft_points = [np.array([]) for _ in range(3)]
 
-        hard_point_threshold = 0.05
+        # if percentage of pixels is above this value on a given row/column, 
+        # the point is assigned as either a hard or soft mesh edge.
+        hard_point_threshold = 0.05  
         soft_point_threshold = 0.02
 
         for k, gbr in self.gbr_images.items():
 
             origin = gbr["origin"]
-            board_size = gbr["board_size"]
-
-            # get edges in image
-            edges_raw = skimage.filters.sobel(gbr["img"]).T
-            edges = np.where(edges_raw > np.max(edges_raw) / 4, 1, 0)
+            edges = gbr["edges"]
 
             # plt.imshow(edges.T, cmap="binary")
             # plt.show()
@@ -416,15 +451,10 @@ class FDTD_Solver():
             ]
 
             nx, ny = edges.shape
-            # image origin in the grid
-            im_x0 = origin[im_ax0]
-            im_y0 = origin[im_ax1]
-            # image physical size in inches
-            im_xsize, im_ysize = board_size
 
             # physical coordinates of image
-            im_x = np.linspace(im_x0, im_x0 + im_xsize, nx)
-            im_y = np.linspace(im_y0, im_y0 + im_ysize, ny)
+            im_x = edges.coords["x"] #np.linspace(im_x0, im_x0 + im_xsize, nx)
+            im_y = edges.coords["y"] #np.linspace(im_y0, im_y0 + im_ysize, ny)
 
             # count the number of edge pixels in each row (count along the columns)
             edge_count_x = np.count_nonzero(edges, axis=1) / ny
@@ -432,18 +462,22 @@ class FDTD_Solver():
             edge_count_y = np.count_nonzero(edges, axis=0) / nx
 
             # hard points, force a mesh edge at these locations
-            hard_points[im_ax0] += list(im_x[edge_count_x > hard_point_threshold])
-            hard_points[im_ax1] += list(im_y[edge_count_y > hard_point_threshold])
+            hard_points[im_ax0] = np.concatenate((hard_points[im_ax0], im_x[edge_count_x > hard_point_threshold]))
+            hard_points[im_ax1] = np.concatenate((hard_points[im_ax1], im_y[edge_count_y > hard_point_threshold]))
 
             # soft points, encourage a mesh edge at these locations
-            soft_points[im_ax0] += list(im_x[edge_count_x > soft_point_threshold])
-            soft_points[im_ax1] += list(im_y[edge_count_y > soft_point_threshold])
+            soft_points[im_ax0] = np.concatenate((soft_points[im_ax0], im_x[edge_count_x > soft_point_threshold]))
+            soft_points[im_ax1] = np.concatenate((soft_points[im_ax1], im_y[edge_count_y > soft_point_threshold]))
 
             # add a single hard point at the layer position on the normal axis
-            
             hard_points[im_ax2] += [origin[im_ax2]]
 
-        return hard_points, soft_points
+        # add soft points around the hard points, one edge cell away
+        for axis in range(3):
+            soft_points[axis] = np.concatenate((soft_points[axis], [edge - d_edge for edge in hard_points[axis]]))
+            soft_points[axis] = np.concatenate((soft_points[axis], [edge + d_edge for edge in hard_points[axis]]))
+                
+        return [np.unique(a) for a in hard_points], [np.unique(a) for a in soft_points]
 
     def _get_mesh_points(self, d_edge: float):
         """
@@ -467,48 +501,52 @@ class FDTD_Solver():
         # array of angled edges broken up into sections, and edge cells that aren't on a geometry boundary
         soft_points = [np.array([]), np.array([]), np.array([])]
 
-        edge_len = np.abs(np.diff(obj_edges, axis=1).squeeze())
-        # compute the area of a box bound by this edge and the cardinal axis. If area is above a certain threshold
-        # related to d_edge, create soft points along the axis to keep the area below the threshold. 
-        edge_area = np.prod(edge_len[:, :2], axis=-1)
+        if len(obj_edges):
+            edge_len = np.abs(np.diff(obj_edges, axis=1).squeeze())
+            # compute the area of a box bound by this edge and the cardinal axis. If area is above a certain threshold
+            # related to d_edge, create soft points along the axis to keep the area below the threshold. 
+            edge_area = np.prod(edge_len[:, :2], axis=-1)
 
-        # add small edge cells around object transitions to reduce error
-        for i, edge in enumerate(obj_edges):
-            if edge_area[i] > (d_edge ** 2):
-                # break angled edges along x and y into sub-cells separated by d_edge
-                nx_ny = np.around(np.abs(edge_len[i][:2]) / d_edge).astype(int)
+            # add small edge cells around object transitions to reduce error
+            for i, edge in enumerate(obj_edges):
+                if edge_area[i] > (d_edge ** 2):
+                    # break angled edges along x and y into sub-cells separated by d_edge
+                    nx_ny = np.around(np.abs(edge_len[i][:2]) / d_edge).astype(int)
 
-                for axis in range(2):
-                    soft_points[axis] = np.append(
-                        soft_points[axis], np.linspace(edge[0, axis], edge[1, axis], nx_ny[axis])
-                    )
-            
-            # add edge cells on either side of edges aligned with the cardinal axis
-            elif np.abs(edge_area[i]) < self._tol:
-                
-                for axis in range(3):
-                    # if edge is normal to the axis (both endpoints are at the same value), add edge cells on 
-                    # either side. Skip if edge is at the bounding box edge
-                    at_bbox_edge = (
-                        (np.abs(edge[0][axis] - self.sbox_max[axis]) < self._tol) |
-                        (np.abs(edge[0][axis] - self.sbox_min[axis]) < self._tol)
-                    )
-
-                    if (edge_len[i][axis] < self._tol) and not at_bbox_edge:
+                    for axis in range(2):
                         soft_points[axis] = np.append(
-                            soft_points[axis], [edge[0][axis] - d_edge, edge[0][axis] + d_edge]
+                            soft_points[axis], np.linspace(edge[0, axis], edge[1, axis], nx_ny[axis])
                         )
+                
+                # add edge cells on either side of edges aligned with the cardinal axis
+                elif np.abs(edge_area[i]) < self._tol:
+                    
+                    for axis in range(3):
+                        # if edge is normal to the axis (both endpoints are at the same value), add edge cells on 
+                        # either side. Skip if edge is at the bounding box edge
+                        at_bbox_edge = (
+                            (np.abs(edge[0][axis] - self.sbox_max[axis]) < self._tol) |
+                            (np.abs(edge[0][axis] - self.sbox_min[axis]) < self._tol)
+                        )
+
+                        if (edge_len[i][axis] < self._tol) and not at_bbox_edge:
+                            soft_points[axis] = np.append(
+                                soft_points[axis], [edge[0][axis] - d_edge, edge[0][axis] + d_edge]
+                            )
 
         # object vertices and points for the mesh around angled sections
         all_points = [np.array([]), np.array([]), np.array([])]
 
         # add points from any gerber layers
-        gbr_hard_points, gbr_soft_points = self._get_points_from_gerbers()
+        gbr_hard_points, gbr_soft_points = self._get_points_from_img(d_edge)
 
         for axis in range(3):
             
             # object vertices
-            hard_points = np.unique(obj_edges[..., axis].flatten())
+            if len(obj_edges):
+                hard_points = np.unique(obj_edges[..., axis].flatten())
+            else:
+                hard_points = []
 
             # add gerber vertices
             hard_points = np.concatenate((hard_points, gbr_hard_points[axis]))
@@ -543,7 +581,7 @@ class FDTD_Solver():
                         sp_axis_reduced += [p]
                         last_p = p
 
-            soft_points[axis] = sp_axis_reduced
+                soft_points[axis] = sp_axis_reduced
 
             # clip points outside of the sbox limits
             soft_points[axis] = np.clip(soft_points[axis], self.sbox_min[axis], self.sbox_max[axis])
@@ -932,6 +970,91 @@ class FDTD_Solver():
             hz_y1 = np.ones((Nx, Ny, Nz+1), dtype=dtype_) * Db_0,
             hz_y2 = np.ones((Nx, Ny, Nz+1), dtype=dtype_) * Db_0,
         )
+
+    def _init_image_layers(self):
+        """
+        Assign coefficients for image layers imported from gerber files.
+        """
+        # epsilon at each field component
+        e_eps = dict(ex=self.eps_ex, ey=self.eps_ey, ez=self.eps_ez)
+
+        # split component field names
+        e_split = dict(ex=("ex_y", "ex_z"), ey=("ey_z", "ey_x"), ez=("ez_x", "ez_y"))
+
+        # gbr = s.gbr_images["lab_project-F_Cu"]
+        for name, gbr in self.gbr_images.items():
+
+            image = gbr["img"]
+            sigma = gbr["sigma"]
+
+            # edges = gbr["edges"]
+            # plt.imshow(image.T, origin="lower", cmap="binary")
+            # plt.imshow(edges.T, origin="lower", cmap="binary")
+
+            # get the three image axis, may be oriented in any direction
+            g0_s = gbr["width_axis"]
+            g1_s = gbr["length_axis"]
+            g2_s = gbr["normal_axis"]
+            # physical origin of the image in the grid
+            origin = gbr["origin"]
+            # physical image size
+            g0_len, g1_len = gbr["dimensions"]
+            # axis strings as integers
+            g0, g1, g2 = [dict(x=0, y=1, z=2)[e] for e in (g0_s, g1_s, g2_s)]
+
+            def build_idx(e_idx):
+                """ order the surface indices to xyz """
+                xyz_idx = [0] * 3
+
+                xyz_idx[g0] = e_idx[0]
+                xyz_idx[g1] = e_idx[1]
+                xyz_idx[g2] = e_idx[2]
+
+                return tuple(xyz_idx)
+
+            # for each axis of the 2D image
+            for axis_s in (g0_s, g1_s):
+
+                field = f"e{axis_s}"
+                # get the grid field locations
+                e_grid_0, e_grid_1 = np.meshgrid(*[self.floc[field][ax] for ax in (g0, g1)], indexing="ij")
+
+                # get the surface index on normal axis that matches the layer
+                n_dist = np.abs(self.floc[field][g2] - origin[g2])
+                if not np.any(n_dist < self._tol):
+                    raise ValueError("Layer surface is not on a mesh edge!")
+                
+                # # get the grid positions at the surface
+                n_idx = np.argmin(n_dist)
+
+                eps = e_eps[field]
+
+                # conductor coefficients
+                Ca_c = (2 * eps - (sigma * self.dt)) / (2 * eps + (sigma * self.dt))
+                Cb_c = (2 * self.dt) / ((2 * eps + (sigma * self.dt)))
+
+                # grid indices that the gerber layer starts and ends on, along width
+                e0_start = np.argmin(np.abs(e_grid_0[:, 0] - origin[g0]))
+                e0_end = np.argmin(np.abs(e_grid_0[:, 0] - (origin[g0] + g0_len)))
+                # grid idices of image bounds, along length
+                e1_start = np.argmin(np.abs(e_grid_1[0] - origin[g1]))
+                e1_end = np.argmin(np.abs(e_grid_1[0] - (origin[g1] + g1_len)))
+
+                # walk through the physical grid and assign each field component based on its value in the image
+                # TODO: if this ever becomes noticely slow, implement in C++
+                for i in np.arange(e0_start, e0_end):
+                    for j in np.arange(e1_start, e1_end):
+                        x, y = e_grid_0[i, j], e_grid_1[i, j]
+
+                        # if the pixel at this physical grid location is copper, set the coefficients, otherwise
+                        # ignore it.
+                        if (image.sel(x=x, y=y)):
+                            # get index into the coefficient grid, needs to be ordered xyz, and not by the surface axes
+                            idx = build_idx((i, j, n_idx))
+                            # assign both split field components
+                            for e_sp in e_split[field]:
+                                self.Ca[e_sp][idx] = Ca_c[idx]
+                                self.Cb[e_sp][idx] = Cb_c[idx]
 
             
     def _init_lumped_elements(self):
