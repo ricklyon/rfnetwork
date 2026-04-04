@@ -8,6 +8,8 @@ from PIL import Image
 
 import pygerber.gerberx3.api.v2 as pygb
 
+from . import conv
+
 def blend_cell_widths(
     a: float, b: float, d: float, n_min: int = 1, tol: float = 0.0001, dtype_=np.float32
 ):
@@ -309,8 +311,11 @@ def get_gerber_image(filepath: Path) -> np.ndarray:
     """
     # render gerber as raster image
     gerber = pygb.GerberFile.from_file(filepath).parse()
+
     buff = io.BytesIO()
-    gerber.render_raster(buff, image_format=pygb.ImageFormatEnum.PNG, color_scheme=pygb.ColorScheme.COPPER, dpmm=50)
+    gerber.render_raster(
+        buff, image_format=pygb.ImageFormatEnum.PNG, color_scheme=pygb.ColorScheme.COPPER, dpmm=50
+    )
     img_raw = np.array(Image.open(buff))
 
     # copper region color in the raster image
@@ -322,4 +327,8 @@ def get_gerber_image(filepath: Path) -> np.ndarray:
     # width axis first
     img = np.flip(img, axis=0).T
 
-    return img
+    # get board dimensions
+    width = conv.in_mm(float(gerber.get_info().width_mm))
+    height = conv.in_mm(float(gerber.get_info().height_mm))
+
+    return img, (width, height)

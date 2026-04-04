@@ -283,37 +283,53 @@ class FDTD_Solver():
     def add_image_layer(
         self,
         filepath: Path,
-        dimensions: tuple,
-        origin: tuple,
-        width_axis: str,
-        length_axis: str,
+        origin: tuple = None,
+        width_axis: str = "x",
+        length_axis: str = "z",
         sigma: float = 1e16
     ):
         """
-        
+        Add a single layer gerber file.
+
+        Parameters
+        ----------
+        filepath : Path
+            path to gerber file (.gbr, .GTL, .G1, etc...)
+        origin : tuple, default: (0, 0, 0)
+            origin in the global grid to place the center of the gerber image, inches. The center is used as the 
+            reference instead of a corner because the gerber may contain a margin that will offset the position.
+        width_axis : str, default: "x"
+            axis along the width of the gerber layer.
+        length_axis : str, default: "y"
+            axis along the length of the gerber layer.
+        sigma : float, default: 1e16
+            conductivity to assign to all copper regions of the layer.
         """
         # render gerber as raster image
-        image = utils_mesh.get_gerber_image(filepath)
+        image, (len_x, len_y) = utils_mesh.get_gerber_image(filepath)
         nx, ny = image.shape
 
         # size of each pixel along both axis
-        pxl_size = dimensions[0] / nx, dimensions[1] / ny
+        pxl_len_x = len_x / nx
+        pxl_len_y = len_y / ny
 
         normal_axis = [ax for ax in ("x", "y", "z") if ax not in (width_axis, length_axis)][0]
         g0, g1, g2 = [dict(x=0, y=1, z=2)[e] for e in (width_axis, length_axis, normal_axis)]
 
+        # location of center of first and last pixel along x
+        xmin = origin[g0] - (len_x / 2) + (pxl_len_x / 2)
+        xmax = origin[g0] + (len_x / 2) - (pxl_len_x / 2)
+        # location of center of first and last pixel and y
+        ymin = origin[g1] - (len_y / 2) + (pxl_len_y / 2)
+        ymax = origin[g1] + (len_y / 2) - (pxl_len_y / 2)
+
         # create labeled array with physical coordinates of image. The coordiantes are at the center of each
         # pixel.
-        im_coords_0 = np.linspace(
-            origin[g0] + (pxl_size[0] / 2), origin[g0] + (dimensions[0]) - (pxl_size[0] / 2), image.shape[0]
-        )
-
-        im_coords_1 = np.linspace(
-            origin[g1] + (pxl_size[1] / 2), origin[g1] + (dimensions[1]) - (pxl_size[1] / 2), image.shape[1]
-        )
+        im_coords_x = np.linspace(xmin, xmax, nx)
+        im_coords_y = np.linspace(ymin, ymax, ny)
 
         image = ldarray(
-            image, coords=dict(x=im_coords_0, y=im_coords_1, idx_precision=dict(x=pxl_size[0], y=pxl_size[1]))
+            image, coords=dict(x=im_coords_x, y=im_coords_y, idx_precision=dict(x=pxl_len_x, y=pxl_len_y))
         )
 
         # get edges
@@ -327,14 +343,13 @@ class FDTD_Solver():
         # save image and metadata
         self.gbr_images[filepath.stem] = dict(
             filepath=filepath,
-            dimensions=dimensions,
             origin=origin,
             width_axis=width_axis,
             length_axis=length_axis,
             normal_axis=normal_axis,
             sigma=sigma,
-            img = image,
-            edges = edges
+            img=image,
+            edges=edges
         )
 
     def assign_PML_boundaries(self, *sides: str, n_pml: float = 10):
@@ -997,8 +1012,9 @@ class FDTD_Solver():
             g2_s = gbr["normal_axis"]
             # physical origin of the image in the grid
             origin = gbr["origin"]
-            # physical image size
-            g0_len, g1_len = gbr["dimensions"]
+            # physical image bounds
+            g0_min, g0_max = np.min(image.coords["x"]), np.max(image.coords["x"])
+            g1_min, g1_max = np.min(image.coords["y"]), np.max(image.coords["y"])
             # axis strings as integers
             g0, g1, g2 = [dict(x=0, y=1, z=2)[e] for e in (g0_s, g1_s, g2_s)]
 
@@ -1012,7 +1028,7 @@ class FDTD_Solver():
 
                 return tuple(xyz_idx)
 
-            # for each axis of the 2D image
+            # for each field along the 2 axes of the 2D image
             for axis_s in (g0_s, g1_s):
 
                 field = f"e{axis_s}"
@@ -1033,15 +1049,16 @@ class FDTD_Solver():
                 Ca_c = (2 * eps - (sigma * self.dt)) / (2 * eps + (sigma * self.dt))
                 Cb_c = (2 * self.dt) / ((2 * eps + (sigma * self.dt)))
 
-                # grid indices that the gerber layer starts and ends on, along width
-                e0_start = np.argmin(np.abs(e_grid_0[:, 0] - origin[g0]))
-                e0_end = np.argmin(np.abs(e_grid_0[:, 0] - (origin[g0] + g0_len)))
-                # grid idices of image bounds, along length
-                e1_start = np.argmin(np.abs(e_grid_1[0] - origin[g1]))
-                e1_end = np.argmin(np.abs(e_grid_1[0] - (origin[g1] + g1_len)))
+                # e-field grid indices that the gerber layer starts and ends on, along width.
+                # ensure the start and and bounds are strictly inside the bounds of the gerber image.
+                e0_start = np.argmin(np.abs(e_grid_0[:, 0] - g0_min)) + 1
+                e0_end = np.argmin(np.abs(e_grid_0[:, 0] - g0_max)) - 1
+                # grid indices of image bounds, along length
+                e1_start = np.argmin(np.abs(e_grid_1[0] - g1_min)) + 1
+                e1_end = np.argmin(np.abs(e_grid_1[0] - g1_max)) - 1
 
                 # walk through the physical grid and assign each field component based on its value in the image
-                # TODO: if this ever becomes noticely slow, implement in C++
+                # TODO: if this ever becomes noticeably slow, implement in C++
                 for i in np.arange(e0_start, e0_end):
                     for j in np.arange(e1_start, e1_end):
                         x, y = e_grid_0[i, j], e_grid_1[i, j]
