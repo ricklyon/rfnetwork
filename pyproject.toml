@@ -19,12 +19,13 @@ dependencies = [
     "numpy>=2.0.0", 
     "matplotlib", 
     "scipy", 
-    "np-struct>=0.0.2", 
+    "np-struct", 
     "mpl-markers", 
     "pyside6", 
     "pyvista",
     "imageio",
-    "pygerber==2.4.3"
+    "pygerber==2.4.3",
+    "scikit-image"
 ]
 requires-python = ">=3.9"
 
