@@ -308,10 +308,24 @@ def is_point_in_surface(points, obj, tolerance=0.001):
     return (np.sum(in_face, axis=0) > 0)
 
 
-def get_gerber_image(filepath: Path, origin: tuple = None, dpi: int = 1000) -> np.ndarray:
+def get_gerber_image(filepath: Path, origin: tuple = None, dpi: int = 1000) -> ldarray:
     """
     Get the an image of a single layer gerber file. Pixels in a copper region are set to 1 in the returned array,
     and are set to 0 outside copper regions.
+
+    Parameters
+    ----------
+    filepath : Path
+        path to gerber file
+    origin : tuple, default: (0, 0)
+        physical x/y location on mesh grid to place the lower left corner of the file. 
+    dpi : int, default: 1000
+        pixels per inch of rasterized gerber image.
+
+    Returns
+    -------
+    ldarray :
+        labeled numpy array of gerber image. Value of 1 indicates metalized area, 0 indicates etched area.
     """
     # convert dpi to dots per mm
     dpmm = int(dpi * conv.in_mm(1))
@@ -346,6 +360,9 @@ def get_gerber_image(filepath: Path, origin: tuple = None, dpi: int = 1000) -> n
     if origin is None:
         origin = (0, 0)
 
+    if len(origin) != 2:
+        raise ValueError("Gerber file origin must be a length 2 tuple (x/y location of lower left corner.)")
+    
     # location of center of first and last pixel along x
     xmin = origin[0]
     xmax = origin[0] + (width) - (pxl_len_x / 2)
