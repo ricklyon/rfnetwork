@@ -115,6 +115,7 @@ ax.set_ylim([-20, 5])
 ax.set_xlabel("Frequency [GHz]")
 ax.set_ylabel("[dB]")
 ax.legend(["Measured S11", "Simulated S11"])
+ax.set_xticks(np.arange(0, 4.5, 0.5))
 
 # plot far-field cut along theta at phi=0
 theta_cut = rfn.conv.db10_lin(
@@ -144,6 +145,7 @@ plt.show()
 # Plot near-field
 # ---------------
 # Re-solve with a narrow-band excitation and plot near-field monitor
+#
 # .. image:: ../_static/img/vivaldi.gif
 
 # excitation centered around 3 GHz. The signal still has significant broad-band energy outside of 3GHz, but it 
