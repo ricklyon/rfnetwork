@@ -776,3 +776,4 @@ def setup_pv_plotter(p: pv.Plotter):
     p.add_key_event("n", lambda: p.disable_parallel_projection())
 
     p.track_click_position(callback, side="left")
+

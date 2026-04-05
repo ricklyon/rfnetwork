@@ -4,6 +4,9 @@ import io
 import numpy as np
 from scipy.optimize import fsolve
 from np_struct import ldarray
+import mpl_markers as mplm
+from matplotlib.axes import Axes
+import matplotlib.pyplot as plt
 
 from PIL import Image
 
@@ -360,3 +363,44 @@ def get_gerber_image(filepath: Path, origin: tuple = None, dpi: int = 1000) -> n
     )
 
     return img
+
+
+def plot_gerber(filepath: Path, origin: tuple = None, axes: Axes = None):
+    """
+    Plot a gerber file with interactive markers showing the physical coordinates. 
+    Conductive areas are shown in black, open areas are shown in white.
+
+    Parameters
+    ----------
+    filepath : Path
+        filepath to gerber file
+    origin : tuple, optional
+        length 2 tuple of the x/y position of the lower left corner of the image
+    """
+
+    if origin is None:
+        origin = (0, 0)
+
+    if axes is None:
+        _, axes = plt.subplots()
+
+    image = get_gerber_image(filepath, origin)
+
+    axes.imshow(image.T, origin="lower", cmap="binary")
+    x_idx = int(len(image.coords["x"]) / 2)
+    y_idx = int(len(image.coords["y"]) / 2)
+    axes.set_xticks([])
+    axes.set_yticks([])
+    
+    # add markers with labels showing the grid coordinates
+    mplm.axis_marker(
+        x=x_idx, 
+        y=y_idx, 
+        xline=dict(color="red"),
+        yline=dict(color="red"),
+        xformatter=lambda x: "{:.4f}".format(image.coords["x"][int(x)]), 
+        yformatter=lambda y: "{:.4f}".format(image.coords["y"][int(y)]),
+        axes=axes
+    )
+    
+    return axes

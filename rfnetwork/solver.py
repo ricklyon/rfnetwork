@@ -9,6 +9,7 @@ import sys
 from matplotlib.axes import Axes
 import skimage
 from scipy import ndimage, interpolate
+import matplotlib.colors as mcolors
 
 from rfnetwork import const, conv, utils, core, utils_mesh
 
@@ -34,7 +35,7 @@ class FDTD_Solver():
         self.dielectrics = dict()
         self.conductors = dict()
         self.lumped_elements = dict()
-        self.gbr_images = dict()
+        self.images = dict()
 
         self.pml_boundaries = []
 
@@ -43,7 +44,6 @@ class FDTD_Solver():
         self.probes = dict()
         self.ports = []
         self.ports_inv = []
-        
         
         self._n_pml = None
         self._auto_name_counter = 0
@@ -324,8 +324,14 @@ class FDTD_Solver():
         # pixels that are on conductive regions
         edges = ldarray(edges & image, coords=dict(**image.coords))
 
+        # create colormap that shows metalized regions in the image and leaves everything else transparent
+        # remove color and opacity from style dictionary so it's not passed on to add_mesh
+        color1 = mcolors.to_rgba("white", alpha=0.0) 
+        color2 = mcolors.to_rgba(style.pop("color", "gold"), alpha=1)
+        cmap = mcolors.ListedColormap([color1, color2])
+
         # save image and metadata
-        self.gbr_images[filepath.stem] = dict(
+        self.images[filepath.stem] = dict(
             filepath=filepath,
             origin=origin,
             width_axis=width_axis,
@@ -334,7 +340,7 @@ class FDTD_Solver():
             sigma=sigma,
             img=image,
             edges=edges,
-            style=style
+            style={**style, "cmap":cmap} # add cmap to style so it's passed to add_mesh
         )
 
     def assign_PML_boundaries(self, *sides: str, n_pml: float = 10):
@@ -420,7 +426,7 @@ class FDTD_Solver():
         for pml_side in self.pml_boundaries:
             self._init_PML(pml_side)
 
-        self._init_image_layers()
+        self._init_image_coefficients()
         self._init_conductors() # allow conductors to override image layers
         self._init_lumped_elements()
         self.invalidate_solution()
@@ -438,7 +444,7 @@ class FDTD_Solver():
         hard_point_threshold = 0.04  
         soft_point_threshold = 0.02
 
-        for k, gbr in self.gbr_images.items():
+        for k, gbr in self.images.items():
 
             origin = gbr["origin"]
             edges = gbr["edges"]
@@ -973,7 +979,7 @@ class FDTD_Solver():
             hz_y2 = np.ones((Nx, Ny, Nz+1), dtype=dtype_) * Db_0,
         )
 
-    def _init_image_layers(self):
+    def _init_image_coefficients(self):
         """
         Assign coefficients for image layers imported from gerber files.
         """
@@ -983,8 +989,8 @@ class FDTD_Solver():
         # split component field names
         e_split = dict(ex=("ex_y", "ex_z"), ey=("ey_z", "ey_x"), ez=("ez_x", "ez_y"))
 
-        # gbr = s.gbr_images["lab_project-F_Cu"]
-        for name, gbr in self.gbr_images.items():
+        # gbr = s.images["lab_project-F_Cu"]
+        for name, gbr in self.images.items():
 
             image = gbr["img"]
             sigma = gbr["sigma"]
@@ -2054,7 +2060,7 @@ class FDTD_Solver():
             plotter.add_mesh(ele["obj"], color="pink", opacity=0.3)
 
         # add gerber layers
-        for name, gbr in self.gbr_images.items():
+        for name, gbr in self.images.items():
             img = gbr["img"]
 
             nx = len(img.coords["x"])
@@ -2090,12 +2096,11 @@ class FDTD_Solver():
             # origin is at the edge of the left bottom pixel. Dimensions are +1 because the image data
             # grid is at the pixel edges. 
             im_grid = pv.ImageData(dimensions=dims_xyz, spacing=spacing_xyz, origin=gbr["origin"])
-            # add pixel values to the cell data
-            im_grid.cell_data["values"] = img.flatten(order="F")
+            # add pixel values to the cell data (at pixel centers)
+            im_grid.cell_data["values"] = img.flatten(order="F").astype(np.float32)
 
             plotter.add_mesh(
-                im_grid, interpolate_before_map=False, 
-                smooth_shading=False, opacity="linear", show_scalar_bar=False, **gbr["style"]
+                im_grid, show_scalar_bar=False, **gbr["style"]
             )
 
         if show_probes:
