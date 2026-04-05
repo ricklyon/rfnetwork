@@ -287,7 +287,9 @@ class FDTD_Solver():
         origin: tuple = None,
         width_axis: str = "x",
         length_axis: str = "z",
-        sigma: float = 1e16
+        sigma: float = 1e16,
+        dpi: int = 1000,
+        style: dict = dict()
     ):
         """
         Add a single layer gerber file.
@@ -312,7 +314,7 @@ class FDTD_Solver():
 
         # render gerber as raster image
         gerber_origin = (origin[g0], origin[g1])
-        image = utils_mesh.get_gerber_image(filepath, origin=gerber_origin)
+        image = utils_mesh.get_gerber_image(filepath, origin=gerber_origin, dpi=dpi)
 
         # get edges
         edges_raw = skimage.filters.sobel(image)
@@ -331,7 +333,8 @@ class FDTD_Solver():
             normal_axis=normal_axis,
             sigma=sigma,
             img=image,
-            edges=edges
+            edges=edges,
+            style=style
         )
 
     def assign_PML_boundaries(self, *sides: str, n_pml: float = 10):
@@ -1976,6 +1979,7 @@ class FDTD_Solver():
         plotter: pv.Plotter = None,
         camera_position: str = None,
         zoom: float = 1.0, 
+        max_image_n: int = 800,
         axes: Axes = None
     ) -> pv.Plotter:
         """
@@ -2000,6 +2004,9 @@ class FDTD_Solver():
         
         zoom : float, default: 1
             camera zoom
+        
+        max_image_n : int, default: 800
+            maximum number of pixels to render for image layers along each axis.
 
         axes : matplotlib.axes.Axes
             matplotlib axes object. If provided, a screenshot is taken of the rendered image and 
@@ -2045,6 +2052,51 @@ class FDTD_Solver():
         # add lumped elements
         for name, ele in self.lumped_elements.items():
             plotter.add_mesh(ele["obj"], color="pink", opacity=0.3)
+
+        # add gerber layers
+        for name, gbr in self.gbr_images.items():
+            img = gbr["img"]
+
+            nx = len(img.coords["x"])
+            ny = len(img.coords["y"])
+
+            # downsample the image to not overload the renderer
+            ds_x = np.clip(int(nx / max_image_n), 1, None)
+            ds_y = np.clip(int(ny / max_image_n), 1, None)
+
+            img = img[::ds_x, ::ds_y]
+            nx = len(img.coords["x"])
+            ny = len(img.coords["y"])
+
+            dx = np.diff(img.coords["x"])[0]
+            dy = np.diff(img.coords["y"])[0]
+
+            g0_s = gbr["width_axis"]
+            g1_s = gbr["length_axis"]
+            g2_s = gbr["normal_axis"]
+
+            # axis strings as integers
+            g0, g1, g2 = [dict(x=0, y=1, z=2)[e] for e in (g0_s, g1_s, g2_s)]
+
+            # dimension and cell spacing ordered in xyz
+            dims_xyz = [1] * 3 
+            dims_xyz[g0] = nx+1
+            dims_xyz[g1] = ny+1
+
+            spacing_xyz = [0] * 3
+            spacing_xyz[g0] = dx
+            spacing_xyz[g1] = dy
+            
+            # origin is at the edge of the left bottom pixel. Dimensions are +1 because the image data
+            # grid is at the pixel edges. 
+            im_grid = pv.ImageData(dimensions=dims_xyz, spacing=spacing_xyz, origin=gbr["origin"])
+            # add pixel values to the cell data
+            im_grid.cell_data["values"] = img.flatten(order="F")
+
+            plotter.add_mesh(
+                im_grid, interpolate_before_map=False, 
+                smooth_shading=False, opacity="linear", show_scalar_bar=False, **gbr["style"]
+            )
 
         if show_probes:
             arrow_pos = np.zeros((len(self.probes), 3))

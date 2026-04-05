@@ -305,17 +305,19 @@ def is_point_in_surface(points, obj, tolerance=0.001):
     return (np.sum(in_face, axis=0) > 0)
 
 
-def get_gerber_image(filepath: Path, origin: tuple = None) -> np.ndarray:
+def get_gerber_image(filepath: Path, origin: tuple = None, dpi: int = 1000) -> np.ndarray:
     """
     Get the an image of a single layer gerber file. Pixels in a copper region are set to 1 in the returned array,
     and are set to 0 outside copper regions.
     """
+    # convert dpi to dots per mm
+    dpmm = int(dpi * conv.in_mm(1))
     # render gerber as raster image
     gerber = pygb.GerberFile.from_file(filepath).parse()
 
     buff = io.BytesIO()
     gerber.render_raster(
-        buff, image_format=pygb.ImageFormatEnum.PNG, color_scheme=pygb.ColorScheme.COPPER, dpmm=50
+        buff, image_format=pygb.ImageFormatEnum.PNG, color_scheme=pygb.ColorScheme.COPPER, dpmm=dpmm
     )
     img_raw = np.array(Image.open(buff))
 
