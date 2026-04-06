@@ -1,4 +1,5 @@
 import itertools
+from pathlib import Path
 import time
 import numpy as np 
 import pyvista as pv
@@ -6,6 +7,9 @@ from copy import copy
 from np_struct import ldarray
 import sys
 from matplotlib.axes import Axes
+import skimage
+from scipy import ndimage, interpolate
+import matplotlib.colors as mcolors
 
 from rfnetwork import const, conv, utils, core, utils_mesh
 
@@ -26,11 +30,12 @@ class FDTD_Solver():
         bounding_box: pv.PolyData
             box enclosing the solution space. 
         """
-
+        
         self.bounding_box = bounding_box
-        self.dielectric = dict()
-        self.conductor = dict()
+        self.dielectrics = dict()
+        self.conductors = dict()
         self.lumped_elements = dict()
+        self.images = dict()
 
         self.pml_boundaries = []
 
@@ -86,7 +91,7 @@ class FDTD_Solver():
             objects = [objects]
 
         # check that name is not used already
-        if name is not None and name in self.conductor.keys():
+        if name is not None and name in self.conductors.keys():
             raise ValueError(f"Duplicate conductor name: {name}")
 
         for i, obj in enumerate(objects):
@@ -127,7 +132,7 @@ class FDTD_Solver():
 
         """
         self._add_object(
-            self.dielectric, objects, properties=dict(er=er, loss_tan=loss_tan, f0=f0, style=style), name=name
+            self.dielectrics, objects, properties=dict(er=er, loss_tan=loss_tan, f0=f0, style=style), name=name
         )
 
     def add_conductor(self, *objects: pv.PolyData, sigma: float = 1e16, style: dict = dict(), name: str = None):
@@ -144,7 +149,7 @@ class FDTD_Solver():
             rendering style arguments passed into pv.Plotter.add_mesh()
 
         """
-        self._add_object(self.conductor, objects, properties=dict(sigma=sigma, style=style), name=name)
+        self._add_object(self.conductors, objects, properties=dict(sigma=sigma, style=style), name=name)
 
     def add_lumped_port(
         self, 
@@ -276,6 +281,68 @@ class FDTD_Solver():
             name=name
         )
 
+    def add_image_layer(
+        self,
+        filepath: Path,
+        origin: tuple = None,
+        width_axis: str = "x",
+        length_axis: str = "z",
+        sigma: float = 1e16,
+        dpi: int = 1000,
+        style: dict = dict()
+    ):
+        """
+        Add a single layer gerber file.
+
+        Parameters
+        ----------
+        filepath : Path
+            path to gerber file (.gbr, .GTL, .G1, etc...)
+        origin : tuple, default: (0, 0, 0)
+            origin in the global grid to place the bottom left corner of the gerber image, inches. 
+        width_axis : str, default: "x"
+            axis along the width of the gerber layer.
+        length_axis : str, default: "y"
+            axis along the length of the gerber layer.
+        sigma : float, default: 1e16
+            conductivity to assign to all copper regions of the layer.
+        """
+
+        normal_axis = [ax for ax in ("x", "y", "z") if ax not in (width_axis, length_axis)][0]
+        # axis indices ordered by width, length, and normal
+        g0, g1, g2 = [dict(x=0, y=1, z=2)[e] for e in (width_axis, length_axis, normal_axis)]
+
+        # render gerber as raster image
+        gerber_origin = (origin[g0], origin[g1])
+        image = utils_mesh.get_gerber_image(filepath, origin=gerber_origin, dpi=dpi)
+
+        # get edges
+        edges_raw = skimage.filters.sobel(image)
+        edges = np.where(edges_raw > (np.max(edges_raw) / 4), 1, 0)
+
+        # the output of the edge filter can produce returns that a multiple cells wide, keep only the
+        # pixels that are on conductive regions
+        edges = ldarray(edges & image, coords=dict(**image.coords))
+
+        # create colormap that shows metalized regions in the image and leaves everything else transparent
+        # remove color and opacity from style dictionary so it's not passed on to add_mesh
+        color1 = mcolors.to_rgba("white", alpha=0.0) 
+        color2 = mcolors.to_rgba(style.pop("color", "gold"), alpha=1)
+        cmap = mcolors.ListedColormap([color1, color2])
+
+        # save image and metadata
+        self.images[filepath.stem] = dict(
+            filepath=filepath,
+            origin=origin,
+            width_axis=width_axis,
+            length_axis=length_axis,
+            normal_axis=normal_axis,
+            sigma=sigma,
+            img=image,
+            edges=edges,
+            style={**style, "cmap":cmap} # add cmap to style so it's passed to add_mesh
+        )
+
     def assign_PML_boundaries(self, *sides: str, n_pml: float = 10):
         """
         Assign a PML boundary to sides of the solve box. All sides must have the same number of PML cells.
@@ -333,7 +400,8 @@ class FDTD_Solver():
         
         return tuple(idx)
     
-    def generate_mesh(self, d0: float, d_edge: float = None):
+    
+    def generate_mesh(self, d0: float = None, d_edge: float = None):
         """
         Generate the grid and FDTD coefficients for the model geometry.
 
@@ -358,9 +426,64 @@ class FDTD_Solver():
         for pml_side in self.pml_boundaries:
             self._init_PML(pml_side)
 
-        self._init_conductors()
+        self._init_image_coefficients()
+        self._init_conductors() # allow conductors to override image layers
         self._init_lumped_elements()
         self.invalidate_solution()
+
+    def _get_points_from_img(self, d_edge):
+        """
+        Compile locations of all edges in a gerber image.
+        """
+
+        hard_points = [np.array([]) for _ in range(3)]
+        soft_points = [np.array([]) for _ in range(3)]
+
+        # if percentage of pixels is above this value on a given row/column, 
+        # the point is assigned as either a hard or soft mesh edge.
+        hard_point_threshold = 0.04  
+        soft_point_threshold = 0.02
+
+        for k, gbr in self.images.items():
+
+            origin = gbr["origin"]
+            edges = gbr["edges"]
+
+            # plt.imshow(edges.T, cmap="binary")
+            # plt.show()
+
+            im_ax0, im_ax1, im_ax2 = [
+                dict(x=0, y=1, z=2)[gbr[ax]] for ax in ("width_axis", "length_axis", "normal_axis")
+            ]
+
+            nx, ny = edges.shape
+
+            # physical coordinates of image
+            im_x = edges.coords["x"] #np.linspace(im_x0, im_x0 + im_xsize, nx)
+            im_y = edges.coords["y"] #np.linspace(im_y0, im_y0 + im_ysize, ny)
+
+            # count the number of edge pixels in each row (count along the columns)
+            edge_count_x = np.count_nonzero(edges, axis=1) / ny
+            # count the number of edge pixels in each column (count along the rows)
+            edge_count_y = np.count_nonzero(edges, axis=0) / nx
+
+            # hard points, force a mesh edge at these locations
+            hard_points[im_ax0] = np.concatenate((hard_points[im_ax0], im_x[(edge_count_x > hard_point_threshold) & (edge_count_x < 0.8)]))
+            hard_points[im_ax1] = np.concatenate((hard_points[im_ax1], im_y[(edge_count_y > hard_point_threshold) & (edge_count_y < 0.8)]))
+
+            # soft points, encourage a mesh edge at these locations
+            soft_points[im_ax0] = np.concatenate((soft_points[im_ax0], im_x[edge_count_x > soft_point_threshold]))
+            soft_points[im_ax1] = np.concatenate((soft_points[im_ax1], im_y[edge_count_y > soft_point_threshold]))
+
+            # add a single hard point at the layer position on the normal axis
+            hard_points[im_ax2] = np.concatenate((hard_points[im_ax2], [origin[im_ax2]]))
+
+        # add soft points around the hard points, one edge cell away
+        for axis in range(3):
+            soft_points[axis] = np.concatenate((soft_points[axis], [edge - d_edge for edge in hard_points[axis]]))
+            soft_points[axis] = np.concatenate((soft_points[axis], [edge + d_edge for edge in hard_points[axis]]))
+                
+        return [np.unique(a) for a in hard_points], [np.unique(a) for a in soft_points]
 
     def _get_mesh_points(self, d_edge: float):
         """
@@ -368,11 +491,11 @@ class FDTD_Solver():
         """
 
         # conductor objects and lumped ports
-        cond_objects = [cond["obj"] for cond in self.conductor.values()] 
+        cond_objects = [cond["obj"] for cond in self.conductors.values()] 
         lumped_ele_objects = [ele["obj"] for ele in self.lumped_elements.values()]
 
         # substrate objects
-        sub_objects = [self.bounding_box] + [sub["obj"] for sub in self.dielectric.values()]
+        sub_objects = [self.bounding_box] + [sub["obj"] for sub in self.dielectrics.values()]
 
         # get a list of 2x3 arrays, coordinates of each endpoint of the edges of the model objects
         obj_edges = []
@@ -384,56 +507,66 @@ class FDTD_Solver():
         # array of angled edges broken up into sections, and edge cells that aren't on a geometry boundary
         soft_points = [np.array([]), np.array([]), np.array([])]
 
-        edge_len = np.abs(np.diff(obj_edges, axis=1).squeeze())
-        # compute the area of a box bound by this edge and the cardinal axis. If area is above a certain threshold
-        # related to d_edge, create soft points along the axis to keep the area below the threshold. 
-        edge_area = np.prod(edge_len[:, :2], axis=-1)
+        if len(obj_edges):
+            edge_len = np.abs(np.diff(obj_edges, axis=1).squeeze())
+            # compute the area of a box bound by this edge and the cardinal axis. If area is above a certain threshold
+            # related to d_edge, create soft points along the axis to keep the area below the threshold. 
+            edge_area = np.prod(edge_len[:, :2], axis=-1)
 
-        # add small edge cells around object transitions to reduce error
-        for i, edge in enumerate(obj_edges):
-            if edge_area[i] > (d_edge ** 2):
-                # break angled edges along x and y into sub-cells separated by d_edge
-                nx_ny = np.around(np.abs(edge_len[i][:2]) / d_edge).astype(int)
+            # add small edge cells around object transitions to reduce error
+            for i, edge in enumerate(obj_edges):
+                if edge_area[i] > (d_edge ** 2):
+                    # break angled edges along x and y into sub-cells separated by d_edge
+                    nx_ny = np.around(np.abs(edge_len[i][:2]) / d_edge).astype(int)
 
-                for axis in range(2):
-                    soft_points[axis] = np.append(
-                        soft_points[axis], np.linspace(edge[0, axis], edge[1, axis], nx_ny[axis])
-                    )
-            
-            # add edge cells on either side of edges aligned with the cardinal axis
-            elif np.abs(edge_area[i]) < self._tol:
-                
-                for axis in range(3):
-                    # if edge is normal to the axis (both endpoints are at the same value), add edge cells on 
-                    # either side. Skip if edge is at the bounding box edge
-                    at_bbox_edge = (
-                        (np.abs(edge[0][axis] - self.sbox_max[axis]) < self._tol) |
-                        (np.abs(edge[0][axis] - self.sbox_min[axis]) < self._tol)
-                    )
-
-                    if (edge_len[i][axis] < self._tol) and not at_bbox_edge:
+                    for axis in range(2):
                         soft_points[axis] = np.append(
-                            soft_points[axis], [edge[0][axis] - d_edge, edge[0][axis] + d_edge]
+                            soft_points[axis], np.linspace(edge[0, axis], edge[1, axis], nx_ny[axis])
                         )
+                
+                # add edge cells on either side of edges aligned with the cardinal axis
+                elif np.abs(edge_area[i]) < self._tol:
+                    
+                    for axis in range(3):
+                        # if edge is normal to the axis (both endpoints are at the same value), add edge cells on 
+                        # either side. Skip if edge is at the bounding box edge
+                        at_bbox_edge = (
+                            (np.abs(edge[0][axis] - self.sbox_max[axis]) < self._tol) |
+                            (np.abs(edge[0][axis] - self.sbox_min[axis]) < self._tol)
+                        )
+
+                        if (edge_len[i][axis] < self._tol) and not at_bbox_edge:
+                            soft_points[axis] = np.append(
+                                soft_points[axis], [edge[0][axis] - d_edge, edge[0][axis] + d_edge]
+                            )
 
         # object vertices and points for the mesh around angled sections
         all_points = [np.array([]), np.array([]), np.array([])]
 
+        # add points from any gerber layers
+        gbr_hard_points, gbr_soft_points = self._get_points_from_img(d_edge)
+
         for axis in range(3):
             
             # object vertices
-            hard_points = np.unique(obj_edges[..., axis].flatten())
-            # round points to tolerance
-            # hard_points[axis] = 
+            if len(obj_edges):
+                hard_points = np.unique(obj_edges[..., axis].flatten())
+            else:
+                hard_points = []
+
+            # add gerber vertices
+            hard_points = np.concatenate((hard_points, gbr_hard_points[axis]))
+            soft_points[axis] = np.concatenate((soft_points[axis], gbr_soft_points[axis]))
+
+            # add points for lumped elements
+            for obj in  (lumped_ele_objects + sub_objects):
+                hard_points = np.concatenate([hard_points, obj.points[:, axis]])
+
             # remove any conductor points that are less than d_edge away from other conductor points
             for i in range(len(hard_points)):
                 # remove by setting other values that are very close to this one equal. 
                 p = hard_points[i]
                 hard_points = np.where(np.abs(p - hard_points) < (d_edge * 0.8), p, hard_points)
-
-            # add points for substrates, bounding box, lumped elements
-            for obj in (sub_objects + lumped_ele_objects):
-                hard_points = np.concatenate([hard_points, obj.points[:, axis]])
 
             # remove redundant values
             hard_points = np.sort(np.unique(np.around(hard_points, decimals=self._places)))
@@ -454,14 +587,16 @@ class FDTD_Solver():
                         sp_axis_reduced += [p]
                         last_p = p
 
-            soft_points[axis] = sp_axis_reduced
+                soft_points[axis] = sp_axis_reduced
 
             # clip points outside of the sbox limits
             soft_points[axis] = np.clip(soft_points[axis], self.sbox_min[axis], self.sbox_max[axis])
             hard_points = np.clip(hard_points, self.sbox_min[axis], self.sbox_max[axis])
 
+            all_points_axis = np.concatenate([hard_points, soft_points[axis]])
+
             # combine object points with soft points
-            all_points[axis] = np.concatenate([hard_points, soft_points[axis]])
+            all_points[axis] = all_points_axis
             # round to tolerance
             all_points[axis] = np.around(all_points[axis], decimals=self._places)
             # remove repeated values and sort
@@ -472,8 +607,81 @@ class FDTD_Solver():
 
         return all_points
 
-    def _init_grid(self, d0: float, d_edge: float = None):
-        """ Create model grid. """
+    def _init_grid(self, d0: float = None, d_edge: float = None):
+        """ Initialize model grid. """
+
+        dtype_ = np.float32
+
+        self._create_grid(d0, d_edge)
+
+        gx, gy, gz = self.grid.x, self.grid.y, self.grid.z
+        dx, dy, dz = np.diff(gx).astype(dtype_), np.diff(gy).astype(dtype_), np.diff(gz).astype(dtype_)
+
+        self.n_cells = len(dx), len(dy), len(dz)  
+        self.Nx, self.Ny, self.Nz = self.n_cells
+        self.dx, self.dy, self.dz = dx, dy, dz
+        
+        # locations of cell centers
+        gx_h = (gx[1:] + gx[:-1]) / 2
+        gy_h = (gy[1:] + gy[:-1]) / 2
+        gz_h = (gz[1:] + gz[:-1]) / 2
+
+        # half cell lengths between h components
+        dx_h = (dx[1:] + dx[:-1]) / 2
+        dy_h = (dy[1:] + dy[:-1]) / 2
+        dz_h = (dz[1:] + dz[:-1]) / 2
+
+        self.g_edges = gx, gy, gz
+        self.g_cells = gx_h, gy_h, gz_h
+        self.d_cells = dx, dy, dz
+        self.dh_cells = dx_h, dy_h, dz_h
+        self.dx_h, self.dy_h, self.dz_h = dx_h, dy_h, dz_h
+
+        self.eps = np.ones(self.n_cells) * e0
+        self.sigma = np.zeros(self.n_cells)
+
+        # locations of all field components in grid
+        self.floc = dict(
+            ex=(gx_h, gy, gz),
+            ey=(gx, gy_h, gz),
+            ez=(gx, gy, gz_h),
+            hx=(gx, gy_h, gz_h),
+            hy=(gx_h, gy, gz_h),
+            hz=(gx_h, gy_h, gz)
+        )
+
+        # field shapes
+        Nx, Ny, Nz = self.n_cells
+        self.fshape = dict(
+            ex=(Nx, Ny+1, Nz+1),
+            ey=(Nx+1, Ny, Nz+1),
+            ez=(Nx+1, Ny+1, Nz),
+            hx=(Nx+1, Ny, Nz),
+            hy=(Nx, Ny+1, Nz),
+            hz=(Nx, Ny, Nz+1)
+        )
+
+        # pad the combined cell widths
+        # so edge components are assigned zero width
+        dx_hp = np.pad(dx_h, (1, 1))
+        dy_hp = np.pad(dy_h, (1, 1))
+        dz_hp = np.pad(dz_h, (1, 1))
+        # cell widths along the direction of the component
+        self.fcell_w = dict(
+            ex=(dx, dy_hp, dz_hp),
+            ey=(dx_hp, dy, dz_hp),
+            ez=(dx_hp, dy_hp, dz),
+            hx=(dx_hp, dy, dz),
+            hy=(dx, dy_hp, dz),
+            hz=(dx, dy, dz_hp)
+        )
+
+
+    def _create_grid(self, d0: float, d_edge: float = None):
+        """ Create model grid """
+
+        if d0 is None:
+            raise ValueError("d0 must be provided")
         
         if d_edge is not None and d_edge > (d0 / 1.5):
             raise ValueError("d_edge must be less than d0.")
@@ -556,74 +764,13 @@ class FDTD_Solver():
             # flatten list of lists of subcell widths
             mesh_cells_d[axis] = list(itertools.chain(*graded_subcells_d))
 
-        
         gx, gy, gz = [np.around(np.concatenate([[self.sbox_min[i]], self.sbox_min[i] + np.cumsum(mesh_cells_d[i])]), decimals=self._places) for i in range(3)]
-        dx, dy, dz = np.diff(gx).astype(dtype_), np.diff(gy).astype(dtype_), np.diff(gz).astype(dtype_)
 
-        self.n_cells = len(dx), len(dy), len(dz)  
-        self.grid_mesh = pv.RectilinearGrid(gx.astype(dtype_), gy.astype(dtype_), gz.astype(dtype_))
-
-        self.Nx, self.Ny, self.Nz = self.n_cells
-        self.dx, self.dy, self.dz = dx, dy, dz
-        
-        # locations of cell centers
-        gx_h = (gx[1:] + gx[:-1]) / 2
-        gy_h = (gy[1:] + gy[:-1]) / 2
-        gz_h = (gz[1:] + gz[:-1]) / 2
-
-        # half cell lengths between h components
-        dx_h = (dx[1:] + dx[:-1]) / 2
-        dy_h = (dy[1:] + dy[:-1]) / 2
-        dz_h = (dz[1:] + dz[:-1]) / 2
-
-        self.g_edges = gx, gy, gz
-        self.g_cells = gx_h, gy_h, gz_h
-        self.d_cells = dx, dy, dz
-        self.dh_cells = dx_h, dy_h, dz_h
-        self.dx_h, self.dy_h, self.dz_h = dx_h, dy_h, dz_h
-
-        self.eps = np.ones(self.n_cells) * e0
-        self.sigma = np.zeros(self.n_cells)
-
-        # locations of all field components in grid
-        self.floc = dict(
-            ex=(gx_h, gy, gz),
-            ey=(gx, gy_h, gz),
-            ez=(gx, gy, gz_h),
-            hx=(gx, gy_h, gz_h),
-            hy=(gx_h, gy, gz_h),
-            hz=(gx_h, gy_h, gz)
-        )
-
-        # field shapes
-        Nx, Ny, Nz = self.n_cells
-        self.fshape = dict(
-            ex=(Nx, Ny+1, Nz+1),
-            ey=(Nx+1, Ny, Nz+1),
-            ez=(Nx+1, Ny+1, Nz),
-            hx=(Nx+1, Ny, Nz),
-            hy=(Nx, Ny+1, Nz),
-            hz=(Nx, Ny, Nz+1)
-        )
-
-        # pad the combined cell widths
-        # so edge components are assigned zero width
-        dx_hp = np.pad(dx_h, (1, 1))
-        dy_hp = np.pad(dy_h, (1, 1))
-        dz_hp = np.pad(dz_h, (1, 1))
-        # cell widths along the direction of the component
-        self.fcell_w = dict(
-            ex=(dx, dy_hp, dz_hp),
-            ey=(dx_hp, dy, dz_hp),
-            ez=(dx_hp, dy_hp, dz),
-            hx=(dx_hp, dy, dz),
-            hy=(dx, dy_hp, dz),
-            hz=(dx, dy, dz_hp)
-        )
+        self.grid = pv.RectilinearGrid(gx.astype(dtype_), gy.astype(dtype_), gz.astype(dtype_))
 
     def _init_dielectrics(self):
 
-        for sub in self.dielectric.values():
+        for sub in self.dielectrics.values():
             if sub["obj"].n_cells > 6:
                 raise NotImplementedError("Only rectangular dielectrics are supported.")
         
@@ -655,7 +802,7 @@ class FDTD_Solver():
         # split component field names
         e_split = dict(ex=("ex_y", "ex_z"), ey=("ey_z", "ey_x"), ez=("ez_x", "ez_y"))
 
-        for cond in self.conductor.values():
+        for cond in self.conductors.values():
             obj = cond["obj"]
             sig = cond["sigma"]
 
@@ -832,6 +979,86 @@ class FDTD_Solver():
             hz_y2 = np.ones((Nx, Ny, Nz+1), dtype=dtype_) * Db_0,
         )
 
+    def _init_image_coefficients(self):
+        """
+        Assign coefficients for image layers imported from gerber files.
+        """
+        # epsilon at each field component
+        e_eps = dict(ex=self.eps_ex, ey=self.eps_ey, ez=self.eps_ez)
+
+        # split component field names
+        e_split = dict(ex=("ex_y", "ex_z"), ey=("ey_z", "ey_x"), ez=("ez_x", "ez_y"))
+
+        # gbr = s.images["lab_project-F_Cu"]
+        for name, gbr in self.images.items():
+
+            image = gbr["img"]
+            sigma = gbr["sigma"]
+
+            # edges = gbr["edges"]
+            # plt.imshow(image.T, origin="lower", cmap="binary")
+            # plt.imshow(edges.T, origin="lower", cmap="binary")
+
+            # get the three image axis, may be oriented in any direction
+            g0_s = gbr["width_axis"]
+            g1_s = gbr["length_axis"]
+            g2_s = gbr["normal_axis"]
+            # physical origin of the image in the grid
+            origin = gbr["origin"]
+
+            # axis strings as integers
+            g0, g1, g2 = [dict(x=0, y=1, z=2)[e] for e in (g0_s, g1_s, g2_s)]
+
+            # for each field along the 2 axes of the 2D image
+            for axis_s in (g0_s, g1_s):
+
+                field = f"e{axis_s}"
+
+                # get the surface index on normal axis that matches the layer
+                n_dist = np.abs(self.floc[field][g2] - origin[g2])
+                if not np.any(n_dist < self._tol):
+                    raise ValueError("Layer surface is not on a mesh edge!")
+                
+                # get the grid positions at the surface
+                n_idx = np.argmin(n_dist)
+
+                # create an index tuple that selects the position along the normal axis (g2) and leaves the other 
+                # two axis as is.
+                idx_at_g2 = [slice(None) for i in range(3)]
+                idx_at_g2[g2] = n_idx
+                idx_at_g2 = tuple(idx_at_g2)
+
+                eps = e_eps[field][idx_at_g2]
+
+                # 2D grid of conductor coefficients at the image plane
+                Ca_c = (2 * eps - (sigma * self.dt)) / (2 * eps + (sigma * self.dt))
+                Cb_c = (2 * self.dt) / ((2 * eps + (sigma * self.dt)))
+
+                # locations of e-field grid along width of image
+                e_g0, e_g1 = [self.floc[field][ax] for ax in (g0, g1)]
+
+                # compute indices into the image grid at the e-field grid locations. 
+                im_g0, im_g1 = image.coords["x"], image.coords["y"]
+
+                e0_interp = interpolate.CubicSpline(im_g0, np.arange(0, len(im_g0)))
+                e0_im_pxl = e0_interp(e_g0)
+
+                e1_interp = interpolate.CubicSpline(im_g1, np.arange(0, len(im_g1)))
+                e1_im_pxl = e1_interp(e_g1)
+
+                # meshgrid of image pixel coordinates
+                im_pxl_m0, im_pxl_m1 = np.meshgrid(e0_im_pxl, e1_im_pxl, indexing="ij")
+                im_pxl_list = np.array([im_pxl_m0, im_pxl_m1])
+
+                # resample the image at the e-field grid locations, fill out of bound areas with 0 (no conductor)
+                i_img = ndimage.map_coordinates(image, im_pxl_list, order=1, mode="constant", cval=0)
+
+                # assign coefficients for values inside conductive regions of the image, for both split field 
+                # components.
+                for e_sp in e_split[field]:
+                    self.Ca[e_sp][idx_at_g2] = np.where(i_img, Ca_c, self.Ca[e_sp][idx_at_g2])
+                    self.Cb[e_sp][idx_at_g2] = np.where(i_img, Cb_c, self.Cb[e_sp][idx_at_g2])
+
             
     def _init_lumped_elements(self):
         """
@@ -840,6 +1067,9 @@ class FDTD_Solver():
         # get the lumped element faces that are assigned as port terminations
         ports = [element for element in self.lumped_elements.values() if element["port"] is not None]
 
+        if not len(ports):
+            return
+        
         n_ports = max([abs(element["port"]) for element in ports])
 
         self.ports = [None] * n_ports
@@ -1492,11 +1722,12 @@ class FDTD_Solver():
             
             # for each face on either side of the far-field box
             for j, side in enumerate(["n", "p"]):
-                
+                skipped = False
                 pml_name = axis_s + ("-" if side == "n" else "+")
                 # if face has no PML boundary, the boundary condition is PEC, place surface on boundary edge
                 if pml_name not in self.pml_boundaries:
-                    print("skip")
+                    # flag this side of the grid to prevent a field monitor from being attached.
+                    skipped = True
                     ff_idx[axis, j] = 0 if j == 0 else len(self.g_edges[axis]) - 1
                 else:
                     # set the position of farfield integration surface by index value in the grid
@@ -1512,6 +1743,10 @@ class FDTD_Solver():
 
                 # face position in meters
                 self.farfield["surf_pos"][axis, j] = conv.m_in(surf_pos_in)
+
+                # skip sides without field monitors
+                if skipped:
+                    continue
                 
                 # add monitors for each surface field
                 for f in (sf0, sf1):
@@ -1750,6 +1985,7 @@ class FDTD_Solver():
         plotter: pv.Plotter = None,
         camera_position: str = None,
         zoom: float = 1.0, 
+        max_image_n: int = 800,
         axes: Axes = None
     ) -> pv.Plotter:
         """
@@ -1774,6 +2010,9 @@ class FDTD_Solver():
         
         zoom : float, default: 1
             camera zoom
+        
+        max_image_n : int, default: 800
+            maximum number of pixels to render for image layers along each axis.
 
         axes : matplotlib.axes.Axes
             matplotlib axes object. If provided, a screenshot is taken of the rendered image and 
@@ -1809,16 +2048,60 @@ class FDTD_Solver():
         plotter.add_mesh(self.bounding_box, style="wireframe")
 
         # add substrates
-        for name, (sub) in self.dielectric.items():
+        for name, (sub) in self.dielectrics.items():
             plotter.add_mesh(sub["obj"], **sub["style"])
             
         # add pec
-        for name, cond in self.conductor.items():
+        for name, cond in self.conductors.items():
             plotter.add_mesh(cond["obj"], **cond["style"])
 
         # add lumped elements
         for name, ele in self.lumped_elements.items():
             plotter.add_mesh(ele["obj"], color="pink", opacity=0.3)
+
+        # add gerber layers
+        for name, gbr in self.images.items():
+            img = gbr["img"]
+
+            nx = len(img.coords["x"])
+            ny = len(img.coords["y"])
+
+            # downsample the image to not overload the renderer
+            ds_x = np.clip(int(nx / max_image_n), 1, None)
+            ds_y = np.clip(int(ny / max_image_n), 1, None)
+
+            img = img[::ds_x, ::ds_y]
+            nx = len(img.coords["x"])
+            ny = len(img.coords["y"])
+
+            dx = np.diff(img.coords["x"])[0]
+            dy = np.diff(img.coords["y"])[0]
+
+            g0_s = gbr["width_axis"]
+            g1_s = gbr["length_axis"]
+            g2_s = gbr["normal_axis"]
+
+            # axis strings as integers
+            g0, g1, g2 = [dict(x=0, y=1, z=2)[e] for e in (g0_s, g1_s, g2_s)]
+
+            # dimension and cell spacing ordered in xyz
+            dims_xyz = [1] * 3 
+            dims_xyz[g0] = nx+1
+            dims_xyz[g1] = ny+1
+
+            spacing_xyz = [0] * 3
+            spacing_xyz[g0] = dx
+            spacing_xyz[g1] = dy
+            
+            # origin is at the edge of the left bottom pixel. Dimensions are +1 because the image data
+            # grid is at the pixel edges. 
+            im_grid = pv.ImageData(dimensions=dims_xyz, spacing=spacing_xyz, origin=gbr["origin"])
+            # add pixel values to the cell data (at pixel centers)
+            im_grid.cell_data["values"] = img.flatten(order="F").astype(np.float32)
+
+            plotter.add_mesh(
+                im_grid, show_scalar_bar=False, **gbr["style"]
+            )
 
         if show_probes:
             arrow_pos = np.zeros((len(self.probes), 3))
@@ -1892,6 +2175,8 @@ class FDTD_Solver():
         plotter.add_axes()
         plotter.camera_position = camera_position
         plotter.camera.zoom(zoom)
+
+        utils.setup_pv_plotter(plotter)
 
         if axes is not None:
             img = plotter.screenshot()

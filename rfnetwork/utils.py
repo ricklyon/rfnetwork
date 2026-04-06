@@ -1,6 +1,7 @@
 import re
 from pathlib import Path
 import numpy as np
+import pyvista as pv
 from scipy.special import ellipk
 from scipy import signal
 from np_struct import ldarray
@@ -758,3 +759,21 @@ def eng_formatter(value, precision: int = 3, zero: float = 1e-20) -> str:
     else:
         return f"{fraction}e{int(exponent)}"
     
+def setup_pv_plotter(p: pv.Plotter):
+    """
+    Set up key events and mouse location text for a pyvista Plotter.
+    """
+    text_actor = p.add_text("", position='lower_left', font_size=9)
+
+    def callback(position):
+        x, y, z = position
+        text_actor.SetText(0, f"({x:.3f}, {y:.3f}, {z:.3f})")
+
+    p.add_key_event("x", lambda: p.view_yz())
+    p.add_key_event("y", lambda: p.view_xz())
+    p.add_key_event("z", lambda: p.view_xy())
+    p.add_key_event("p", lambda: p.enable_parallel_projection())
+    p.add_key_event("n", lambda: p.disable_parallel_projection())
+
+    p.track_click_position(callback, side="left")
+

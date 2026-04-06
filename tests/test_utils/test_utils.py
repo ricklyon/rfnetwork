@@ -1,8 +1,11 @@
 import unittest
 import numpy as np
 from pathlib import Path
+from np_struct import ldarray
 
 import rfnetwork as rfn
+
+DATA_DIR = Path(__file__).parent / "../data"
 
 
 class TestUtils(unittest.TestCase):
@@ -77,6 +80,18 @@ class TestUtils(unittest.TestCase):
         self.assertEqual(
             rfn.utils.eng_formatter([2e7 +0.01j, 2e-4j]), '[(20e6+0.01j) (0+200e-6j)]'
         )
+
+    def test_gerber_import(self):
+
+        img = rfn.utils_mesh.get_gerber_image(DATA_DIR / "lab_project-B_Cu.gbr", origin=(-2.0197, -0.0197), dpi=100)
+
+        # compare with regression file
+        img_ref = ldarray.load(DATA_DIR / "regression/lab_project-B_Cu.npy")
+
+        np.testing.assert_array_almost_equal(img, img_ref)
+        # check coordinates
+        np.testing.assert_array_almost_equal(img.coords["x"], img_ref.coords["x"], decimal=4)
+        np.testing.assert_array_almost_equal(img.coords["y"], img_ref.coords["y"], decimal=4)
 
 if __name__ == "__main__":
     unittest.main()

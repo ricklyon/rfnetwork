@@ -1,7 +1,18 @@
 
 from pathlib import Path
+import io
 import numpy as np
 from scipy.optimize import fsolve
+from np_struct import ldarray
+import mpl_markers as mplm
+from matplotlib.axes import Axes
+import matplotlib.pyplot as plt
+
+from PIL import Image
+
+import pygerber.gerberx3.api.v2 as pygb
+
+from . import conv
 
 def blend_cell_widths(
     a: float, b: float, d: float, n_min: int = 1, tol: float = 0.0001, dtype_=np.float32
@@ -295,3 +306,118 @@ def is_point_in_surface(points, obj, tolerance=0.001):
 
     # return True if point is contained in any face of the surface
     return (np.sum(in_face, axis=0) > 0)
+
+
+def get_gerber_image(filepath: Path, origin: tuple = None, dpi: int = 1000) -> ldarray:
+    """
+    Get the an image of a single layer gerber file. Pixels in a copper region are set to 1 in the returned array,
+    and are set to 0 outside copper regions.
+
+    Parameters
+    ----------
+    filepath : Path
+        path to gerber file
+    origin : tuple, default: (0, 0)
+        physical x/y location on mesh grid to place the lower left corner of the file. 
+    dpi : int, default: 1000
+        pixels per inch of rasterized gerber image.
+
+    Returns
+    -------
+    ldarray :
+        labeled numpy array of gerber image. Value of 1 indicates metalized area, 0 indicates etched area.
+    """
+    # convert dpi to dots per mm
+    dpmm = int(dpi * conv.in_mm(1))
+    # render gerber as raster image
+    gerber = pygb.GerberFile.from_file(filepath).parse()
+
+    buff = io.BytesIO()
+    gerber.render_raster(
+        buff, image_format=pygb.ImageFormatEnum.PNG, color_scheme=pygb.ColorScheme.COPPER, dpmm=dpmm
+    )
+    img_raw = np.array(Image.open(buff))
+
+    # copper region color in the raster image
+    gcolor = np.array(pygb.DEFAULT_COLOR_MAP[pygb.FileTypeEnum.COPPER].solid_region_color.as_rgb_int())
+    # if pixel is close to the copper color, set as 1, otherwise 0
+    img = np.where(np.sum(np.abs(img_raw - gcolor[None, None]), axis=-1) < 1, 1, 0)
+
+    # flip the length axis and transpose, this puts the origin at the lower left corner, and puts the
+    # width axis first
+    img = np.flip(img, axis=0).T
+
+    # get board dimensions
+    width = conv.in_mm(float(gerber.get_info().width_mm))
+    height = conv.in_mm(float(gerber.get_info().height_mm))
+
+    nx, ny = img.shape
+
+    # size of each pixel along both axis
+    pxl_len_x = width / nx
+    pxl_len_y = height / ny
+
+    if origin is None:
+        origin = (0, 0)
+
+    if len(origin) != 2:
+        raise ValueError("Gerber file origin must be a length 2 tuple (x/y location of lower left corner.)")
+    
+    # location of center of first and last pixel along x
+    xmin = origin[0]
+    xmax = origin[0] + (width) - (pxl_len_x / 2)
+    # location of center of first and last pixel and y
+    ymin = origin[1]
+    ymax = origin[1] + (height) - (pxl_len_y / 2)
+
+    # create labeled array with physical coordinates of image. The coordinates are at the center of each
+    # pixel.
+    im_coords_x = np.linspace(xmin, xmax, nx)
+    im_coords_y = np.linspace(ymin, ymax, ny)
+
+    img = ldarray(
+        img, coords=dict(x=im_coords_x, y=im_coords_y, idx_precision=dict(x=pxl_len_x, y=pxl_len_y))
+    )
+
+    return img
+
+
+def plot_gerber(filepath: Path, origin: tuple = None, axes: Axes = None):
+    """
+    Plot a gerber file with interactive markers showing the physical coordinates. 
+    Conductive areas are shown in black, open areas are shown in white.
+
+    Parameters
+    ----------
+    filepath : Path
+        filepath to gerber file
+    origin : tuple, optional
+        length 2 tuple of the x/y position of the lower left corner of the image
+    """
+
+    if origin is None:
+        origin = (0, 0)
+
+    if axes is None:
+        _, axes = plt.subplots()
+
+    image = get_gerber_image(filepath, origin)
+
+    axes.imshow(image.T, origin="lower", cmap="binary")
+    x_idx = int(len(image.coords["x"]) / 2)
+    y_idx = int(len(image.coords["y"]) / 2)
+    axes.set_xticks([])
+    axes.set_yticks([])
+    
+    # add markers with labels showing the grid coordinates
+    mplm.axis_marker(
+        x=x_idx, 
+        y=y_idx, 
+        xline=dict(color="red"),
+        yline=dict(color="red"),
+        xformatter=lambda x: "{:.4f}".format(image.coords["x"][int(x)]), 
+        yformatter=lambda y: "{:.4f}".format(image.coords["y"][int(y)]),
+        axes=axes
+    )
+    
+    return axes
