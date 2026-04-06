@@ -2,7 +2,7 @@
 Vivaldi Antenna
 ==============
 
-Import Gerber files of a vivaldi antenna and compare the s-parameters with measured results.
+Import Gerber files of a vivaldi antenna and compare the S-parameters with measured results.
 """
 
 # sphinx_gallery_thumbnail_number = -1
@@ -14,15 +14,15 @@ import pyvista as pv
 import rfnetwork as rfn
 
 from pathlib import Path
-import sys
 import numpy as np
 
 # set matplotlib style
 plt.style.use(rfn.DEFAULT_STYLE)
-dir_ = Path(__file__).parent
 
-pv.set_jupyter_backend("trame")
-sys.argv = sys.argv[0:1]
+try:
+    dir_ = Path(__file__).parent
+except:
+    dir_ = Path().cwd()
 
 # %%
 # Build model
