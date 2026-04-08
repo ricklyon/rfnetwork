@@ -116,7 +116,7 @@ ring = pv.Disc(
 )
 
 # remove section in ring for resistor
-ring = ring.clip_box((0, outer_radius + 0.1, -gap / 2, gap / 2, 0, sub_h)).extract_surface()
+ring = ring.clip_box((0, outer_radius + 0.1, -gap / 2, gap / 2, 0, sub_h)).extract_surface(algorithm="dataset_surface")
 s.add_conductor(ring, style=dict(color="gold"))
 
 # add 100 ohm resistor lumped element
