@@ -149,6 +149,9 @@ class FDTD_Solver():
             rendering style arguments passed into pv.Plotter.add_mesh()
 
         """
+        if "color" not in style:
+            style["color"] = "gold"
+
         self._add_object(self.conductors, objects, properties=dict(sigma=sigma, style=style), name=name)
 
     def add_lumped_port(
@@ -502,6 +505,9 @@ class FDTD_Solver():
         for obj in cond_objects:
             obj_edges += utils_mesh.get_object_edges(obj, group_faces=False)
 
+        # remove edges that are inside the conductive areas, enforcing mesh points is only required at boundaries
+        obj_edges = utils_mesh.remove_interior_edges(obj_edges)
+        # round to tolerance
         obj_edges = np.around(obj_edges, decimals=self._places).astype(np.float32)
 
         # array of angled edges broken up into sections, and edge cells that aren't on a geometry boundary
@@ -513,7 +519,7 @@ class FDTD_Solver():
             # related to d_edge, create soft points along the axis to keep the area below the threshold. 
             edge_area = np.prod(edge_len[:, :2], axis=-1)
 
-            # add small edge cells around object transitions to reduce error
+            # add small edge cells around object transitions
             for i, edge in enumerate(obj_edges):
                 if edge_area[i] > (d_edge ** 2):
                     # break angled edges along x and y into sub-cells separated by d_edge
@@ -525,7 +531,7 @@ class FDTD_Solver():
                         )
                 
                 # add edge cells on either side of edges aligned with the cardinal axis
-                elif np.abs(edge_area[i]) < self._tol:
+                if np.abs(edge_area[i]) < self._tol:
                     
                     for axis in range(3):
                         # if edge is normal to the axis (both endpoints are at the same value), add edge cells on 

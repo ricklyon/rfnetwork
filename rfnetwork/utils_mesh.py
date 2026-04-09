@@ -7,6 +7,7 @@ from np_struct import ldarray
 import mpl_markers as mplm
 from matplotlib.axes import Axes
 import matplotlib.pyplot as plt
+import pyvista as pv
 
 from PIL import Image
 
@@ -86,7 +87,7 @@ def blend_cell_widths(
         raise RuntimeError("Mesh did not converge.")
     
 
-def get_object_edges(obj, group_faces: bool = True) -> list:
+def get_object_edges(obj: pv.PolyData, group_faces: bool = True) -> list:
     """
     Get the endpoints of the lines that form the edges of the object faces. Returns a M-length list for each 
     face in the object, each containing a N-length list of 2x3 arrays. N is the number of edges in the face.
@@ -94,7 +95,9 @@ def get_object_edges(obj, group_faces: bool = True) -> list:
 
     Parameters
     ----------
-    group_faces: bool, default: True
+    obj : py.PolyData
+        pyvista PolyData object 
+    group_faces : bool, default: True
         if False, edges from all faces are combined and the returned list is Nx2x3, where N is the 
         number of edges in the object.
     """
@@ -149,13 +152,49 @@ def get_object_edges(obj, group_faces: bool = True) -> list:
     return faces if group_faces else faces[0]
 
 
-def get_object_vertices(obj, group_faces: bool = True) -> list:
+def remove_interior_edges(obj_edges: np.ndarray, tolerance=0.001):
+    """
+    Remove interior edges returned from get_object_edges(..., group_faces=False) that share an edge with other faces. 
+    """
+    obj_edges = np.array(obj_edges)
+
+    unique_edges = []
+    hit_indices = np.array([])
+
+    for i, e in enumerate(obj_edges):
+
+        # skip if this edge has already been found to be a duplicate with another face
+        if i in hit_indices:
+            continue
+
+        # compare every other edge with this one. Create a M length array where values are True if the points are
+        # the same for "e", False if different. 
+        edge_equal = np.all(np.abs(obj_edges - e[None]) < tolerance, axis=(1, 2))
+        # edges may have the points flipped, but should be treated as the same edge.
+        edge_equal_f = np.all(np.abs(obj_edges - np.flip(e, axis=0)) < tolerance, axis=(1, 2))
+        edge_equal = edge_equal | edge_equal_f
+
+        # unique edges should only have one "True" value in the edge_equal array (itself).
+        # add the indices to all edges that are duplicates to the hit_indices array to prevent them from being
+        # added as a unique edge
+        if np.count_nonzero(edge_equal) != 1:
+            hit_indices = np.unique(np.concatenate([hit_indices, np.argwhere(edge_equal)[:, 0]]))
+        # if unique, add to the list
+        else:
+            unique_edges.append(e)
+
+    return np.array(unique_edges)
+
+
+def get_object_vertices(obj: pv.PolyData, group_faces: bool = True) -> list:
     """
     Get the vertices of each face of the object. Returns a M-length list for each face in the
     object, each containing a Nx3 array of the vertices coordinates in that face.
 
     Parameters
     ----------
+    obj : py.PolyData
+        pyvista PolyData object 
     group_faces: bool, default: True
         if False, vertices from all faces are combined and the returned list is Nx2x3, where N is the 
         number of edges in the object.
