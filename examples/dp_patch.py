@@ -14,12 +14,14 @@ import numpy as np
 import matplotlib.pyplot as plt 
 
 import pyvista as pv
+from np_struct import ldarray
 
 import rfnetwork as rfn
 from rfnetwork import conv
 import mpl_markers as mplm
 import sys
 
+np.set_printoptions(suppress=True)
 # set matplotlib style
 plt.style.use(rfn.DEFAULT_STYLE)
 
@@ -54,7 +56,6 @@ len_ms = conv.in_mm(58)
 w_ms = conv.in_mm(4.42)
 len_stub = conv.in_mm(20)
 
-
 # %%
 # Build Model
 # ------------------------
@@ -76,21 +77,13 @@ s.add_dielectric(sub_btm, er=er_btm, style=dict(opacity=0.2))
 gnd_plane = pv.Rectangle([(sub_x0, sub_y0, 0), (sub_x0, sub_y1, 0), (sub_x1, sub_y1, 0)])
 slot_cutout = pv.Box((-w_slot/2, w_slot, -len_slot/2, len_slot/2, -h_btm, h_top))
 gnd_plane = gnd_plane.clip_box((-w_slot/2, w_slot, -len_slot/2, len_slot/2, 0, 0)).extract_surface(algorithm="dataset_surface")
-s.add_conductor(gnd_plane, style=dict(opacity=0.5, color="black"))
-
-# gnd_plane.plot()
+s.add_conductor(gnd_plane, style=dict(color="k"))
 
 # create patch
 patch = pv.Rectangle(
     [(-w_patch/2, -len_patch/2, h_top), (-w_patch/2, len_patch/2, h_top), (w_patch/2, len_patch/2, h_top)]
 )
 s.add_conductor(patch, style=dict(opacity=0.4))
-
-# point_cloud = pv.PolyData(gnd_plane.points)
-# plotter = pv.Plotter()
-# plotter.add_mesh(point_cloud, color="k")
-# plotter.add_mesh(gnd_plane, opacity=0.5)
-# plotter.show()
 
 # microstrip feed trace
 port_x = sub_x0 + 0.1
@@ -106,9 +99,7 @@ s.add_lumped_port(1, port1_face, "z-")
 # PML boundaries
 s.assign_PML_boundaries("x-", "x+", "y-", "y+", "z+", "z-", n_pml=5)
 
-
-self = s
-s.generate_mesh(d0 = 0.05, d_edge=0.03)
+s.generate_mesh(d0 = 0.05, d_edge=0.02)
 s.render().show()
 
 
@@ -132,7 +123,7 @@ s.add_field_monitor("mon1", "ez", "z", h_top, n_step=10)
 # %%
 # Setup Excitation and Solve
 # ------------------------
-vsrc = s.gaussian_source(width=80e-12, t0=50e-12, t_len=6000e-12)
+vsrc = s.gaussian_source(width=80e-12, t0=50e-12, t_len=8000e-12)
 # plt.plot(vsrc)
 
 s.assign_excitation(vsrc, 1)
@@ -169,15 +160,22 @@ plt.show()
 # %%
 # Plot S11
 # ------------------------
-frequency: np.ndarray = np.arange(500e6, 5e9, 10e6)
+
+frequency: np.ndarray = np.arange(1.5e9, 3e9, 10e6)
 sdata = s.get_sparameters(frequency, downsample=False)
-S11 = sdata[:, 0]
+
+S11 = ldarray(sdata[:, 0][..., None, None], coords=dict(frequency=sdata.coords["frequency"], b=[1], a=[1]))
+
+ant = rfn.Component_Data(S11)
 
 fig, ax = plt.subplots()
-ax.plot(frequency / 1e6, conv.db20_lin(S11))
-ax.set_ylim([-20, 5])
-ax.set_xlabel("Frequency [MHz]")
-ax.set_ylabel("[dB]")
+ant.plot(11, fmt="smith", axes=ax)
 
-mplm.line_marker(x=f0 / 1e6, xlabel=True)
+
+fig, ax = plt.subplots()
+ant.plot(11, fmt="db", axes=ax)
+
+
+mplm.line_marker(x=f0 / 1e9, xlabel=True)
 plt.show()
+# %%
