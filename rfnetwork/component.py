@@ -115,7 +115,7 @@ class Component(object):
         if len(state_str) > threshold:
             state_str = state_str[:threshold] + "..."
 
-        return f"<{module_name} ({state_str}) {self.n_ports} ports>"
+        return f"<{module_name} ({state_str}) {self.n_ports} port{"s" if self.n_ports > 1 else ""}>"
     
     def equals(self, other) -> bool:
         """
