@@ -35,7 +35,7 @@ except:
 # User defined Parameters [inches]
 # ------------------------
 
-f0 = 2.2e9
+f0 = 2.160e9
 lam0 = rfn.const.c0_in / f0
 
 # bottom substrate er
@@ -46,8 +46,8 @@ er_top = 2.54
 h_top = conv.in_mm(1.6)
 
 # parameters from table 3-1 in [1]
-len_patch = conv.in_mm(40)
-w_patch = conv.in_mm(30)
+len_patch = conv.in_mm(30)
+w_patch = conv.in_mm(40)
 w_slot = conv.in_mm(1.55)
 len_slot = conv.in_mm(11.2)
 len_ms = conv.in_mm(58)
@@ -60,7 +60,7 @@ len_stub = conv.in_mm(20)
 # ------------------------
 
 # solve box
-sbox = pv.Cube(center=(0, 0, 0), x_length=w_patch*1.7, y_length=len_patch*1.7, z_length=lam0 / 4)
+sbox = pv.Cube(center=(0, 0, 0), x_length=w_patch*1.7, y_length=w_patch*1.7, z_length=lam0 / 5)
 
 # create model and add elements
 s = rfn.FDTD_Solver(sbox)
@@ -108,14 +108,14 @@ s.assign_PML_boundaries("x-", "x+", "y-", "y+", "z+", "z-", n_pml=5)
 
 
 self = s
-s.generate_mesh(d0 = 0.05, d_edge=0.015)
+s.generate_mesh(d0 = 0.05, d_edge=0.03)
 s.render().show()
 
 
 # s.plot_coefficients("ex_z", "b", "z", 0).show()
 
 # setup far-field monitor
-# s.add_farfield_monitor(frequency=f0)
+s.add_farfield_monitor(frequency=f0)
 
 s.add_field_monitor("mon1", "ez", "z", h_top, n_step=10)
 
@@ -132,7 +132,7 @@ s.add_field_monitor("mon1", "ez", "z", h_top, n_step=10)
 # %%
 # Setup Excitation and Solve
 # ------------------------
-vsrc = s.gaussian_source(width=100e-12, t0=100e-12, t_len=5000e-12)
+vsrc = s.gaussian_source(width=80e-12, t0=50e-12, t_len=6000e-12)
 # plt.plot(vsrc)
 
 s.assign_excitation(vsrc, 1)
@@ -140,45 +140,31 @@ s.solve(n_threads=4)
 
 s.plot_monitor("mon1", opacity=1).show()
 
-# # %%
-# # Principal Plane Cut at phi=0°
-# # ------------------------
-# # This plot shows realized gain
 
-# phi_cut = rfn.conv.db10_lin(
-#     s.get_farfield_gain(phi=np.arange(-180, 182, 2), theta=90).sel(polarization="thetapol")
-# )
+# plot far-field cut along theta at phi=0
+theta_cut = rfn.conv.db10_lin(
+    s.get_farfield_gain(theta=np.arange(-180, 181, 2), phi=0).sel(polarization="thetapol")
+)
 
-# theta_cut = rfn.conv.db10_lin(
-#     s.get_farfield_gain(theta=np.arange(-180, 181, 2), phi=0).sel(polarization="thetapol")
-# )
+fig1, ax = plt.subplots(subplot_kw=dict(projection="polar"))
+theta_rad = np.deg2rad(theta_cut.coords["theta"])
+ax.plot(theta_rad, theta_cut.squeeze().T)
 
-# fig1, ax1 = plt.subplots(subplot_kw=dict(projection="polar"))
-# fig2, ax2 = plt.subplots(subplot_kw=dict(projection="polar"))
+ax.set_theta_zero_location('N') 
+ax.set_theta_direction(-1) 
+ax.set_ylim([-25, 10])
+ax.set_yticks(np.arange(-25, 15, 5))
+ax.set_yticklabels(["", "-20", "-15", "-10", "-5", "0", "5", "10dBi"])
 
-# theta_rad = np.deg2rad(theta_cut.coords["theta"])
-# phi_rad = np.deg2rad(phi_cut.coords["phi"])
+# Set theta labels
+ax.set_xticks(np.linspace(0, 2 * np.pi, 8, endpoint=False))
+labels = [f"{d}°" for d in [0, 45, 90, 135, 180, -135, -90, -45]]
+ax.set_xticklabels(labels)
 
-# ax1.plot(theta_rad, theta_cut.squeeze())
-# ax2.plot(phi_rad, phi_cut.squeeze())
-
-# for ax in (ax1, ax2):
-#     ax.set_theta_zero_location('N') 
-#     ax.set_theta_direction(-1) 
-#     ax.set_ylim([-20, 10])
-#     ax.set_yticks(np.arange(-20, 15, 5))
-#     ax.set_yticklabels(["", "-15", "-10", "-5", "0", "5", "10dBi"])
-
-#     # Set theta labels
-#     ax.set_xticks(np.linspace(0, 2 * np.pi, 8, endpoint=False))
-#     labels = [f"{d}°" for d in [0, 45, 90, 135, 180, -135, -90, -45]]
-#     ax.set_xticklabels(labels)
-
-# ax1.set_xlabel(r"$\theta$ [deg], $\phi$=0°")
-# ax2.set_xlabel(r"$\phi$ [deg], $\theta$=90°")
-# mplm.line_marker(x=np.pi/2, axes=ax1, xline=False)
-
-# fig.tight_layout()
+ax.set_xlabel(r"$\theta$ [deg], $\phi$=0°")
+ax.legend(["{:.3f}GHz".format(f/1e9) for f in theta_cut.coords["frequency"]])
+mplm.line_marker(x=0)
+plt.show()
 
 # %%
 # Plot S11
