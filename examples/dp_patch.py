@@ -37,7 +37,7 @@ except:
 # User defined Parameters [inches]
 # ------------------------
 
-f0 = 2.160e9
+f0 = 2.21e9
 lam0 = rfn.const.c0_in / f0
 
 # bottom substrate er
@@ -51,10 +51,11 @@ h_top = conv.in_mm(1.6)
 len_patch = conv.in_mm(30)
 w_patch = conv.in_mm(40)
 w_slot = conv.in_mm(1.55)
-len_slot = conv.in_mm(11.2)
-len_ms = conv.in_mm(58)
+len_slot = conv.in_mm(6)
+len_leg = conv.in_mm(4)
 w_ms = conv.in_mm(4.42)
 len_stub = conv.in_mm(20)
+
 
 # %%
 # Build Model
@@ -75,9 +76,12 @@ s.add_dielectric(sub_btm, er=er_btm, style=dict(opacity=0.2))
 
 # center conductor layer with slot
 gnd_plane = pv.Rectangle([(sub_x0, sub_y0, 0), (sub_x0, sub_y1, 0), (sub_x1, sub_y1, 0)])
-slot_cutout = pv.Box((-w_slot/2, w_slot, -len_slot/2, len_slot/2, -h_btm, h_top))
-gnd_plane = gnd_plane.clip_box((-w_slot/2, w_slot, -len_slot/2, len_slot/2, 0, 0)).extract_surface(algorithm="dataset_surface")
+# cutout slots
+gnd_plane = gnd_plane.clip_box((-w_slot/2, w_slot/2, -len_slot/2, len_slot/2, 0, 0)).extract_surface(algorithm="dataset_surface")
+gnd_plane = gnd_plane.clip_box((-len_leg/2, len_leg/2, -len_slot/2 - w_slot/2, -len_slot/2 + w_slot/2, 0, 0)).extract_surface(algorithm="dataset_surface")
+gnd_plane = gnd_plane.clip_box((-len_leg/2, len_leg/2, len_slot/2 - w_slot/2, len_slot/2 + w_slot/2, 0, 0)).extract_surface(algorithm="dataset_surface")
 s.add_conductor(gnd_plane, style=dict(color="k"))
+
 
 # create patch
 patch = pv.Rectangle(
@@ -99,11 +103,11 @@ s.add_lumped_port(1, port1_face, "z-")
 # PML boundaries
 s.assign_PML_boundaries("x-", "x+", "y-", "y+", "z+", "z-", n_pml=5)
 
-s.generate_mesh(d0 = 0.05, d_edge=0.02)
+s.generate_mesh(d0 = 0.05, d_edge=0.025)
 s.render().show()
 
 
-# s.plot_coefficients("ex_z", "b", "z", 0).show()
+s.plot_coefficients("ex_z", "b", "z", 0).show()
 
 # setup far-field monitor
 s.add_farfield_monitor(frequency=f0)
@@ -123,7 +127,7 @@ s.add_field_monitor("mon1", "ez", "z", h_top, n_step=10)
 # %%
 # Setup Excitation and Solve
 # ------------------------
-vsrc = s.gaussian_source(width=80e-12, t0=50e-12, t_len=8000e-12)
+vsrc = s.gaussian_source(width=120e-12, t0=60e-12, t_len=20000e-12)
 # plt.plot(vsrc)
 
 s.assign_excitation(vsrc, 1)
@@ -161,7 +165,7 @@ plt.show()
 # Plot S11
 # ------------------------
 
-frequency: np.ndarray = np.arange(1.5e9, 3e9, 10e6)
+frequency: np.ndarray = np.arange(1.5e9, 3e9, 2e6)
 sdata = s.get_sparameters(frequency, downsample=False)
 
 S11 = ldarray(sdata[:, 0][..., None, None], coords=dict(frequency=sdata.coords["frequency"], b=[1], a=[1]))
