@@ -161,6 +161,10 @@ def remove_interior_edges(obj_edges: np.ndarray, tolerance=0.001):
     unique_edges = []
     hit_indices = np.array([])
 
+    # remove edges with zero length
+    edge_len = np.sqrt(np.sum(np.abs(np.diff(obj_edges, axis=1))**2, axis=-1)).squeeze()
+    obj_edges = obj_edges[edge_len > tolerance]
+
     for i, e in enumerate(obj_edges):
 
         # skip if this edge has already been found to be a duplicate with another face
