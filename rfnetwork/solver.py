@@ -542,7 +542,7 @@ class FDTD_Solver():
                         )
 
                         if (edge_len[i][axis] < self._tol) and not at_bbox_edge:
-                            soft_points[axis] = np.append(
+                            soft_points[axis] = np.append( 
                                 soft_points[axis], [edge[0][axis] - d_edge, edge[0][axis] + d_edge]
                             )
 
@@ -554,11 +554,16 @@ class FDTD_Solver():
 
         for axis in range(3):
             
-            # object vertices
+            # assign points as hard points if they define an edge parallel to one of the cartesian axes
+            hard_points = []
             if len(obj_edges):
-                hard_points = np.unique(obj_edges[..., axis].flatten())
-            else:
-                hard_points = []
+                # get list of edge vertices along the current axis
+                points = np.unique(obj_edges[..., axis])
+                for p in points:
+                    # if both points from any edge are at the point p, it is aligned with the current axis, 
+                    # add to list of hard points
+                    if np.any(np.all(np.abs(obj_edges[..., axis] - p) < self._tol, axis=-1)):
+                        hard_points.append(p)
 
             # add gerber vertices
             hard_points = np.concatenate((hard_points, gbr_hard_points[axis]))
@@ -568,14 +573,16 @@ class FDTD_Solver():
             for obj in  (lumped_ele_objects + sub_objects):
                 hard_points = np.concatenate([hard_points, obj.points[:, axis]])
 
+            # remove redundant values
+            hard_points = np.sort(np.unique(np.around(hard_points, decimals=self._places)))
+
             # remove any conductor points that are less than d_edge away from other conductor points
             for i in range(len(hard_points)):
                 # remove by setting other values that are very close to this one equal. 
                 p = hard_points[i]
                 hard_points = np.where(np.abs(p - hard_points) < (d_edge * 0.8), p, hard_points)
 
-            # remove redundant values
-            hard_points = np.sort(np.unique(np.around(hard_points, decimals=self._places)))
+
 
             # remove any soft points that are less than d_edge away from an object point
             for p in hard_points:
