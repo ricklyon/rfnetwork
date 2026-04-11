@@ -37,24 +37,24 @@ except:
 # User defined Parameters [inches]
 # ------------------------
 
-f0 = 2.21e9
+f0 = 2.4e9
 lam0 = rfn.const.c0_in / f0
 
 # bottom substrate er
-er_btm = 2.54
+er_btm = 3.5
 h_btm = conv.in_mm(1.6)
 # top substrate er
-er_top = 2.54
+er_top = 3.5
 h_top = conv.in_mm(1.6)
 
 # parameters from table 3-1 in [1]
 len_patch = conv.in_mm(30)
-w_patch = conv.in_mm(40)
+w_patch = conv.in_mm(30)
 w_slot = conv.in_mm(1.55)
 len_slot = conv.in_mm(6)
 len_leg = conv.in_mm(4)
 w_ms = conv.in_mm(4.42)
-len_stub = conv.in_mm(20)
+len_stub = conv.in_mm(15)
 
 
 # %%
@@ -77,9 +77,13 @@ s.add_dielectric(sub_btm, er=er_btm, style=dict(opacity=0.2))
 # center conductor layer with slot
 gnd_plane = pv.Rectangle([(sub_x0, sub_y0, 0), (sub_x0, sub_y1, 0), (sub_x1, sub_y1, 0)])
 # cutout slots
-gnd_plane = gnd_plane.clip_box((-w_slot/2, w_slot/2, -len_slot/2, len_slot/2, 0, 0)).extract_surface(algorithm="dataset_surface")
-gnd_plane = gnd_plane.clip_box((-len_leg/2, len_leg/2, -len_slot/2 - w_slot/2, -len_slot/2 + w_slot/2, 0, 0)).extract_surface(algorithm="dataset_surface")
-gnd_plane = gnd_plane.clip_box((-len_leg/2, len_leg/2, len_slot/2 - w_slot/2, len_slot/2 + w_slot/2, 0, 0)).extract_surface(algorithm="dataset_surface")
+slot_center = (-w_slot/2, w_slot/2, -len_slot/2, len_slot/2, 0, 0)
+slot_lower = (-len_leg/2, len_leg/2, -len_slot/2 - w_slot/2, -len_slot/2 + w_slot/2, 0, 0)
+slot_upper = (-len_leg/2, len_leg/2, len_slot/2 - w_slot/2, len_slot/2 + w_slot/2, 0, 0)
+
+for cutout in (slot_center, slot_lower, slot_upper):
+    gnd_plane = gnd_plane.clip_box(cutout).extract_surface(algorithm="dataset_surface")
+
 s.add_conductor(gnd_plane, style=dict(color="k"))
 
 
@@ -90,7 +94,7 @@ patch = pv.Rectangle(
 s.add_conductor(patch, style=dict(opacity=0.4))
 
 # microstrip feed trace
-port_x = sub_x0 + 0.1
+port_x = sub_x0 + 0.05
 ms_trace = pv.Rectangle(
     [(port_x, -w_ms/2, -h_btm), (port_x, w_ms/2, -h_btm), (len_stub, w_ms/2, -h_btm)]
 )
@@ -103,7 +107,7 @@ s.add_lumped_port(1, port1_face, "z-")
 # PML boundaries
 s.assign_PML_boundaries("x-", "x+", "y-", "y+", "z+", "z-", n_pml=5)
 
-s.generate_mesh(d0 = 0.05, d_edge=0.025)
+s.generate_mesh(d0 = 0.05, d_edge=0.02)
 s.render().show()
 
 
@@ -127,7 +131,7 @@ s.add_field_monitor("mon1", "ez", "z", h_top, n_step=10)
 # %%
 # Setup Excitation and Solve
 # ------------------------
-vsrc = s.gaussian_source(width=120e-12, t0=60e-12, t_len=20000e-12)
+vsrc = s.gaussian_source(width=120e-12, t0=60e-12, t_len=10000e-12)
 # plt.plot(vsrc)
 
 s.assign_excitation(vsrc, 1)
