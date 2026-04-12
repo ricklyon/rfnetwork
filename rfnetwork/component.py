@@ -115,7 +115,8 @@ class Component(object):
         if len(state_str) > threshold:
             state_str = state_str[:threshold] + "..."
 
-        return f"<{module_name} ({state_str}) {self.n_ports} port{"s" if self.n_ports > 1 else ""}>"
+        port_str = f"{self.n_ports} ports" if self.n_ports > 1 else f"{self.n_ports} port"
+        return f"<{module_name} ({state_str}) {port_str}>"
     
     def equals(self, other) -> bool:
         """
@@ -689,9 +690,29 @@ class Component_Data(Component):
     """
 
     def __init__(self, data: ldarray, state: dict = dict()):
+        
+        # validate all dims are present
+        if not isinstance(data, ldarray) or (list(data.coords.keys()) != ["frequency", "b", "a"]):
+            raise ValueError("Invalid data. Must have labeled dimensions: frequency, b, a.")
+        
+        n_ports = np.max(data.shape[-2:])
+        
+        # fill in missing rows/columns with 0
+        if data.shape[-2] != data.shape[-1]:
 
-        self._sdata = data
-        super().__init__(n_ports=data.shape[-2], passive=False, state=state)
+            coords_full = dict(
+                frequency=data.coords["frequency"], b = np.arange(1, n_ports + 1), a = np.arange(1, n_ports +1)
+            )
+            data_full = ldarray(
+                np.zeros((len(data.coords["frequency"]), n_ports, n_ports), dtype=data.dtype),coords=coords_full
+            )
+
+            for b in data.coords["b"]:
+                for a in data.coords["a"]:
+                    data_full[dict(b=b, a=a)] = data.sel(b=b, a=a)
+
+        self._sdata = data_full
+        super().__init__(n_ports=n_ports, passive=False, state=state)
 
     @property
     def frequency(self):
