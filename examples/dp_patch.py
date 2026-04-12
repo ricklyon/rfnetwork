@@ -64,7 +64,7 @@ len_slot = conv.in_mm(7.5)
 len_leg = conv.in_mm(4.5)
 w_ms = 0.09
 len_stub1 = 0.15#0.6
-len_stub2 = 0.55
+len_stub2 = 0.5
 
 # upper slot offset (h-polarized patch)
 x_pos_h = conv.in_mm(-9.1)
