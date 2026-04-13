@@ -511,40 +511,40 @@ class FDTD_Solver():
         obj_edges = np.around(obj_edges, decimals=self._places).astype(np.float32)
 
         # array of angled edges broken up into sections, and edge cells that aren't on a geometry boundary
-        soft_points = [np.array([]), np.array([]), np.array([])]
+        # soft_points = [np.array([]), np.array([]), np.array([])]
 
-        if len(obj_edges):
-            edge_len = np.abs(np.diff(obj_edges, axis=1).squeeze())
-            # compute the area of a box bound by this edge and the cardinal axis. If area is above a certain threshold
-            # related to d_edge, create soft points along the axis to keep the area below the threshold. 
-            edge_area = np.prod(edge_len[:, :2], axis=-1)
+        # if len(obj_edges):
+        #     edge_len = np.abs(np.diff(obj_edges, axis=1).squeeze())
+        #     # compute the area of a box bound by this edge and the cardinal axis. If area is above a certain threshold
+        #     # related to d_edge, create soft points along the axis to keep the area below the threshold. 
+        #     edge_area = np.prod(edge_len[:, :2], axis=-1)
 
-            # add small edge cells around object transitions
-            for i, edge in enumerate(obj_edges):
-                if edge_area[i] > (d_edge ** 2):
-                    # break angled edges along x and y into sub-cells separated by d_edge
-                    nx_ny = np.around(np.abs(edge_len[i][:2]) / d_edge).astype(int)
+        #     # add small edge cells around object transitions
+        #     for i, edge in enumerate(obj_edges):
+        #         if edge_area[i] > (d_edge ** 2):
+        #             # break angled edges along x and y into sub-cells separated by d_edge
+        #             nx_ny = np.around(np.abs(edge_len[i][:2]) / d_edge).astype(int)
 
-                    for axis in range(2):
-                        soft_points[axis] = np.append(
-                            soft_points[axis], np.linspace(edge[0, axis], edge[1, axis], nx_ny[axis])
-                        )
+        #             for axis in range(2):
+        #                 soft_points[axis] = np.append(
+        #                     soft_points[axis], np.linspace(edge[0, axis], edge[1, axis], nx_ny[axis])
+        #                 )
                 
-                # add edge cells on either side of edges aligned with the cardinal axis
-                if np.abs(edge_area[i]) < self._tol:
+        #         # add edge cells on either side of edges aligned with the cardinal axis
+        #         if np.abs(edge_area[i]) < self._tol:
                     
-                    for axis in range(3):
-                        # if edge is normal to the axis (both endpoints are at the same value), add edge cells on 
-                        # either side. Skip if edge is at the bounding box edge
-                        at_bbox_edge = (
-                            (np.abs(edge[0][axis] - self.sbox_max[axis]) < self._tol) |
-                            (np.abs(edge[0][axis] - self.sbox_min[axis]) < self._tol)
-                        )
+        #             for axis in range(3):
+        #                 # if edge is normal to the axis (both endpoints are at the same value), add edge cells on 
+        #                 # either side. Skip if edge is at the bounding box edge
+        #                 at_bbox_edge = (
+        #                     (np.abs(edge[0][axis] - self.sbox_max[axis]) < self._tol) |
+        #                     (np.abs(edge[0][axis] - self.sbox_min[axis]) < self._tol)
+        #                 )
 
-                        if (edge_len[i][axis] < self._tol) and not at_bbox_edge:
-                            soft_points[axis] = np.append( 
-                                soft_points[axis], [edge[0][axis] - d_edge, edge[0][axis] + d_edge]
-                            )
+        #                 if (edge_len[i][axis] < self._tol) and not at_bbox_edge:
+        #                     soft_points[axis] = np.append( 
+        #                         soft_points[axis], [edge[0][axis] - d_edge, edge[0][axis] + d_edge]
+        #                     )
 
         # object vertices and points for the mesh around angled sections
         all_points = [np.array([]), np.array([]), np.array([])]
@@ -555,7 +555,10 @@ class FDTD_Solver():
         for axis in range(3):
             
             # assign points as hard points if they define an edge parallel to one of the cartesian axes
-            hard_points = []
+            hard_points = np.array([])
+            # soft points are suggestions for the mesh grid locations, but are flexible
+            soft_points = np.array([])
+
             if len(obj_edges):
                 # get list of edge vertices along the current axis
                 points = np.unique(obj_edges[..., axis])
@@ -563,11 +566,13 @@ class FDTD_Solver():
                     # if both points from any edge are at the point p, it is aligned with the current axis, 
                     # add to list of hard points
                     if np.any(np.all(np.abs(obj_edges[..., axis] - p) < self._tol, axis=-1)):
-                        hard_points.append(p)
+                        hard_points = np.append(hard_points, p)
+                        # add soft points on either edge of hard point separated by d_edge
+                        soft_points = np.append(soft_points, [p - d_edge, p + d_edge])
 
             # add gerber vertices
             hard_points = np.concatenate((hard_points, gbr_hard_points[axis]))
-            soft_points[axis] = np.concatenate((soft_points[axis], gbr_soft_points[axis]))
+            soft_points = np.concatenate((soft_points, gbr_soft_points[axis]))
 
             # add points for lumped elements
             for obj in  (lumped_ele_objects + sub_objects):
@@ -576,37 +581,35 @@ class FDTD_Solver():
             # remove redundant values
             hard_points = np.sort(np.unique(np.around(hard_points, decimals=self._places)))
 
-            # remove any conductor points that are less than d_edge away from other conductor points
+            # remove any points that are less than d_edge away from other conductor points
             for i in range(len(hard_points)):
                 # remove by setting other values that are very close to this one equal. 
                 p = hard_points[i]
                 hard_points = np.where(np.abs(p - hard_points) < (d_edge * 0.8), p, hard_points)
 
-
-
             # remove any soft points that are less than d_edge away from an object point
             for p in hard_points:
-                soft_points[axis] = np.where(np.abs(p - soft_points[axis]) < (d_edge * 0.8), np.nan, soft_points[axis])
+                soft_points = np.where(np.abs(p - soft_points) < (d_edge * 0.8), np.nan, soft_points)
             
             # clean up and sort soft mesh points
-            sp_axis = np.sort(np.unique(np.around(soft_points[axis], decimals=self._places)))
+            soft_points = np.sort(np.unique(np.around(soft_points, decimals=self._places)))
             # create a reduced set of mesh points that are spaced no less than d_edge. Walk through all soft points
             # and only add points to the reduced list if they are at least d_edge away from the last point.
-            if len(sp_axis):
-                sp_axis_reduced = [sp_axis[0]]
-                last_p = sp_axis[0]
-                for i, p in enumerate(sp_axis[1:]):
+            if len(soft_points):
+                sp_axis_reduced = []
+                last_p = soft_points[0]
+                for i, p in enumerate(soft_points[1:]):
                     if (p - last_p) >= d_edge:
                         sp_axis_reduced += [p]
                         last_p = p
 
-                soft_points[axis] = sp_axis_reduced
+                soft_points = sp_axis_reduced
 
             # clip points outside of the sbox limits
-            soft_points[axis] = np.clip(soft_points[axis], self.sbox_min[axis], self.sbox_max[axis])
+            soft_points = np.clip(soft_points, self.sbox_min[axis], self.sbox_max[axis])
             hard_points = np.clip(hard_points, self.sbox_min[axis], self.sbox_max[axis])
 
-            all_points_axis = np.concatenate([hard_points, soft_points[axis]])
+            all_points_axis = np.concatenate([hard_points, soft_points])
 
             # combine object points with soft points
             all_points[axis] = all_points_axis
@@ -1579,7 +1582,7 @@ class FDTD_Solver():
             print(f"Running solver with {n_cells / 1e3:.1f}k cells, and {Nt} time steps...")
             # push an update to the console each X%. If there are more solve cells or time steps, push more
             # frequently.
-            update_percentage = np.clip(n_cells * len(self._time) / 10e6, 20, 100)
+            update_percentage = np.clip(n_cells * len(self._time) / 100e6, 20, 100)
             update_interval = int(Nt / update_percentage)
             stime = time.time()
         else:

@@ -29,11 +29,10 @@ pv.set_jupyter_backend("trame")
 sys.argv = sys.argv[0:1]
 
 # todo:
-# 1. make patch cp
-# 2. implement rhcp, lhcp, xyz polarizations
+# fix mesh granularity
 # 3. add angled msline tests
 # 4. parallel threads for far-field calculation
-# 5. ldarray interpolation
+# 5. ldarray interpolation tests
 # 6. make function to combine s-data into a single matrix
 
 
@@ -64,12 +63,12 @@ len_slot = conv.in_mm(7.5)
 len_leg = conv.in_mm(4.5)
 w_ms = 0.09
 len_stub1 = 0.15#0.6
-len_stub2 = 0.5
+len_stub2 = 0.4
 
 # upper slot offset (h-polarized patch)
 x_pos_h = conv.in_mm(-9.1)
 # lower (v-polarized patch)
-y_pos_v = conv.in_mm(-9.1)
+y_pos_v = conv.in_mm(-9.5)
 
 rfn.elements.MSLine(0.04, 3.5, z0=50)
 
@@ -80,7 +79,7 @@ rfn.elements.MSLine(0.04, 3.5, z0=50)
 # ------------------------
 
 # solve box
-sbox = pv.Cube(center=(0, 0, 0), x_length=w_patch*1.8, y_length=w_patch*1.8, z_length=lam0 / 5)
+sbox = pv.Cube(center=(0, 0, 0), x_length=w_patch*2.5, y_length=w_patch*2.5, z_length=lam0 / 5)
 
 # create model and add elements
 s = rfn.FDTD_Solver(sbox)
@@ -151,7 +150,11 @@ s.add_lumped_port(2, port2_face, "z-")
 # PML boundaries
 s.assign_PML_boundaries("x-", "x+", "y-", "y+", "z+", "z-", n_pml=5)
 
+d_edge=0.02
+d0 = 0.08
+
 s.generate_mesh(d0 = 0.08, d_edge=0.02)
+
 s.render().show()
 
 
@@ -200,7 +203,7 @@ s.add_field_monitor("mon1", "ez", "z", 0, n_step=50)
 # %%
 # Setup Excitation and Solve
 # ------------------------
-vsrc1 = s.gaussian_modulated_source(f0, width=100e-12, t0=60e-12, t_len=21000e-12)
+vsrc1 = s.gaussian_modulated_source(f0, width=100e-12, t0=60e-12, t_len=5000e-12)
 
 
 # apply a phase delay to the vertically polarized port to get RHCP
@@ -223,6 +226,8 @@ s.solve(n_threads=4)
 theta_cut = rfn.conv.db10_lin(
     s.get_farfield_gain(theta=np.arange(-180, 181, 2), phi=0, polarization=["rhcp", "lhcp"])
 )
+
+theta_cut = theta_cut.interpolate(theta=np.arange(-180, 180.5, 0.5))
 
 fig1, ax = plt.subplots(subplot_kw=dict(projection="polar"))
 theta_rad = np.deg2rad(theta_cut.coords["theta"])
@@ -250,6 +255,8 @@ plt.show()
 
 frequency: np.ndarray = np.arange(1.5e9, 3e9, 2e6)
 sdata = s.get_sparameters(frequency, downsample=False)
+
+# plt.plot(rfn.conv.db20_lin(sdata.interpolate(frequency=np.arange(1.5e9, 3e9, 0.25e9)).squeeze()))
 
 ant = rfn.Component_Data(sdata)
 
