@@ -711,6 +711,9 @@ class Component_Data(Component):
                 for a in data.coords["a"]:
                     data_full[dict(b=b, a=a)] = data.sel(b=b, a=a)
 
+        else:
+            data_full = data
+
         self._sdata = data_full
         super().__init__(n_ports=n_ports, passive=False, state=state)
 
