@@ -87,7 +87,7 @@ class TestMicroStrip(unittest.TestCase):
         s.add_dielectric(substrate, er=3.66, style=dict(opacity=0.0))
         s.add_conductor(ms1_trace, style=dict(color="gold"))
 
-        int_axis = ["x-", "y-", "z-"][normal_axis]
+        int_axis = ["x+", "y+", "z+"][normal_axis]
         s.add_lumped_port(1, port1_face, integration_line=int_axis)
 
         pml_side = ["x", "y", "z"][len_axis]
