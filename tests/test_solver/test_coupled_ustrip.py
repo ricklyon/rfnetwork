@@ -71,7 +71,7 @@ class TestCoupledUStrip(unittest.TestCase):
                 (ms_x[0], ms_y + ms_w/2, sub_h),
                 (ms_x[0], ms_y + ms_w/2, 0),
             ])
-            s.add_lumped_port(i+1, port_face, integration_line="z-")
+            s.add_lumped_port(i+1, port_face, integration_line="z+")
 
         # assign PML layers, omitting the x- side near the ports
         s.assign_PML_boundaries("x+", "z+", "y-", "y+", n_pml=5)
