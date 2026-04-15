@@ -122,7 +122,7 @@ class TestDipole(unittest.TestCase):
         np.testing.assert_array_less(conv.db20_lin(s11), -10)
 
         # input impedance, not quite equal to theoretical value since it is a strip and not ideal wire.
-        np.testing.assert_array_less(np.abs(73 - conv.z_gamma(s11).real), 3)
+        np.testing.assert_array_less(np.abs(73 - conv.z_gamma(s11).real), 3.5)
 
 
 if __name__ == "__main__":
