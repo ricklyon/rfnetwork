@@ -172,7 +172,13 @@ class FDTD_Solver():
         face : pv.PolyData
             pyvista PolyData object of 2D face. Must be aligned with the cartesian axis
         integration_line : str, {"x+", "x-", "y+", "y-", "z+", "z-"}
-            axis that the port voltage is evaluated across.
+            axis that the port voltage is evaluated across. The line direction defines the positive current direction
+            when the port is acting as a source. The direction is important if computing s-parameters, the direction
+            should be pointing into the port from the reference ground into the conducting structure.
+            
+            PolyData lines are also supported. The line direction from the first point to the second is used
+            as the integration direction. For stripline ports, the face should extend across the full height of the
+            substrate, and the integration line should start from one ground plane and end on the stripline. 
         r0 : float, default: 50
             port impedance
         """
@@ -577,7 +583,7 @@ class FDTD_Solver():
             hard_points = np.concatenate((hard_points, gbr_hard_points[axis]))
             soft_points = np.concatenate((soft_points, gbr_soft_points[axis]))
 
-            # add points for lumped elements
+            # add points for lumped elements and dielectric boundaries
             for obj in  (lumped_ele_objects + sub_objects):
                 hard_points = np.concatenate([hard_points, obj.points[:, axis]])
 
@@ -599,8 +605,8 @@ class FDTD_Solver():
             # create a reduced set of mesh points that are spaced no less than d_edge. Walk through all soft points
             # and only add points to the reduced list if they are at least d_edge away from the last point.
             if len(soft_points):
-                sp_axis_reduced = []
                 last_p = soft_points[0]
+                sp_axis_reduced = [last_p]
                 for i, p in enumerate(soft_points[1:]):
                     if (p - last_p) >= d_edge:
                         sp_axis_reduced += [p]
@@ -1198,12 +1204,15 @@ class FDTD_Solver():
             if port is not None:
 
                 group = self.ports if port > 0 else self.ports_inv
+                
+                # if element is a source, the sign on the added Vs_a term in the time stepping loop is negative,
+                # voltage should increase along the integration line.
+                # Unlike passive loads, where the voltage should decrease along the integration line.
 
                 # assign face as a port if specified. resistive element acts as the port termination.
-                # direction indicates the voltage integration direction from higher voltage to lower.
                 group[abs(port) - 1] = dict(
                     idx = efield_idx, 
-                    Vs_a = f_dir / (denom * rterm * nf), 
+                    Vs_a = -f_dir / (denom * rterm * nf), 
                     field = f"e{fa}", 
                     axis = n_axis, 
                     r0 = r, 
@@ -1818,7 +1827,8 @@ class FDTD_Solver():
     def add_current_probe(self, name: str, face: pv.PolyData):
         """
         Add a probe that collects the current through a 2D surface. Calling vi_probe_values() with name
-        will return the current through this surface.
+        will return the current through this surface, with the current direction being defined along the positive 
+        cartesian axis.
 
         Parameters
         ----------
@@ -1952,7 +1962,9 @@ class FDTD_Solver():
         name : str
             unique name for field monitor
         line : pv.PolyData
-            PolyData object defining a line. Must be aligned with the cartesian axes.
+            PolyData object defining a line. Must be aligned with the cartesian axes. The voltage is defined as 
+            V = (p1 - p2) where p1 is the starting point of the line and p2 is the end point. When plotted with 
+            render, the probe arrows are shown in the p1 -> p2 direction.
         """
         line_length = np.diff(line.points, axis=0)
 
@@ -1991,13 +2003,14 @@ class FDTD_Solver():
         fcell_w = self.fcell_w[field]
 
         # direction of line, +1 if oriented along positive axis direction, -1 if along negative direction
-        p0, p1 = line.points
-        direction = 1 if p1[axis] > p0[axis] else -1
+        p1, p2 = line.points
+        # the field integration direction is p1 -> p2
+        direction = -1 if p1[axis] > p2[axis] else 1
 
         for i, idx in enumerate(ijk_probes):
             # get cell width along the given axis
             cw = [fcell_w[axis][i] for axis, i in enumerate(idx)][axis]
-            self.probes[f"{name}_{i}"] = dict(field=field, index=(idx), d=direction * conv.m_in(cw))
+            self.probes[f"{name}_{i}"] = dict(field=field, index=(idx), d=(direction) * conv.m_in(cw))
         
         
     def render(
@@ -2141,6 +2154,8 @@ class FDTD_Solver():
                 # axis of the probe field direction
                 axis_str = probe["field"][1]
                 axis = dict(x=0, y=1, z=2)[axis_str]
+                # field direction
+                direction = np.sign(probe["d"])
 
                 # scale arrow to be smaller than the grid cell, e-probes are in the center of the cell along
                 # the axis the point in, h-cells are on the edges
@@ -2154,13 +2169,13 @@ class FDTD_Solver():
                 colors[i] = 0 if field_type == "e" else 0.5
                 
                 # orient arrow in direction of field component
-                vectors[i] = [1 if i == axis else 0 for i in range(3)]
+                vectors[i] = [direction if i == axis else 0 for i in range(3)]
 
                 # get physical position of probe from the grid index
                 probe_pos[i] = [f[p] for f, p in zip(floc, pos_idx)]
                 # move the position of the arrow so the middle is at the probe location instead of the tail
                 arrow_pos[i] = probe_pos[i]
-                arrow_pos[i, axis] -= (mag[i] / 2)
+                arrow_pos[i, axis] -= direction * (mag[i] / 2)
 
             mesh = pv.PolyData(arrow_pos)
             # assign colormap values
@@ -2385,10 +2400,6 @@ class FDTD_Solver():
         nports = len(self.ports)
         nfrequency = len(frequency)
 
-        # source port applied voltage
-        src_applied = self.ports[source_port - 1]["src"]
-        V_applied = utils.dtft(src_applied, frequency, 1 / self.dt, downsample)
-
         # frequency domain voltage and current at each port termination
         Vp = np.zeros((nports, nfrequency), dtype=np.complex128)
         Ip = np.zeros((nports, nfrequency), dtype=np.complex128)
@@ -2409,9 +2420,10 @@ class FDTD_Solver():
             cell_w_b[f_axis] = slice(None)
             component_v = port["values"] * cell_w[tuple(cell_w_b)]
 
-            # add voltage along integration axis, remove unitary axis along port face normal
+            # add voltage along integration axis, remove unitary axis along port face normal.
+            # direction is inverted because V = -E dx.
             direction = port["direction"]
-            vp = direction * np.sum(component_v, axis=f_axis).squeeze()
+            vp = (-direction) * np.sum(component_v, axis=f_axis).squeeze()
 
             # average voltage across width of port
             if len(vp.shape) > 1:
@@ -2420,12 +2432,14 @@ class FDTD_Solver():
             # convert voltage to frequency domain
             Vp[i] = utils.dtft(vp, frequency, 1 / self.dt, downsample)
 
-            # current through termination
+            # current through termination, positive current is defined along the positive cartesian axis
             ip = self.vi_probe_values(f"port_{i+1}")
             # h-fields are 1/2 time step ahead of the e-fields. Delay current so they are at the same time step
-            Ip[i] = (-direction) * utils.dtft(ip, frequency, 1 / self.dt, downsample) #* np.exp(-1j * frequency * 2 * np.pi * (self.dt / 2))
+            # flip current direction if integration axis is along negative cartesian axis.
+            Ip[i] = direction * utils.dtft(ip, frequency, 1 / self.dt, downsample) #* np.exp(-1j * frequency * 2 * np.pi * (self.dt / 2))
 
         # V0+ and V0- at each port. see equation 4.58 in Pozar 4th ed.
+        # positive current direction is into the port
         r0 = np.array([p["r0"] for p in self.ports])[..., None]
         Ap = (Vp + r0 * Ip ) / 2
         Bp = (Vp - r0 * Ip) / 2
@@ -2436,17 +2450,16 @@ class FDTD_Solver():
         # S11 can be computed a different way that seems to have less error than the (Vp + r0 * Ip) equation.
         # The source port reflected wave (b) is the difference of the total voltage across the port V,
         # and the applied wave (a),  V = a + b.
-        # S[source_port-1] = (Vp[source_port - 1] - V_applied) / V_applied
+        # src_applied = self.ports[source_port - 1]["src"]
+        # V_applied = utils.dtft(src_applied, frequency, 1 / self.dt, downsample)
+        # S[source_port-1] = (-Vp[source_port - 1] - V_applied) / V_applied
 
         # the exiting waves on other ports is the voltage that appears across the terminations. This is
         # different than the total voltage across the port because that is the sum of the reflected wave that
         # doesn't make it into the load, and the wave transmitted through the load.
-        # The positive current direction for the exiting b wave is into the termination from the line, I_term is 
-        # defined as the current along the z axis so the current is inverted. 
         # exit_ports = [i for i in range(nports) if i+1 != source_port]
         # for i in exit_ports:
-        #     S[i] = -Ip[i] * r0
-        
+        #     Bp[i] = -Ip[i] * r0
 
         return ldarray(
             S.T[..., None], coords=dict(frequency=frequency, b=np.arange(1, nports + 1), a=[source_port])
