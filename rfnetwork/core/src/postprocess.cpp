@@ -131,7 +131,7 @@ int postprocess_nf2ff(
     PyObject * J_xyz_py, 
     PyObject * M_xyz_py, 
     PyObject * r_grid_py, 
-    PyObject * w_grid_py, 
+    PyObject * ds_grid_py, 
     PyObject * surf_pos_py, 
     PyObject * ff_data_py
 )
@@ -144,10 +144,10 @@ int postprocess_nf2ff(
         throw std::runtime_error("Invalid r_grid data array. Expected list of length 3.");
     }
 
-    // check that cell widths are given for the three cartesian axis
-    if (PyList_Size(w_grid_py) != 3)
+    // check that cell areas are given for the three cartesian axis
+    if (PyList_Size(ds_grid_py) != 3)
     {
-        throw std::runtime_error("Invalid w_grid data array. Expected list of length 3.");
+        throw std::runtime_error("Invalid ds_grid data array. Expected list of length 3.");
     }
 
     // check surface positions
@@ -205,8 +205,8 @@ int postprocess_nf2ff(
     std::complex<double> * M_xyz_p[3][2];
     // array pointers for cell positions on each axis
     float * r_grid_p[3][2];
-    // array pointers for cell widths on each axis
-    float * w_grid_p[3][2];
+    // array pointers for cell areas on each axis
+    std::complex<double> * ds_grid_p[3];
     // surface positions, 2 values per axis
     float surf_pos[3][2];
 
@@ -241,13 +241,11 @@ int postprocess_nf2ff(
         PyObject* r_grid_axis_2 = PyList_GetItem(r_grid_axis, 1);
 
         // get two arrays per axis for x/y cell widths
-        PyObject* w_grid_axis = PyList_GetItem(w_grid_py, axis);
-        PyObject* w_grid_axis_1 = PyList_GetItem(w_grid_axis, 0);
-        PyObject* w_grid_axis_2 = PyList_GetItem(w_grid_axis, 1);
+        PyObject* ds_grid_axis = PyList_GetItem(ds_grid_py, axis);
 
         // get shape of the grid
-        PyArrayObject* w_grid_axis_arr_1 = (PyArrayObject*) w_grid_axis_1;
-        npy_shape = PyArray_SHAPE(w_grid_axis_arr_1);
+        PyArrayObject* ds_grid_axis_arr = (PyArrayObject*) ds_grid_axis;
+        npy_shape = PyArray_SHAPE(ds_grid_axis_arr);
         grid_shape[axis][0] = (int) npy_shape[0];
         grid_shape[axis][1] = (int) npy_shape[1];
         // shape of current arrays
@@ -261,8 +259,7 @@ int postprocess_nf2ff(
         r_grid_p[axis][1] = get_float_array(r_grid_axis_2, grid_shape[axis], 2);
 
         // get arrays for the grid cell sizes, values are a meshgrid
-        w_grid_p[axis][0] = get_float_array(w_grid_axis_1, grid_shape[axis], 2);
-        w_grid_p[axis][1] = get_float_array(w_grid_axis_2, grid_shape[axis], 2);
+        ds_grid_p[axis] = get_complex_array(ds_grid_axis, grid_shape[axis], 2);
 
         // array pointers for the J current
         PyObject * J_xyz_axis = PyList_GetItem(J_xyz_py, axis);
@@ -318,57 +315,101 @@ int postprocess_nf2ff(
     std::complex<double> p1J = std::complex<double>(0, 1);
     std::complex<double> zero_c = std::complex<double>(0, 0);
 
-    // loop over theta
-    for (int th = 0; th < data_shape[FF_THETA]; th++)
-    {
-        theta = theta_arr[th];
-        // loop over phi
-        for (int ph = 0; ph < data_shape[FF_PHI]; ph++)
+    // loop over frequency
+    for (int f = 0; f < data_shape[FF_FREQUENCY]; f++)
+    {   
+        beta = beta_arr[f];
+        beta_c = (std::complex<double>) beta;
+        
+        std::complex<double> * Jx_p[3][2];
+        std::complex<double> * Jy_p[3][2];
+        std::complex<double> * Jz_p[3][2];
+
+        std::complex<double> * Mx_p[3][2]; 
+        std::complex<double> * My_p[3][2]; 
+        std::complex<double> * Mz_p[3][2]; 
+
+
+        // get pointers to each J and M grid at this frequency
+        for (int axis = 0; axis < 3; axis++)
         {
-            phi = phi_arr[ph];
-            
-            cos_ph = (float) std::cos((double) phi);
-            cos_th = (float) std::cos((double) theta);
-            sin_ph = (float) std::sin((double) phi);
-            sin_th = (float) std::sin((double) theta);
-            
-            // covert to uvw
-            u = sin_th * cos_ph;
-            v = sin_th * sin_ph;
-            w = cos_th;
+            // each of the two faces on axis
+            for (int s = 0; s < 2; s++)
+            {
+                Jx_p[axis][s] = (J_xyz_p[axis][s]) + get_pointer_index_4(JM_shape[axis], {0, f, 0, 0});
+                Jy_p[axis][s] = (J_xyz_p[axis][s]) + get_pointer_index_4(JM_shape[axis], {1, f, 0, 0});
+                Jz_p[axis][s] = (J_xyz_p[axis][s]) + get_pointer_index_4(JM_shape[axis], {2, f, 0, 0});
 
-            cos_ph_c = (std::complex<double>) cos_ph;
-            cos_th_c = (std::complex<double>) cos_th;
-            sin_ph_c = (std::complex<double>) sin_ph;
-            sin_th_c = (std::complex<double>) sin_th;
+                Mx_p[axis][s] = (M_xyz_p[axis][s]) + get_pointer_index_4(JM_shape[axis], {0, f, 0, 0});
+                My_p[axis][s] = (M_xyz_p[axis][s]) + get_pointer_index_4(JM_shape[axis], {1, f, 0, 0});
+                Mz_p[axis][s] = (M_xyz_p[axis][s]) + get_pointer_index_4(JM_shape[axis], {2, f, 0, 0});
 
-            // loop over frequency
-            for (int f = 0; f < data_shape[FF_FREQUENCY]; f++)
-            {   
-                beta = beta_arr[f];
-                beta_c = (std::complex<double>) beta;
-                // reset N and L at each frequency, values from all faces are summed into a single value
+            }
+        }
+
+        // loop over theta
+        for (int th = 0; th < data_shape[FF_THETA]; th++)
+        {
+            theta = theta_arr[th];
+            // loop over phi
+            for (int ph = 0; ph < data_shape[FF_PHI]; ph++)
+            {
+                phi = phi_arr[ph];
+                
+                cos_ph = (float) std::cos((double) phi);
+                cos_th = (float) std::cos((double) theta);
+                sin_ph = (float) std::sin((double) phi);
+                sin_th = (float) std::sin((double) theta);
+                
+                // covert to uvw
+                u = sin_th * cos_ph;
+                v = sin_th * sin_ph;
+                w = cos_th;
+
+                cos_ph_c = (std::complex<double>) cos_ph;
+                cos_th_c = (std::complex<double>) cos_th;
+                sin_ph_c = (std::complex<double>) sin_ph;
+                sin_th_c = (std::complex<double>) sin_th;
+
+                // reset N and L at each frequency/theta/phi, values from all faces are summed into a single value
                 N_theta = zero_c;
                 N_phi = zero_c;
                 L_theta = zero_c;
                 L_phi = zero_c;
 
-                // loop over x, y, z axis
                 for (int axis = 0; axis < 3; axis++)
                 {
-                    // cell positions on the surface
-                    MatrixFloatType r_pos_0 (r_grid_p[axis][0], grid_shape[axis][0], grid_shape[axis][1]);
-                    MatrixFloatType r_pos_1 (r_grid_p[axis][1], grid_shape[axis][0], grid_shape[axis][1]);
-                    
-                    // cell widths
-                    MatrixFloatType w_0 (w_grid_p[axis][0], grid_shape[axis][0], grid_shape[axis][1]);
-                    MatrixFloatType w_1 (w_grid_p[axis][1], grid_shape[axis][0], grid_shape[axis][1]);
 
                     grid_size = grid_shape[axis][0] * grid_shape[axis][1];
 
                     // each of the two faces on axis
                     for (int s = 0; s < 2; s++)
                     {
+                        // Jx current grid
+                        MatrixComplexType Jx (Jx_p[axis][s], grid_shape[axis][0], grid_shape[axis][1]);
+                        
+                        // Jy current grid
+                        MatrixComplexType Jy (Jy_p[axis][s], grid_shape[axis][0], grid_shape[axis][1]);
+                        
+                        // Jz current grid
+                        MatrixComplexType Jz (Jz_p[axis][s], grid_shape[axis][0], grid_shape[axis][1]);
+
+                        // Mx current grid
+                        MatrixComplexType Mx (Mx_p[axis][s], grid_shape[axis][0], grid_shape[axis][1]);
+                        
+                        // My current grid
+                        MatrixComplexType My (My_p[axis][s], grid_shape[axis][0], grid_shape[axis][1]);
+                        
+                        // Mz current grid
+                        MatrixComplexType Mz (Mz_p[axis][s], grid_shape[axis][0], grid_shape[axis][1]);
+
+                        // cell positions on the surface
+                        MatrixFloatType r_pos_0 (r_grid_p[axis][0], grid_shape[axis][0], grid_shape[axis][1]);
+                        MatrixFloatType r_pos_1 (r_grid_p[axis][1], grid_shape[axis][0], grid_shape[axis][1]);
+                        
+                        // cell widths
+                        MatrixComplexType ds (ds_grid_p[axis], grid_shape[axis][0], grid_shape[axis][1]);
+
                         // phase term for integrand
                         MatrixFloatType r_dot (working_grid_float_p, grid_shape[axis][0], grid_shape[axis][1]);
                         
@@ -385,7 +426,7 @@ int postprocess_nf2ff(
                         {
                             r_dot = ((surf_pos[axis][s] * w) + ((r_pos_0 * u).array() + (r_pos_1 * v).array()).array());
                         }
-
+                        
                         // integrand term, same memory used for exponential phase term exp(1j * beta.item() * r_dot)
                         // and the differential dS.
                         MatrixComplexType intg (working_grid_cmplx_p, grid_shape[axis][0], grid_shape[axis][1]);
@@ -393,31 +434,7 @@ int postprocess_nf2ff(
                         // phs_term = exp(1j * beta.item() * r_dot)
                         intg = exp((p1J * beta_c) * r_dot.array().cast<std::complex<double>>());
                         // dS = phs_term * d1 * d2
-                        intg = intg.array() * ((w_0.array() * w_1.array()).cast<std::complex<double>>());
-
-                        // Jx current grid
-                        std::complex<double> * Jx_p = J_xyz_p[axis][s] + get_pointer_index_4(JM_shape[axis], {0, f, 0, 0});
-                        MatrixComplexType Jx (Jx_p, grid_shape[axis][0], grid_shape[axis][1]);
-                        
-                        // Jy current grid
-                        std::complex<double> * Jy_p = (J_xyz_p[axis][s]) + get_pointer_index_4(JM_shape[axis], {1, f, 0, 0});
-                        MatrixComplexType Jy (Jy_p, grid_shape[axis][0], grid_shape[axis][1]);
-                        
-                        // Jz current grid
-                        std::complex<double> * Jz_p = (J_xyz_p[axis][s]) + get_pointer_index_4(JM_shape[axis], {2, f, 0, 0});
-                        MatrixComplexType Jz (Jz_p, grid_shape[axis][0], grid_shape[axis][1]);
-
-                        // Mx current grid
-                        std::complex<double> * Mx_p = (M_xyz_p[axis][s]) + get_pointer_index_4(JM_shape[axis], {0, f, 0, 0});
-                        MatrixComplexType Mx (Mx_p, grid_shape[axis][0], grid_shape[axis][1]);
-                        
-                        // My current grid
-                        std::complex<double> * My_p = (M_xyz_p[axis][s]) + get_pointer_index_4(JM_shape[axis], {1, f, 0, 0});
-                        MatrixComplexType My (My_p, grid_shape[axis][0], grid_shape[axis][1]);
-                        
-                        // Mz current grid
-                        std::complex<double> * Mz_p = (M_xyz_p[axis][s]) + get_pointer_index_4(JM_shape[axis], {2, f, 0, 0});
-                        MatrixComplexType Mz (Mz_p, grid_shape[axis][0], grid_shape[axis][1]);
+                        intg = intg.array() * (ds.array());
 
                         // N_theta
                         // N_theta_intg = (Jx * cos_th * cos_ph) + (Jy * cos_th * sin_ph) - (Jz * sin_th)
@@ -478,11 +495,11 @@ int postprocess_nf2ff(
                 // E_phi[i] = (j * beta / (4 * np.pi)) * (L_theta - eta0 * N_phi)
                 *phipol_p = ((p1J * beta_c / pi4_c) * (L_theta - (eta0_c * N_phi)));
 
-            } // end frequency loop 
+            } // end phi loop
 
-        } // end phi loop
+        } // end theta loop
 
-    } // end theta loop
+    } // end frequency loop 
 
     return 0;
 }

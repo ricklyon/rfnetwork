@@ -397,14 +397,14 @@ static PyObject* nf2ff(PyObject* self, PyObject* args) {
     PyObject *J_xyz;
     PyObject *M_xyz;
     PyObject *r_grid;
-    PyObject *w_grid;
+    PyObject *ds_grid;
 
     PyObject *surf_pos;
     PyObject *ff_data;
 
     // Parse arguments: expecting a single Python object
     if (!PyArg_ParseTuple(
-        args, "OOOOOO", &J_xyz, &M_xyz, &r_grid, &w_grid, &surf_pos, &ff_data
+        args, "OOOOOO", &J_xyz, &M_xyz, &r_grid, &ds_grid, &surf_pos, &ff_data
     )) {
         return PyLong_FromLong(1);
     }
@@ -424,8 +424,8 @@ static PyObject* nf2ff(PyObject* self, PyObject* args) {
         return PyLong_FromLong(1);
     }
 
-    if (!PyList_Check(w_grid)) {
-        PyErr_SetString(PyExc_TypeError, "Expected w_grid as a list");
+    if (!PyList_Check(ds_grid)) {
+        PyErr_SetString(PyExc_TypeError, "Expected ds_grid as a list");
         return PyLong_FromLong(1);
     }
 
@@ -439,7 +439,7 @@ static PyObject* nf2ff(PyObject* self, PyObject* args) {
         return PyLong_FromLong(1);
     }
 
-    postprocess_nf2ff(J_xyz, M_xyz, r_grid, w_grid, surf_pos, ff_data);
+    postprocess_nf2ff(J_xyz, M_xyz, r_grid, ds_grid, surf_pos, ff_data);
 
     return PyLong_FromLong(0);
 }

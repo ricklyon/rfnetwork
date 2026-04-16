@@ -2818,8 +2818,8 @@ class FDTD_Solver():
         # meshgrid of x/y positions on grid, same for each face on the same axis
         r_grid = [[None, None] for i in range(3)]
 
-        # meshgrid of cell widths along each surface axis, same for each face on the same axis
-        w_grid = [[None, None] for i in range(3)]
+        # meshgrid of cell areas along each surface axis, same for each face on the same axis
+        ds_grid = [[None] for i in range(3)]
 
         # indices of each face on farfield box
         ff_idx = self.farfield["idx"]
@@ -2839,9 +2839,10 @@ class FDTD_Solver():
             r_grid[axis][0] = np.array(self.farfield["cell_pos"][axis][0], dtype=np.float32, order="C")
             r_grid[axis][1] = np.array(self.farfield["cell_pos"][axis][1], dtype=np.float32, order="C")
 
-            # grid cell widths
-            w_grid[axis][0] = np.array(self.farfield["cell_w"][axis][0], dtype=np.float32, order="C")
-            w_grid[axis][1] = np.array(self.farfield["cell_w"][axis][1], dtype=np.float32, order="C")
+            # grid cell areas, cast as complex to save time since dS is multiplied by a complex phase term
+            # in C++ and would require a cast operation otherwise.
+            ds = self.farfield["cell_w"][axis][0] * self.farfield["cell_w"][axis][1]
+            ds_grid[axis] = np.array(ds, dtype=np.complex128, order="C")
 
             # for each face on either side of the far-field box
             for j, side in enumerate(["n", "p"]):
@@ -2923,7 +2924,7 @@ class FDTD_Solver():
             working_grid_float = np.zeros((max_grid_length, max_grid_length), dtype=np.float32, order="C")
         )
 
-        core.core_func.nf2ff(J_xyz, M_xyz, r_grid, w_grid, surf_pos, ff_data)
+        core.core_func.nf2ff(J_xyz, M_xyz, r_grid, ds_grid, surf_pos, ff_data)
 
         # cast as labeled array
         return ldarray(
