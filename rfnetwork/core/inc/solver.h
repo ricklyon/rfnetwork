@@ -124,7 +124,7 @@ struct Coeff_Hz {
 
 struct Monitor {
     char * values;
-    std::complex<double> * dtft_phase;
+    std::complex<float> * dtft_phase;
     int n_phasors;
     int field_type;
     int axis;

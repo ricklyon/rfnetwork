@@ -26,7 +26,7 @@ using Eigen::MatrixXd;
 
 typedef Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> MatrixFloatType;
 typedef Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>, 0, Eigen::Stride<Eigen::Dynamic, Eigen::Dynamic>> MatrixFloatStride;
-typedef Eigen::Map<Eigen::Matrix<std::complex<double>, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> MatrixComplexType;
+typedef Eigen::Map<Eigen::Matrix<std::complex<float>, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> MatrixComplexType;
 
 #define FFDATA_NDIM 4
 
@@ -38,7 +38,7 @@ typedef Eigen::Map<Eigen::Matrix<std::complex<double>, Eigen::Dynamic, Eigen::Dy
 
 #define ETA0 376.730313
 
-std::complex<double> * get_complex_array(PyObject* py_obj, int * shape, int ndim) 
+std::complex<float> * get_complex_array(PyObject* py_obj, int * shape, int ndim) 
 {   
     PyArrayObject* array = (PyArrayObject*) py_obj;
     // get array shape
@@ -51,9 +51,9 @@ std::complex<double> * get_complex_array(PyObject* py_obj, int * shape, int ndim
         throw std::runtime_error("Invalid data array. Wrong number of dimensions.");
     }
 
-    if (PyArray_TYPE(array) != NPY_CDOUBLE)
+    if (PyArray_TYPE(array) != NPY_CFLOAT)
     {
-        throw std::runtime_error("Invalid data array. Must be complex double type.");
+        throw std::runtime_error("Invalid data array. Must be complex float32 type.");
     }
 
     if (!(PyArray_FLAGS(array) & NPY_ARRAY_C_CONTIGUOUS))
@@ -68,7 +68,7 @@ std::complex<double> * get_complex_array(PyObject* py_obj, int * shape, int ndim
         }
     }
 
-    return (std::complex<double> *) PyArray_DATA(array);
+    return (std::complex<float> *) PyArray_DATA(array);
 }
 
 float * get_float_array(PyObject * py_obj, int * shape, int ndim) 
@@ -174,7 +174,7 @@ int postprocess_nf2ff(
     }
 
     // result data array
-    std::complex<double> * data_array = get_complex_array(py_data, data_shape, FFDATA_NDIM);
+    std::complex<float> * data_array = get_complex_array(py_data, data_shape, FFDATA_NDIM);
 
     // beta (frequency) array
     int beta_shape[1] = {data_shape[FF_FREQUENCY]};
@@ -200,24 +200,24 @@ int postprocess_nf2ff(
     int JM_shape[3][4];
     
     // array pointers for J currents, two per axis on each face
-    std::complex<double> * J_xyz_p[3][2];
+    std::complex<float> * J_xyz_p[3][2];
     // array pointers for M currents, two per axis on each face
-    std::complex<double> * M_xyz_p[3][2];
+    std::complex<float> * M_xyz_p[3][2];
     // array pointers for cell positions on each axis
     float * r_grid_p[3][2];
     // array pointers for cell areas on each axis
-    std::complex<double> * ds_grid_p[3];
+    std::complex<float> * ds_grid_p[3];
     // surface positions, 2 values per axis
     float surf_pos[3][2];
 
     // get temporary working complex array
     PyObject* working_grid_py = PyDict_GetItemString(ff_data_py, "working_grid_cmplx");
     PyArrayObject* working_grid_array = (PyArrayObject*) working_grid_py;
-    std::complex<double> * working_grid_cmplx_p = (std::complex<double> *) PyArray_DATA(working_grid_array);
+    std::complex<float> * working_grid_cmplx_p = (std::complex<float> *) PyArray_DATA(working_grid_array);
 
-    if (PyArray_TYPE(working_grid_array) != NPY_CDOUBLE)
+    if (PyArray_TYPE(working_grid_array) != NPY_CFLOAT)
     {
-        throw std::runtime_error("Invalid data array. Must be complex double type.");
+        throw std::runtime_error("Invalid data array. Must be complex float type.");
     }
 
     // get temporary working float array
@@ -287,47 +287,47 @@ int postprocess_nf2ff(
     }
     
     // variables for N and L auxilary fields
-    std::complex<double> N_theta, N_phi, L_theta, L_phi;
+    std::complex<float> N_theta, N_phi, L_theta, L_phi;
     // pointers into the result data array for both polarizations
-    std::complex<double> * thetapol_p;
-    std::complex<double> * phipol_p;
+    std::complex<float> * thetapol_p;
+    std::complex<float> * phipol_p;
 
     // variables for the current frequency, theta and phi values in the loops
     float beta, theta, phi;
     // working variables for cos(theta), sin(theta), etc...
     float cos_th, cos_ph, sin_th, sin_ph;
     // cos/sin terms cast as complex values
-    std::complex<double> cos_th_c, cos_ph_c, sin_th_c, sin_ph_c;
-    std::complex<double> beta_c;
+    std::complex<float> cos_th_c, cos_ph_c, sin_th_c, sin_ph_c;
+    std::complex<float> beta_c;
 
     // 4 * PI as a complex number
-    std::complex<double> pi4_c = (std::complex<double>) (4 * M_PI);
+    std::complex<float> pi4_c = (std::complex<float>) (4 * M_PI);
     // Impedance of free space as a complex number
-    std::complex<double> eta0_c = (std::complex<double>) (ETA0);
+    std::complex<float> eta0_c = (std::complex<float>) (ETA0);
 
     // variables for current uv values in the loop
-    double u, v, w;
+    float u, v, w;
     // number of spatial grid points in a face
     int grid_size;
 
     // constant -1j, 1j and 0 as complex numbers
-    std::complex<double> n1J = std::complex<double>(0, -1);
-    std::complex<double> p1J = std::complex<double>(0, 1);
-    std::complex<double> zero_c = std::complex<double>(0, 0);
+    std::complex<float> n1J = std::complex<float>(0, -1);
+    std::complex<float> p1J = std::complex<float>(0, 1);
+    std::complex<float> zero_c = std::complex<float>(0, 0);
 
     // loop over frequency
     for (int f = 0; f < data_shape[FF_FREQUENCY]; f++)
     {   
         beta = beta_arr[f];
-        beta_c = (std::complex<double>) beta;
+        beta_c = (std::complex<float>) beta;
         
-        std::complex<double> * Jx_p[3][2];
-        std::complex<double> * Jy_p[3][2];
-        std::complex<double> * Jz_p[3][2];
+        std::complex<float> * Jx_p[3][2];
+        std::complex<float> * Jy_p[3][2];
+        std::complex<float> * Jz_p[3][2];
 
-        std::complex<double> * Mx_p[3][2]; 
-        std::complex<double> * My_p[3][2]; 
-        std::complex<double> * Mz_p[3][2]; 
+        std::complex<float> * Mx_p[3][2]; 
+        std::complex<float> * My_p[3][2]; 
+        std::complex<float> * Mz_p[3][2]; 
 
 
         // get pointers to each J and M grid at this frequency
@@ -356,20 +356,20 @@ int postprocess_nf2ff(
             {
                 phi = phi_arr[ph];
                 
-                cos_ph = (float) std::cos((double) phi);
-                cos_th = (float) std::cos((double) theta);
-                sin_ph = (float) std::sin((double) phi);
-                sin_th = (float) std::sin((double) theta);
+                cos_ph = (float) std::cos((float) phi);
+                cos_th = (float) std::cos((float) theta);
+                sin_ph = (float) std::sin((float) phi);
+                sin_th = (float) std::sin((float) theta);
                 
                 // covert to uvw
                 u = sin_th * cos_ph;
                 v = sin_th * sin_ph;
                 w = cos_th;
 
-                cos_ph_c = (std::complex<double>) cos_ph;
-                cos_th_c = (std::complex<double>) cos_th;
-                sin_ph_c = (std::complex<double>) sin_ph;
-                sin_th_c = (std::complex<double>) sin_th;
+                cos_ph_c = (std::complex<float>) cos_ph;
+                cos_th_c = (std::complex<float>) cos_th;
+                sin_ph_c = (std::complex<float>) sin_ph;
+                sin_th_c = (std::complex<float>) sin_th;
 
                 // reset N and L at each frequency/theta/phi, values from all faces are summed into a single value
                 N_theta = zero_c;
@@ -432,7 +432,7 @@ int postprocess_nf2ff(
                         MatrixComplexType intg (working_grid_cmplx_p, grid_shape[axis][0], grid_shape[axis][1]);
 
                         // phs_term = exp(1j * beta.item() * r_dot)
-                        intg = exp((p1J * beta_c) * r_dot.array().cast<std::complex<double>>());
+                        intg = exp((p1J * beta_c) * r_dot.array().cast<std::complex<float>>());
                         // dS = phs_term * d1 * d2
                         intg = intg.array() * (ds.array());
 

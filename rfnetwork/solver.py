@@ -1576,10 +1576,10 @@ class FDTD_Solver():
                 fn = frequency / fs
                 omega = 2 * np.pi * fn
                 # phase terms of the DTFT at a single frequency for each time step
-                mon_config["values"] = np.zeros(((len(frequency),) + m["shape"]), dtype=np.complex128, order="C")
+                mon_config["values"] = np.zeros(((len(frequency),) + m["shape"]), dtype=np.complex64, order="C")
                 # dtft phase is ordered (n_m, frequency)
                 mon_config["dtft_phase"] = np.exp(
-                    -1j * omega[None] * np.arange(n_m)[:, None], dtype=np.complex128, order="C" 
+                    -1j * omega[None] * np.arange(n_m)[:, None], dtype=np.complex64, order="C" 
                 )
                 mon_config["n_frequencies"] = int(len(frequency))
             else:
@@ -2842,7 +2842,7 @@ class FDTD_Solver():
             # grid cell areas, cast as complex to save time since dS is multiplied by a complex phase term
             # in C++ and would require a cast operation otherwise.
             ds = self.farfield["cell_w"][axis][0] * self.farfield["cell_w"][axis][1]
-            ds_grid[axis] = np.array(ds, dtype=np.complex128, order="C")
+            ds_grid[axis] = np.array(ds, dtype=np.complex64, order="C")
 
             # for each face on either side of the far-field box
             for j, side in enumerate(["n", "p"]):
@@ -2853,8 +2853,8 @@ class FDTD_Solver():
                 surf_shape = self.farfield["cell_pos"][axis][0].shape
                 
                 # initialize surface field at the cell centers
-                e_xyz = np.zeros(((3, n_frequencies) + surf_shape), dtype=np.complex128, order="C")
-                h_xyz = np.zeros(((3, n_frequencies) + surf_shape), dtype=np.complex128, order="C")
+                e_xyz = np.zeros(((3, n_frequencies) + surf_shape), dtype=np.complex64, order="C")
+                h_xyz = np.zeros(((3, n_frequencies) + surf_shape), dtype=np.complex64, order="C")
                 
                 for f in (sf0, sf1):
                     # string value for field direction
@@ -2908,9 +2908,9 @@ class FDTD_Solver():
                 normal_axis_v[axis] = (-1 if j == 0 else 1)
                 # magnetic equivalent surface currents, n X Hs
                 # equation 7-43 in Advanced Engineering Electromagnetics, 2nd Edition 
-                J_xyz[axis][j] = np.array(np.cross(normal_axis_v, h_xyz, axis=0), order="C")
+                J_xyz[axis][j] = np.array(np.cross(normal_axis_v, h_xyz, axis=0), order="C", dtype=np.complex64)
                 # electric equivalent surface currents, -n X Es
-                M_xyz[axis][j] = np.array(np.cross(-normal_axis_v, e_xyz, axis=0), order="C")
+                M_xyz[axis][j] = np.array(np.cross(-normal_axis_v, e_xyz, axis=0), order="C", dtype=np.complex64)
 
         # max grid length for temporary working grid
         max_grid_length = np.max([len(d) for d in self.d_cells])
@@ -2919,8 +2919,8 @@ class FDTD_Solver():
             beta = np.array(2 * np.pi * frequency / const.c0, dtype=np.float32, order="C"),
             theta = np.array(np.deg2rad(theta), dtype=np.float32, order="C"),
             phi = np.array(np.deg2rad(phi), dtype=np.float32, order="C"),
-            data = np.zeros((2, n_frequencies, len(theta), len(phi)), dtype=np.complex128, order="C"),
-            working_grid_cmplx = np.zeros((max_grid_length, max_grid_length), dtype=np.complex128, order="C"),
+            data = np.zeros((2, n_frequencies, len(theta), len(phi)), dtype=np.complex64, order="C"),
+            working_grid_cmplx = np.zeros((max_grid_length, max_grid_length), dtype=np.complex64, order="C"),
             working_grid_float = np.zeros((max_grid_length, max_grid_length), dtype=np.float32, order="C")
         )
 
