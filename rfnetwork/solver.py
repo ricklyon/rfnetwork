@@ -507,9 +507,10 @@ class FDTD_Solver():
         sub_objects = [self.bounding_box] + [sub["obj"] for sub in self.dielectrics.values()]
 
         # get a list of 2x3 arrays, coordinates of each endpoint of the edges of the model objects
-        obj_edges = []
+        obj_edges = np.zeros(shape=(0, 2, 3))
         for obj in cond_objects:
-            obj_edges += utils_mesh.get_object_edges(obj, group_faces=False)
+            obj_edges_i = utils_mesh.get_object_edges(obj, group_faces=False)
+            obj_edges = np.concatenate((obj_edges, obj_edges_i), axis=0)
 
         # remove edges that are inside the conductive areas, enforcing mesh points is only required at boundaries
         obj_edges = utils_mesh.remove_interior_edges(obj_edges)
@@ -853,7 +854,7 @@ class FDTD_Solver():
                     # get an array the same shape as the grid_points with zeros for points outside the object and ones 
                     # for points inside
                     points = np.transpose(e_grid_points, axes=(1, 2, 3, 0))
-                    inside_mask = utils_mesh.is_point_in_surface(points, obj)
+                    inside_mask = utils_mesh.is_point_in_surface(points, obj, tolerance=2e-3)
 
                 else:
                     dist = e_pdata.compute_implicit_distance(obj)

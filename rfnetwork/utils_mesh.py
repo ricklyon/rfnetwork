@@ -8,6 +8,7 @@ import mpl_markers as mplm
 from matplotlib.axes import Axes
 import matplotlib.pyplot as plt
 import pyvista as pv
+import itertools
 
 from PIL import Image
 
@@ -87,7 +88,7 @@ def blend_cell_widths(
         raise RuntimeError("Mesh did not converge.")
     
 
-def get_object_edges(obj: pv.PolyData, group_faces: bool = True) -> list:
+def get_object_edges(obj: pv.PolyData, group_faces: bool = True, zero_threshold: float = 1e-12) -> list:
     """
     Get the endpoints of the lines that form the edges of the object faces. Returns a M-length list for each 
     face in the object, each containing a N-length list of 2x3 arrays. N is the number of edges in the face.
@@ -100,6 +101,8 @@ def get_object_edges(obj: pv.PolyData, group_faces: bool = True) -> list:
     group_faces : bool, default: True
         if False, edges from all faces are combined and the returned list is Nx2x3, where N is the 
         number of edges in the object.
+    zero_threshold : bool, default: True
+        remove faces with area below this amount. Set to None to return all faces.
     """
     
     # build list of edge coordinates along each axis
@@ -132,9 +135,7 @@ def get_object_edges(obj: pv.PolyData, group_faces: bool = True) -> list:
                 if face_idx >= 0:
                     faces[face_idx] += obj_edges
                 
-                if group_faces or (face_idx < 0):
-                    face_idx += 1
-
+                face_idx += 1
                 obj_edges = []
             # if on the last point in the face, connect back to the first point in the face
             elif face_point_count == 1:
@@ -149,10 +150,20 @@ def get_object_edges(obj: pv.PolyData, group_faces: bool = True) -> list:
         if len(obj_edges):
             faces[face_idx] += obj_edges
 
-    return faces if group_faces else faces[0]
+    # prune faces with zero area
+    if zero_threshold is not None:
+        mesh = obj.compute_cell_sizes()
+        face_area = mesh.cell_data["Area"]
+        faces = [f for i, f in enumerate(faces) if face_area[i] > zero_threshold]
+
+    # flatten to a list of edges, list of (2x3) matrices
+    if not group_faces:
+        faces = list(itertools.chain.from_iterable(faces))
+
+    return faces
 
 
-def remove_interior_edges(obj_edges: np.ndarray, tolerance=1e-3):
+def remove_interior_edges(obj_edges: np.ndarray, tolerance: float = 1e-6, zero: float = 1e-12):
     """
     Remove interior edges returned from get_object_edges(..., group_faces=False) that share an edge with other faces. 
     """
@@ -175,6 +186,9 @@ def remove_interior_edges(obj_edges: np.ndarray, tolerance=1e-3):
     # non-overlapping segments
     nonovl_edges = []
 
+    i = np.argwhere(np.max(abs(obj_edges[..., 0] - -0.27), axis=-1) < 1e-2)
+    edge = obj_edges[i]
+
     for i, edge in enumerate(obj_edges):
 
         # two end points of current edge
@@ -187,8 +201,8 @@ def remove_interior_edges(obj_edges: np.ndarray, tolerance=1e-3):
         v_A_p2 = p2 - A
 
         # length of each vector
-        len_A_p1 = np.clip(np.linalg.norm(v_A_p1, axis=-1), 1e-12, None)
-        len_A_p2 = np.clip(np.linalg.norm(v_A_p2, axis=-1), 1e-12, None)
+        len_A_p1 = np.clip(np.linalg.norm(v_A_p1, axis=-1), zero, None)
+        len_A_p2 = np.clip(np.linalg.norm(v_A_p2, axis=-1), zero, None)
 
         # dot product of the p1 and p2 vectors with all other edge vectors. Dot product is normalized by the lengths 
         # to get cos(theta). 
@@ -196,84 +210,109 @@ def remove_interior_edges(obj_edges: np.ndarray, tolerance=1e-3):
         p2_dot = np.einsum("ij,j->i", v_A_p2, v_AB) / (len_A_p2 * len_AB)
 
         # If the edges are colinear cos(theta) is 1 or -1. 
-        # if the edges share a point, the dot product will be zero since v_A_p1 or v_A_p2 has zero length. 
-        colinear_p1 = (np.abs((np.abs(p1_dot) - 1)) < tolerance) | (len_A_p1 < tolerance)
-        colinear_p2 = (np.abs((np.abs(p2_dot) - 1)) < tolerance) | (len_A_p2 < tolerance)
+        # if the edges share a point with A, the dot product will be zero since v_A_p1 or v_A_p2 has zero length. 
+        # Set to 1 to indicate the edge is in the same direction as AB.
+        p1_dot = np.where(len_A_p1 <= zero * 2, 1, p1_dot)
+        p2_dot = np.where(len_A_p2 <= zero * 2, 1, p2_dot)
+
+        # set lengths to negative if lines in opposite direction
+        len_A_p1 = np.sign(p1_dot) * len_A_p1
+        len_A_p2 = np.sign(p2_dot) * len_A_p2
+
+        colinear_p1 = np.abs((np.abs(p1_dot) - 1)) < tolerance
+        colinear_p2 = np.abs((np.abs(p2_dot) - 1)) < tolerance
 
         # AB overlaps with P12 if the vector length between A -> P1 or A -> P2 is less than the length of AB, 
         # and if A -> P1 or A -> P2 makes a positive angle with AB. 
-        does_edge_overlap = (
-            (colinear_p1 & colinear_p2) & 
-            (((len_A_p1 - tolerance) < len_AB) | ((len_A_p2 - tolerance) < len_AB)) &
-            ((p1_dot > 0) | (p2_dot > 0))
+        is_edge_colinear = (colinear_p1 & colinear_p2)
+
+        np.argwhere(is_edge_colinear)
+
+        does_edge_overlap = is_edge_colinear & (
+            ((len_A_p1 + tolerance > 0) & ((len_A_p1 - tolerance) < len_AB)) | # if p1 falls on AB
+            ((len_A_p2 + tolerance > 0) & ((len_A_p2 - tolerance) < len_AB)) | # if p2 falls on AB
+            (np.sign(len_A_p2) != np.sign(len_A_p1)) # p1 is on opposite side of A as p2, or vice versa
         )
 
-        # for each edge that overlaps with AB (excluding itself)
+        # for each edge that overlaps with AB (excluding itself) get edge indices that overlap with AB
         does_edge_overlap[i] = False
-
-        # points on AB that defines a non-overlapping segment from A->Ao and B->Bo
-        Ao, Bo = [], []
-
-        # get edges that overlap with AB
         ovl_idx = np.atleast_1d(np.argwhere(does_edge_overlap).squeeze())
-
+        # if no other edge overlaps with AB, add the full AB edge as a non-overlapping edge
         if not len(ovl_idx):
             nonovl_edges.append((A, B))
             continue
         
-        # for each overlapping edge with AB
+        # distances from point A that define colinear line segments that overlap with AB.
+        segments = []
+        # for each overlapping edge with AB, get the segments along AB that overlap
         for j in ovl_idx:
             # end points of edge
             P1 = p1[j]
             P2 = p2[j]
 
-            # if A->P1 and A->P2 are in the same direction as AB, and both are smaller in length than AB, this splits 
-            # the non-overlapping part of AB into two parts.
-            if p1_dot[j] > 0 and p2_dot[j] > 0 and (len_A_p1[j] < len_AB) and (len_A_p2[j] < len_AB):
+            # if P1 is on A, overlapping segment is A->P2 if P2
+            if (abs(len_A_p1[j]) < tolerance):
+                segments.append((0, len_A_p2[j]))
+            elif (abs(len_A_p2[j]) < tolerance):
+                segments.append((0, len_A_p1[j]))
+            # if A->P1 and A->P2 are in the same direction as AB, and both are smaller in length than AB, the
+            # overlapping segment is fully contained in A and B
+            elif (len_A_p1[j] > 0) and (len_A_p1[j] > 0) and (len_A_p1[j] < len_AB) and (len_A_p2[j] < len_AB):
                 if len_A_p1[j] < len_A_p2[j]:
-                    Ao.append(P1)
-                    Bo.append(P2)
+                    segments.append((len_A_p1[j], len_A_p2[j]))
                 else: # if len_A_p1[j] < len_A_p2[j] 
-                    Ao.append(P2)
-                    Bo.append(P1)
-            # if A->P1 is in the opposite direction, P2 is on AB, and the non-overlapping segment is P2->B
-            elif p1_dot[j] < 0:
-                Bo.append(P2)
-                Ao.append(A)
-            # A->P2 is in the opposite direction, P1 is on AB, and the non-overlapping segment is P1->B
-            elif p2_dot[j] < 0:
-                Bo.append(P1)
-                Ao.append(A)
+                    segments.append((len_A_p2[j], len_A_p1[j]))
+            # if A->P1 is in the opposite direction, P2 is before or past B, and the overlapping segment is A->P2
+            elif len_A_p1[j] < 0:
+                segments.append((0, len_A_p2[j]))
+            # A->P2 is in the opposite direction, P1 is before or past B, and the overlapping segment is A->P1
+            elif len_A_p2[j] < 0:
+                segments.append((0, len_A_p1[j]))
             # both A->P1 and A->P2 are in the same direction, but one is longer than AB. 
-            # if A->P1 is smaller than A->P2, the non-overlapping segment is A->P1
+            # if A->P1 is smaller than A->P2, the overlapping segment is P1->B
             elif len_A_p1[j] < len_A_p2[j]:
-                Ao.append(P1)
-                Bo.append(B)
-            # A->P2 is smaller than A->P1, then A->P is longer than AB, overlapping segment is A->P2
+                segments.append((len_A_p1[j], len_AB))
+            # A->P2 is smaller than A->P1, then A->P1 is longer than AB, overlapping segment is P2->B
             else:
-                Ao.append(P2)
-                Bo.append(B)
+                segments.append((len_A_p2[j], len_AB))
 
-        # compute distances of A->Ao and B->Bo. Keep the points with the smallest distance as B->Bo defines
-        # a segment that was not overlapped by any of the other edges.
-        len_AAo = np.linalg.norm(np.array(Ao) - A, axis=-1)
-        len_BBo = np.linalg.norm(np.array(Bo) - B, axis=-1)
-        Ao_idx, Bo_idx = np.argmin(len_AAo), np.argmin(len_BBo)
+        # start with the full segment A->B, and remove the sections in segments. Each segment might
+        # split the non-overlapping parts into two different parts.
+        nonovl_segments = [(0, len_AB)]
 
-        # add non-overlapping line segments to the list
-        if len_AAo[Ao_idx] > tolerance:
-            nonovl_edges.append((A, Ao[Ao_idx]))
+        for i, seg in enumerate(segments):
+            for k, nseg in enumerate(nonovl_segments.copy()):
+                # clip endpoints of segment to the non-overlapping segment
+                s0, s1 = np.clip(seg[0], *nseg), np.clip(seg[1], *nseg)
+                # start points are the same, non-overlapping part is from end point of segment to the end
+                if abs(s0 - nseg[0]) < tolerance:
+                    nonovl_segments[k] = (s1, nseg[1])
+                # endpoints are the same, non-overlapping part is up to the start point of segment
+                elif abs(s1 - nseg[1]) < tolerance:
+                    nonovl_segments[k] = (nseg[0], s0)
+                # segment is between non-overlapping endpoints, split into two segments
+                else:
+                    nonovl_segments[k] = (nseg[0], s0)
+                    nonovl_segments.append((s1, nseg[1]))
+                
 
-        if len_BBo[Bo_idx] > tolerance:
-            nonovl_edges.append((B, Bo[Bo_idx]))
+        # vector that when multiplied by the length of a segment, gives the vector along the line from A->B.
+        # To see this for the point B,
+        # B = A + v * len_AB = A + ((B - A) / len_AB) * len_AB = B
+        v = (B - A) / len_AB
+
+        # create edges from segments
+        for (s0, s1) in nonovl_segments:
+            # remove segments with 0 length.
+            if (s1 - s0) < tolerance:
+                continue
+
+            nonovl_edges.append([(A + v * s0), (A + v * s1)])
 
     # for e in np.array(nonovl_edges):
     #     plt.plot(e[:, 0], e[:, 1])
 
-
     return np.array(nonovl_edges)
-
-
 
 
 def get_object_vertices(obj: pv.PolyData, group_faces: bool = True) -> list:
@@ -347,7 +386,7 @@ def is_point_in_surface(points, obj, tolerance=0.001):
         return np.zeros(points.shape[:-1])
     
     vertices = get_object_vertices(obj, group_faces=True)
-    edges = get_object_edges(obj, group_faces=True)
+    edges = get_object_edges(obj, group_faces=True, zero_threshold=None)
     n_faces = len(edges)
 
     in_face = np.zeros((n_faces,) + points.shape[:-1], dtype=np.int64)
