@@ -517,41 +517,9 @@ class FDTD_Solver():
         # round to tolerance
         obj_edges = np.around(obj_edges, decimals=self._places).astype(np.float32)
 
-        # array of angled edges broken up into sections, and edge cells that aren't on a geometry boundary
-        # soft_points = [np.array([]), np.array([]), np.array([])]
-
-        # if len(obj_edges):
-        #     edge_len = np.abs(np.diff(obj_edges, axis=1).squeeze())
-        #     # compute the area of a box bound by this edge and the cardinal axis. If area is above a certain threshold
-        #     # related to d_edge, create soft points along the axis to keep the area below the threshold. 
-        #     edge_area = np.prod(edge_len[:, :2], axis=-1)
-
-        #     # add small edge cells around object transitions
-        #     for i, edge in enumerate(obj_edges):
-        #         if edge_area[i] > (d_edge ** 2):
-        #             # break angled edges along x and y into sub-cells separated by d_edge
-        #             nx_ny = np.around(np.abs(edge_len[i][:2]) / d_edge).astype(int)
-
-        #             for axis in range(2):
-        #                 soft_points[axis] = np.append(
-        #                     soft_points[axis], np.linspace(edge[0, axis], edge[1, axis], nx_ny[axis])
-        #                 )
-                
-        #         # add edge cells on either side of edges aligned with the cardinal axis
-        #         if np.abs(edge_area[i]) < self._tol:
-                    
-        #             for axis in range(3):
-        #                 # if edge is normal to the axis (both endpoints are at the same value), add edge cells on 
-        #                 # either side. Skip if edge is at the bounding box edge
-        #                 at_bbox_edge = (
-        #                     (np.abs(edge[0][axis] - self.sbox_max[axis]) < self._tol) |
-        #                     (np.abs(edge[0][axis] - self.sbox_min[axis]) < self._tol)
-        #                 )
-
-        #                 if (edge_len[i][axis] < self._tol) and not at_bbox_edge:
-        #                     soft_points[axis] = np.append( 
-        #                         soft_points[axis], [edge[0][axis] - d_edge, edge[0][axis] + d_edge]
-        #                     )
+        obj_edge_v = np.diff(obj_edges, axis=1)[:, 0, :]
+        # flag each edge if it is not aligned with one of the cartesian axes
+        obj_edge_oblique = np.count_nonzero(np.abs(obj_edge_v) > d_edge / 2, axis=1) > 1
 
         # object vertices and points for the mesh around angled sections
         all_points = [np.array([]), np.array([]), np.array([])]
@@ -579,6 +547,16 @@ class FDTD_Solver():
                         # of solve box
                         if (abs(p - self.sbox_max[axis]) > self._tol) and (abs(p - self.sbox_min[axis]) > self._tol):
                             soft_points = np.append(soft_points, [p - d_edge, p + d_edge])
+
+            for i, edge in enumerate(obj_edges):
+                # grade mesh cells along angled edges
+                if obj_edge_oblique[i] and obj_edge_v[i][axis] > d_edge:
+                    # break angled edges along x and y into sub-cells separated by d_edge
+                    nx_ny = np.around(np.abs(obj_edge_v[i][axis]) / d_edge).astype(int)
+
+                    soft_points = np.append(
+                        soft_points, np.linspace(edge[0, axis], edge[1, axis], nx_ny)
+                    )
 
             # add gerber vertices
             hard_points = np.concatenate((hard_points, gbr_hard_points[axis]))
