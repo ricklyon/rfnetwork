@@ -152,42 +152,128 @@ def get_object_edges(obj: pv.PolyData, group_faces: bool = True) -> list:
     return faces if group_faces else faces[0]
 
 
-def remove_interior_edges(obj_edges: np.ndarray, tolerance=0.001):
+def remove_interior_edges(obj_edges: np.ndarray, tolerance=1e-3):
     """
     Remove interior edges returned from get_object_edges(..., group_faces=False) that share an edge with other faces. 
     """
     obj_edges = np.array(obj_edges)
 
-    unique_edges = []
-    hit_indices = np.array([])
-
     # remove edges with zero length
     edge_len = np.sqrt(np.sum(np.abs(np.diff(obj_edges, axis=1))**2, axis=-1)).squeeze()
     obj_edges = obj_edges[edge_len > tolerance]
 
-    for i, e in enumerate(obj_edges):
+    # base point (or starting point) of each vector
+    p1 = obj_edges[:, 0]
+    # end point of each vector
+    p2 = obj_edges[:, 1]
 
-        # skip if this edge has already been found to be a duplicate with another face
-        if i in hit_indices:
+    # vector from first point to second point of edges
+    v_p1_p2 = p2 - p1
+    # length of each vector
+    len_p1_p2 = np.clip(np.linalg.norm(v_p1_p2, axis=-1), 1e-12, None)
+
+    # non-overlapping segments
+    nonovl_edges = []
+
+    for i, edge in enumerate(obj_edges):
+
+        # two end points of current edge
+        A, B = edge
+        v_AB = v_p1_p2[i]
+        len_AB = len_p1_p2[i]
+
+        # vectors from the base point of the current edge to all other end points from edges
+        v_A_p1 = p1 - A
+        v_A_p2 = p2 - A
+
+        # length of each vector
+        len_A_p1 = np.clip(np.linalg.norm(v_A_p1, axis=-1), 1e-12, None)
+        len_A_p2 = np.clip(np.linalg.norm(v_A_p2, axis=-1), 1e-12, None)
+
+        # dot product of the p1 and p2 vectors with all other edge vectors. Dot product is normalized by the lengths 
+        # to get cos(theta). 
+        p1_dot = np.einsum("ij,j->i", v_A_p1, v_AB) / (len_A_p1 * len_AB)
+        p2_dot = np.einsum("ij,j->i", v_A_p2, v_AB) / (len_A_p2 * len_AB)
+
+        # If the edges are colinear cos(theta) is 1 or -1. 
+        # if the edges share a point, the dot product will be zero since v_A_p1 or v_A_p2 has zero length. 
+        colinear_p1 = (np.abs((np.abs(p1_dot) - 1)) < tolerance) | (len_A_p1 < tolerance)
+        colinear_p2 = (np.abs((np.abs(p2_dot) - 1)) < tolerance) | (len_A_p2 < tolerance)
+
+        # AB overlaps with P12 if the vector length between A -> P1 or A -> P2 is less than the length of AB, 
+        # and if A -> P1 or A -> P2 makes a positive angle with AB. 
+        does_edge_overlap = (
+            (colinear_p1 & colinear_p2) & 
+            (((len_A_p1 - tolerance) < len_AB) | ((len_A_p2 - tolerance) < len_AB)) &
+            ((p1_dot > 0) | (p2_dot > 0))
+        )
+
+        # for each edge that overlaps with AB (excluding itself)
+        does_edge_overlap[i] = False
+
+        # points on AB that defines a non-overlapping segment from A->Ao and B->Bo
+        Ao, Bo = [], []
+
+        # get edges that overlap with AB
+        ovl_idx = np.atleast_1d(np.argwhere(does_edge_overlap).squeeze())
+
+        if not len(ovl_idx):
+            nonovl_edges.append((A, B))
             continue
+        
+        # for each overlapping edge with AB
+        for j in ovl_idx:
+            # end points of edge
+            P1 = p1[j]
+            P2 = p2[j]
 
-        # compare every other edge with this one. Create a M length array where values are True if the points are
-        # the same for "e", False if different. 
-        edge_equal = np.all(np.abs(obj_edges - e[None]) < tolerance, axis=(1, 2))
-        # edges may have the points flipped, but should be treated as the same edge.
-        edge_equal_f = np.all(np.abs(obj_edges - np.flip(e, axis=0)) < tolerance, axis=(1, 2))
-        edge_equal = edge_equal | edge_equal_f
+            # if A->P1 and A->P2 are in the same direction as AB, and both are smaller in length than AB, this splits 
+            # the non-overlapping part of AB into two parts.
+            if p1_dot[j] > 0 and p2_dot[j] > 0 and (len_A_p1[j] < len_AB) and (len_A_p2[j] < len_AB):
+                if len_A_p1[j] < len_A_p2[j]:
+                    Ao.append(P1)
+                    Bo.append(P2)
+                else: # if len_A_p1[j] < len_A_p2[j] 
+                    Ao.append(P2)
+                    Bo.append(P1)
+            # if A->P1 is in the opposite direction, P2 is on AB, and the non-overlapping segment is P2->B
+            elif p1_dot[j] < 0:
+                Bo.append(P2)
+                Ao.append(A)
+            # A->P2 is in the opposite direction, P1 is on AB, and the non-overlapping segment is P1->B
+            elif p2_dot[j] < 0:
+                Bo.append(P1)
+                Ao.append(A)
+            # both A->P1 and A->P2 are in the same direction, but one is longer than AB. 
+            # if A->P1 is smaller than A->P2, the non-overlapping segment is A->P1
+            elif len_A_p1[j] < len_A_p2[j]:
+                Ao.append(P1)
+                Bo.append(B)
+            # A->P2 is smaller than A->P1, then A->P is longer than AB, overlapping segment is A->P2
+            else:
+                Ao.append(P2)
+                Bo.append(B)
 
-        # unique edges should only have one "True" value in the edge_equal array (itself).
-        # add the indices to all edges that are duplicates to the hit_indices array to prevent them from being
-        # added as a unique edge
-        if np.count_nonzero(edge_equal) != 1:
-            hit_indices = np.unique(np.concatenate([hit_indices, np.argwhere(edge_equal)[:, 0]]))
-        # if unique, add to the list
-        else:
-            unique_edges.append(e)
+        # compute distances of A->Ao and B->Bo. Keep the points with the smallest distance as B->Bo defines
+        # a segment that was not overlapped by any of the other edges.
+        len_AAo = np.linalg.norm(np.array(Ao) - A, axis=-1)
+        len_BBo = np.linalg.norm(np.array(Bo) - B, axis=-1)
+        Ao_idx, Bo_idx = np.argmin(len_AAo), np.argmin(len_BBo)
 
-    return np.array(unique_edges)
+        # add non-overlapping line segments to the list
+        if len_AAo[Ao_idx] > tolerance:
+            nonovl_edges.append((A, Ao[Ao_idx]))
+
+        if len_BBo[Bo_idx] > tolerance:
+            nonovl_edges.append((B, Bo[Bo_idx]))
+
+    # for e in np.array(nonovl_edges):
+    #     plt.plot(e[:, 0], e[:, 1])
+
+
+    return np.array(nonovl_edges)
+
+
 
 
 def get_object_vertices(obj: pv.PolyData, group_faces: bool = True) -> list:
