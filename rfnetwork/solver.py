@@ -509,11 +509,23 @@ class FDTD_Solver():
         # get a list of 2x3 arrays, coordinates of each endpoint of the edges of the model objects
         obj_edges = np.zeros(shape=(0, 2, 3))
         for obj in cond_objects:
-            obj_edges_i = utils_mesh.get_object_edges(obj, group_faces=False)
+            
+            is_surface = obj.area < self._tol
+
+            # get all edges of a surface mesh that forms the mesh boundaries
+            if is_surface:
+                obj_edges_i = utils_mesh.get_object_edges(obj, group_faces=False)
+                obj_edges_i = utils_mesh.remove_interior_edges(obj_edges_i)
+
+            # if object is 3D, attempt to use the built in pyvista method to extract boundary edges.
+            else:
+                obj_extracted = obj.extract_feature_edges(
+                    non_manifold_edges=False, feature_edges=True, manifold_edges=False, clear_data=False
+                )
+                obj_edges_i = utils_mesh.get_object_edges(obj_extracted, group_faces=False)
+
             obj_edges = np.concatenate((obj_edges, obj_edges_i), axis=0)
 
-        # remove edges that are inside the conductive areas, enforcing mesh points is only required at boundaries
-        obj_edges = utils_mesh.remove_interior_edges(obj_edges)
         # round to tolerance
         obj_edges = np.around(obj_edges, decimals=self._places).astype(np.float32)
 
