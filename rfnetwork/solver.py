@@ -510,7 +510,7 @@ class FDTD_Solver():
         obj_edges = np.zeros(shape=(0, 2, 3))
         for obj in cond_objects:
             
-            is_surface = obj.area < self._tol
+            is_surface = utils_mesh.is_object_surface(obj)
 
             # get all edges of a surface mesh that forms the mesh boundaries
             if is_surface:
@@ -829,7 +829,7 @@ class FDTD_Solver():
                 p0 = list(self.field_pos_to_idx(np.min(obj.points, axis=0), field))
                 p1 = list(self.field_pos_to_idx(np.max(obj.points, axis=0), field))
 
-                is_surface = np.any(np.diff([p0, p1], axis=0) == 0)
+                is_surface = utils_mesh.is_object_surface(obj)
 
                 # index for the bounding box of the object
                 bbox_idx = tuple([slice(p0[i], p1[i] + 1) for i in range(3)])
