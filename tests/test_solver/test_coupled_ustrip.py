@@ -31,7 +31,7 @@ class TestCoupledUStrip(unittest.TestCase):
         # solve box dimensions, inches
         sbox_h = 0.25
         sbox_w = 0.3
-        sbox_len = 0.25
+        sbox_len = 0.3
 
         ref_odd, ref_even = rfn.utils.coupled_ustrip_impedance(ms_w, sub_h, ms_sp, er, frequency=f0)
 
@@ -74,11 +74,13 @@ class TestCoupledUStrip(unittest.TestCase):
             s.add_lumped_port(i+1, port_face, integration_line="z+")
 
         # assign PML layers, omitting the x- side near the ports
-        s.assign_PML_boundaries("x+", "z+", "y-", "y+", n_pml=5)
+        s.assign_PML_boundaries("x+", "x-", "z+", "y-", "y+", n_pml=5)
 
         # create mesh with a nominal width of 20mils far from geometry edges, and 2.5mils near edges.
         # cell widths are tapered to minimize errors
-        s.generate_mesh(d0 = 0.01, d_edge = 0.0025)
+        s.generate_mesh(d0 = 0.01, d_edge = 0.005)
+
+        # s.render().show()
 
         # apply edge singularity correction to the edges along the length of the microstrip lines
         for i, ms_y in enumerate((ms1_y, ms2_y)):
@@ -93,7 +95,7 @@ class TestCoupledUStrip(unittest.TestCase):
             s.edge_correction(p1, p2, integration_line="y-")
 
         # create voltage waveform. Time units are in seconds
-        vsrc = 1e-2 * s.gaussian_modulated_source(f0=10e9, width=200e-12, t0=160e-12, t_len=400e-12)
+        vsrc = 1e-2 * s.gaussian_source(width=80e-12, t0=50e-12, t_len=300e-12)
 
         # run even mode, 
         # same waveform at both port 1 and 2
@@ -116,7 +118,7 @@ class TestCoupledUStrip(unittest.TestCase):
         # ax.plot(frequency / 1e9, conv.z_gamma(S_odd.sel(b=1, a=1)).real)
         # ax.plot(frequency / 1e9, conv.z_gamma(S_even.sel(b=1, a=1)).real)
 
-        # ax.set_ylim([0, 110])
+        # ax.set_ylim([0, 130])
         # ax.axhline(y=ref_odd, linestyle=":", color="tab:blue")
         # ax.axhline(y=ref_even, linestyle=":", color="tab:orange")
         # ax.set_xlabel("Frequency [GHz]")
