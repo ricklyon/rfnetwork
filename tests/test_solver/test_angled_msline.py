@@ -90,7 +90,7 @@ class TestAngledLine(unittest.TestCase):
         s.add_lumped_port(2, port2_face, "z+")
 
         s.assign_PML_boundaries("z+", "y-", "y+", n_pml=5)
-        s.generate_mesh(d0 = 0.02, d_edge=0.007)
+        s.generate_mesh(d_max = 0.02, d_min=0.007)
 
         # rough check on mesh resolution
         self.assertGreater(s.Nx * s.Ny * s.Nz / 1e3, 90)

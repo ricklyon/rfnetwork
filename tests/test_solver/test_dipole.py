@@ -59,7 +59,7 @@ class TestDipole(unittest.TestCase):
 
         # PML boundaries are required on all sides to add a far-field monitor
         s.assign_PML_boundaries("x-", "x+", "y-", "y+", "z+", "z-", n_pml=5)
-        s.generate_mesh(d0 = 0.03, d_edge=0.01)
+        s.generate_mesh(d_max = 0.03, d_min=0.01)
 
         # setup wide-band far-field monitor
         s.add_farfield_monitor(frequency=[10e9, 20e9])

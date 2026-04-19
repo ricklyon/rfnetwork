@@ -410,21 +410,21 @@ class FDTD_Solver():
         return tuple(idx)
     
     
-    def generate_mesh(self, d0: float = None, d_edge: float = None):
+    def generate_mesh(self, d_max: float = None, d_min: float = None):
         """
         Generate the grid and FDTD coefficients for the model geometry.
 
         Parameters
         ----------
-        d0 : float
+        d_max : float
             nominal cell width, inches. This cell width is used in open regions far from geometry features.
-        d_edge : float, optional
-            cell width around geometry edges, inches. Must be smaller than d0 if provided.
+        d_min : float, optional
+            cell width around geometry edges, inches. Must be smaller than d_max if provided.
         """
 
         self._meshed = True
 
-        self._init_grid(d0=d0, d_edge=d_edge)
+        self._init_grid(d_max=d_max, d_min=d_min)
         # init dielectrics sets the cell sigma and er but does not set the coefficients
         self._init_dielectrics()
         # initialize coefficients from the cell sigma and er set by the dielectrics
@@ -440,7 +440,7 @@ class FDTD_Solver():
         self._init_lumped_elements()
         self.invalidate_solution()
 
-    def _get_points_from_img(self, d_edge):
+    def _get_points_from_img(self, d_min):
         """
         Compile locations of all edges in a gerber image.
         """
@@ -489,12 +489,12 @@ class FDTD_Solver():
 
         # add soft points around the hard points, one edge cell away
         for axis in range(3):
-            soft_points[axis] = np.concatenate((soft_points[axis], [edge - d_edge for edge in hard_points[axis]]))
-            soft_points[axis] = np.concatenate((soft_points[axis], [edge + d_edge for edge in hard_points[axis]]))
+            soft_points[axis] = np.concatenate((soft_points[axis], [edge - d_min for edge in hard_points[axis]]))
+            soft_points[axis] = np.concatenate((soft_points[axis], [edge + d_min for edge in hard_points[axis]]))
                 
         return [np.unique(a) for a in hard_points], [np.unique(a) for a in soft_points]
 
-    def _get_mesh_points(self, d_edge: float):
+    def _get_mesh_points(self, d_min: float):
         """
         Compile all points defined by model geometry, as well as edge cells around geometry features.
         """
@@ -531,13 +531,13 @@ class FDTD_Solver():
 
         obj_edge_v = np.diff(obj_edges, axis=1)[:, 0, :]
         # flag each edge if it is not aligned with one of the cartesian axes
-        obj_edge_oblique = np.count_nonzero(np.abs(obj_edge_v) > d_edge / 2, axis=1) > 1
+        obj_edge_oblique = np.count_nonzero(np.abs(obj_edge_v) > d_min / 2, axis=1) > 1
 
         # object vertices and points for the mesh around angled sections
         all_points = [np.array([]), np.array([]), np.array([])]
 
         # add points from any gerber layers
-        gbr_hard_points, gbr_soft_points = self._get_points_from_img(d_edge)
+        gbr_hard_points, gbr_soft_points = self._get_points_from_img(d_min)
 
         for axis in range(3):
             
@@ -555,16 +555,16 @@ class FDTD_Solver():
                     if np.any(np.all(np.abs(obj_edges[..., axis] - p) < self._tol, axis=-1)):
                         hard_points = np.append(hard_points, p)
 
-                        # add soft points on either edge of point separated by d_edge, if point is not on the edge
+                        # add soft points on either edge of point separated by d_min, if point is not on the edge
                         # of solve box
                         if (abs(p - self.sbox_max[axis]) > self._tol) and (abs(p - self.sbox_min[axis]) > self._tol):
-                            soft_points = np.append(soft_points, [p - d_edge, p + d_edge])
+                            soft_points = np.append(soft_points, [p - d_min, p + d_min])
 
             for i, edge in enumerate(obj_edges):
                 # grade mesh cells along angled edges
-                if obj_edge_oblique[i] and obj_edge_v[i][axis] > d_edge:
-                    # break angled edges along x and y into sub-cells separated by d_edge
-                    nx_ny = np.around(np.abs(obj_edge_v[i][axis]) / d_edge).astype(int)
+                if obj_edge_oblique[i] and obj_edge_v[i][axis] > d_min:
+                    # break angled edges along x and y into sub-cells separated by d_min
+                    nx_ny = np.around(np.abs(obj_edge_v[i][axis]) / d_min).astype(int)
 
                     soft_points = np.append(
                         soft_points, np.linspace(edge[0, axis], edge[1, axis], nx_ny)
@@ -581,25 +581,25 @@ class FDTD_Solver():
             # remove redundant values
             hard_points = np.sort(np.unique(np.around(hard_points, decimals=self._places)))
 
-            # remove any points that are less than d_edge away from other conductor points
+            # remove any points that are less than d_min away from other conductor points
             for i in range(len(hard_points)):
                 # remove by setting other values that are very close to this one equal. 
                 p = hard_points[i]
-                hard_points = np.where(np.abs(p - hard_points) < (d_edge * 0.8), p, hard_points)
+                hard_points = np.where(np.abs(p - hard_points) < (d_min * 0.8), p, hard_points)
 
-            # remove any soft points that are less than d_edge away from an object point
+            # remove any soft points that are less than d_min away from an object point
             for p in hard_points:
-                soft_points = np.where(np.abs(p - soft_points) < (d_edge * 0.8), np.nan, soft_points)
+                soft_points = np.where(np.abs(p - soft_points) < (d_min * 0.8), np.nan, soft_points)
             
             # clean up and sort soft mesh points
             soft_points = np.sort(np.unique(np.around(soft_points, decimals=self._places)))
-            # create a reduced set of mesh points that are spaced no less than d_edge. Walk through all soft points
-            # and only add points to the reduced list if they are at least d_edge away from the last point.
+            # create a reduced set of mesh points that are spaced no less than d_min. Walk through all soft points
+            # and only add points to the reduced list if they are at least d_min away from the last point.
             if len(soft_points):
                 last_p = soft_points[0]
                 sp_axis_reduced = [last_p]
                 for i, p in enumerate(soft_points[1:]):
-                    if (p - last_p) >= d_edge:
+                    if (p - last_p) >= d_min:
                         sp_axis_reduced += [p]
                         last_p = p
 
@@ -623,12 +623,12 @@ class FDTD_Solver():
 
         return all_points
 
-    def _init_grid(self, d0: float = None, d_edge: float = None):
+    def _init_grid(self, d_max: float = None, d_min: float = None):
         """ Initialize model grid. """
 
         dtype_ = np.float32
 
-        self._create_grid(d0, d_edge)
+        self._create_grid(d_max, d_min)
 
         gx, gy, gz = self.grid.x, self.grid.y, self.grid.z
         dx, dy, dz = np.diff(gx).astype(dtype_), np.diff(gy).astype(dtype_), np.diff(gz).astype(dtype_)
@@ -692,20 +692,24 @@ class FDTD_Solver():
             hz=(dx, dy, dz_hp)
         )
 
-
-    def _create_grid(self, d0: float, d_edge: float = None):
+    def _create_grid(self, d_max: float, d_min: float = None):
         """ Create model grid """
 
-        if d0 is None:
-            raise ValueError("d0 must be provided")
+        if d_max is None:
+            raise ValueError("d_max must be provided")
         
-        if d_edge is not None and d_edge > (d0 / 1.5):
-            raise ValueError("d_edge must be less than d0.")
+        if d_min is not None and d_min > (d_max / 1.5):
+            raise ValueError("d_min must be less than d_max.")
         
-        all_points = self._get_mesh_points(d_edge=d0 if d_edge is None else d_edge)
+        d_min = d_max if d_min is None else d_min
+        
+        self._d_max = d_max
+        self._d_min = d_min
 
-        if not isinstance(d0, list):
-            d0 = [d0] * 3
+        all_points = self._get_mesh_points(d_min)
+
+        if not isinstance(d_max, list):
+            d_max = [d_max] * 3
 
         dtype_ = np.float32
 
@@ -722,8 +726,8 @@ class FDTD_Solver():
 
             for i, d in enumerate(cells_d):
 
-                # split cells larger than d0*5 into multiple cells, this prevents grading over large spans
-                split_threshold = d0[axis] * 3
+                # split cells larger than d_max*5 into multiple cells, this prevents grading over large spans
+                split_threshold = d_max[axis] * 3
                 if int(d / split_threshold) >= 1:
                     n_split = int(d / split_threshold)
                     # split cell width into equal parts
@@ -739,7 +743,7 @@ class FDTD_Solver():
             # The larger cells have more room to work in and
             # it's easier to blend. The smaller cells have less work to do because the
             # larger cells have already stepped down to meet their widths.
-            # Leave PEC cells for last so they don't blend up to the (typically) larger d0 cells
+            # Leave PEC cells for last so they don't blend up to the (typically) larger d_max cells
             d_order = np.flip(np.argsort(subcells_d))
             
             graded_subcells_d = [None] * len(subcells_d)
@@ -752,24 +756,24 @@ class FDTD_Solver():
                 if (i > 0) and (graded_subcells_d[i - 1] is not None):
                     dprev = graded_subcells_d[i - 1][-1]
                 elif (i > 0):
-                    dprev = np.clip(subcells_d[i - 1], 0, d0[axis] )
-                # If on the edge of the grid, match to d0 if the cell width is near d0, otherwise match
+                    dprev = np.clip(subcells_d[i - 1], 0, d_max[axis] )
+                # If on the edge of the grid, match to d_max if the cell width is near d_max, otherwise match
                 # to the edge width
                 else:
-                    dprev = d0[axis] if d >= (d0[axis] * 0.9) else d_edge
+                    dprev = d_max[axis] if d >= (d_max[axis] * 0.9) else d_min
 
                 # next cell width
                 if (i < len(subcells_d) - 1) and (graded_subcells_d[i + 1] is not None):
                     dnext = graded_subcells_d[i + 1][0]
                 elif (i < len(subcells_d) - 1) :
-                    dnext = np.clip(subcells_d[i + 1], 0, d0[axis] )
+                    dnext = np.clip(subcells_d[i + 1], 0, d_max[axis] )
                 # If on the edge of the grid, match to the boundary width
                 else:
-                    dnext = d0[axis] if d >= (d0[axis] * 0.9) else d_edge
+                    dnext = d_max[axis] if d >= (d_max[axis] * 0.9) else d_min
 
-                # if cell is bounded by d0 cells on either side, divide the cell equally 
-                if all([(g / d0[axis] ) > 0.8 for g in [dprev, dnext, d]]):
-                    n_split = int(np.around(d / d0[axis] ))
+                # if cell is bounded by d_max cells on either side, divide the cell equally 
+                if all([(g / d_max[axis] ) > 0.8 for g in [dprev, dnext, d]]):
+                    n_split = int(np.around(d / d_max[axis] ))
                     graded_subcells_d[i] = [d / n_split] * n_split
                 # create a gradient of cell widths to span the space that minimizes the growth rate. 
                 else:
@@ -844,7 +848,7 @@ class FDTD_Solver():
                     # get an array the same shape as the grid_points with zeros for points outside the object and ones 
                     # for points inside
                     points = np.transpose(e_grid_points, axes=(1, 2, 3, 0))
-                    inside_mask = utils_mesh.is_point_in_surface(points, obj, tolerance=2e-3)
+                    inside_mask = utils_mesh.is_point_in_surface(points, obj, tolerance=self._d_min / 3)
 
                 else:
                     dist = e_pdata.compute_implicit_distance(obj)

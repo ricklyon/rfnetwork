@@ -93,7 +93,7 @@ class TestMicroStrip(unittest.TestCase):
         pml_side = ["x", "y", "z"][len_axis]
         s.assign_PML_boundaries(f"{pml_side}+", n_pml=10)
 
-        s.generate_mesh(d0 = 0.02)
+        s.generate_mesh(d_max = 0.02)
         
         # edge correction
         p1 = build_dims(ms_ends[0], + ms_w/2, sub_h)

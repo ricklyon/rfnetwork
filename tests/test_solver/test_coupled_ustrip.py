@@ -78,7 +78,7 @@ class TestCoupledUStrip(unittest.TestCase):
 
         # create mesh with a nominal width of 20mils far from geometry edges, and 2.5mils near edges.
         # cell widths are tapered to minimize errors
-        s.generate_mesh(d0 = 0.01, d_edge = 0.005)
+        s.generate_mesh(d_max = 0.01, d_min = 0.005)
 
         # s.render().show()
 
