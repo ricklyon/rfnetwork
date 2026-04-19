@@ -115,7 +115,8 @@ def get_object_edges(obj: pv.PolyData, group_faces: bool = True, zero_threshold:
         for i, p in enumerate(obj.points):
             end_p = obj.points[i+1] if i < len(obj.points) - 1 else obj.points[0]
             obj_edges.append((p, end_p))
-        faces[0] = obj_edges
+
+        return obj_edges
 
     else:
         # index of the current face
@@ -150,22 +151,35 @@ def get_object_edges(obj: pv.PolyData, group_faces: bool = True, zero_threshold:
         if len(obj_edges):
             faces[face_idx] += obj_edges
 
-    # prune faces with zero area
-    if zero_threshold is not None:
-        mesh = obj.compute_cell_sizes()
-        face_area = mesh.cell_data["Area"]
-        faces = [f for i, f in enumerate(faces) if face_area[i] > zero_threshold]
+        # prune faces with zero area
+        if zero_threshold is not None:
+            mesh = obj.compute_cell_sizes()
+            face_area = mesh.cell_data["Area"]
+            faces = [f for i, f in enumerate(faces) if face_area[i] > zero_threshold]
 
-    # flatten to a list of edges, list of (2x3) matrices
-    if not group_faces:
-        faces = list(itertools.chain.from_iterable(faces))
+        # flatten to a list of edges, list of (2x3) matrices
+        if not group_faces:
+            faces = list(itertools.chain.from_iterable(faces))
 
     return faces
 
+def is_object_surface(obj: pv.PolyData):
+    """
+    Returns True if the object is a 2D surface, False if 3D or 1D.
+    """
+
+    x0, x1, y0, y1, z0, z1 = obj.bounds
+    p0 = x0, y0, z0
+    p1 = x1, y1, z1
+
+    axis_len = np.abs(np.diff([p0, p1], axis=0))
+
+    return np.count_nonzero(axis_len > 1e-12) == 2
 
 def remove_interior_edges(obj_edges: np.ndarray, tolerance: float = 1e-6, zero: float = 1e-12):
     """
     Remove interior edges returned from get_object_edges(..., group_faces=False) that share an edge with other faces. 
+    Only works for 2D surfaces.
     """
     obj_edges = np.array(obj_edges)
 
