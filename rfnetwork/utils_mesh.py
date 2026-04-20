@@ -14,7 +14,7 @@ from PIL import Image
 
 import pygerber.gerberx3.api.v2 as pygb
 
-# from . import conv
+from . import conv
 
 def blend_cell_widths(
     a: float, b: float, d: float, n_min: int = 1, tol: float = 0.0001, dtype_=np.float32
