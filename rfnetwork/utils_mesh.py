@@ -14,7 +14,7 @@ from PIL import Image
 
 import pygerber.gerberx3.api.v2 as pygb
 
-from . import conv
+# from . import conv
 
 def blend_cell_widths(
     a: float, b: float, d: float, n_min: int = 1, tol: float = 0.0001, dtype_=np.float32
@@ -101,7 +101,7 @@ def get_object_edges(obj: pv.PolyData, group_faces: bool = True, zero_threshold:
     group_faces : bool, default: True
         if False, edges from all faces are combined and the returned list is Nx2x3, where N is the 
         number of edges in the object.
-    zero_threshold : bool, default: True
+    zero_threshold : bool, default: 1e-12
         remove faces with area below this amount. Set to None to return all faces.
     """
     
@@ -329,7 +329,7 @@ def remove_interior_edges(obj_edges: np.ndarray, tolerance: float = 1e-6, zero: 
     return np.array(nonovl_edges)
 
 
-def get_object_vertices(obj: pv.PolyData, group_faces: bool = True) -> list:
+def get_object_vertices(obj: pv.PolyData, group_faces: bool = True, zero_threshold: float = 1e-12) -> list:
     """
     Get the vertices of each face of the object. Returns a M-length list for each face in the
     object, each containing a Nx3 array of the vertices coordinates in that face.
@@ -341,6 +341,8 @@ def get_object_vertices(obj: pv.PolyData, group_faces: bool = True) -> list:
     group_faces: bool, default: True
         if False, vertices from all faces are combined and the returned list is Nx2x3, where N is the 
         number of edges in the object.
+    zero_threshold : bool, default: True
+        remove faces with area below this amount. Set to None to return all faces.
     """
     # build list of edge coordinates along each axis
     n_cells = np.clip(obj.n_cells, 1, None)
@@ -363,21 +365,51 @@ def get_object_vertices(obj: pv.PolyData, group_faces: bool = True) -> list:
                 faces[face_idx].append(obj.points[obj.faces[face_point_idx + p]])
             
             face_point_idx += (n_points + 1)
+            face_idx += 1
 
-            if group_faces:
-                face_idx += 1
+        # prune faces with zero area
+        if zero_threshold is not None:
+            mesh = obj.compute_cell_sizes()
+            face_area = mesh.cell_data["Area"]
+            faces = [f for i, f in enumerate(faces) if face_area[i] > zero_threshold]
 
-    return faces if group_faces else faces[0]
+        # flatten to a list of edges, list of (2x3) matrices
+        if not group_faces:
+            faces = list(itertools.chain.from_iterable(faces))
+
+    return faces
 
 
-def is_point_in_surface(points, obj, tolerance=0.001):
+def is_point_in_surface(
+    points: np.ndarray, obj: pv.PolyData, tolerance: float = 0.1, d_min: float = None
+) -> np.ndarray:
     """
-    Returns an array the same shape as point with each value set to True if point is inside the 2D surface.
+    Returns an array the same shape as points with each value set to True if point is inside the 2D surface.
+
+    Parameters
+    ----------
+    points : np.ndarray
+        matrix of points with the last axis being the xyz position
+    obj : py.PolyData
+        2D surface to evaluate inclusion for.
+    tolerance : float, default: 1
+        tolerance in degrees that defines how far outside a point may be from a vertex angle before it is
+        not considered part of the surface. Lower values will tend to drop points close to the edge. 
+        Value is in degrees.
+    d_min : float, optional
+        Minimum cell width. If provided, correct points within d_min / 3  of a vertex are included in the surface. 
+        Points very close to vertices can be prone to numerical errors in the algorithm. 
 
     """
-
+    # return all zeros if object mesh is empty
+    if not len(obj.points):
+        return np.zeros(points.shape[:-1])
+    
     # tolerance for zero values
-    _zero_tol = 1e-5
+    _zero_tol = 1e-8
+
+    # convert tolerance to radians
+    tolerance = np.deg2rad(tolerance)
 
     points = np.atleast_2d(points)
 
@@ -394,21 +426,21 @@ def is_point_in_surface(points, obj, tolerance=0.001):
     
     # get the two axis of the component vectors on the surface
     c1_axis, c2_axis = ((1, 2), (0, 2), (0, 1))[axis]
-
-    # return all zeros if object mesh is empty
-    if not len(obj.points):
-        return np.zeros(points.shape[:-1])
     
-    vertices = get_object_vertices(obj, group_faces=True)
-    edges = get_object_edges(obj, group_faces=True, zero_threshold=None)
+    vertices = get_object_vertices(obj, group_faces=True, zero_threshold=_zero_tol)
+    edges = get_object_edges(obj, group_faces=True, zero_threshold=_zero_tol)
     n_faces = len(edges)
-
+    
     in_face = np.zeros((n_faces,) + points.shape[:-1], dtype=np.int64)
-    # for each face in the object
+    # each face in the object should be a simple polygon (no cutouts) where the following algorithm is used to 
+    # determine if a point is within any face of the surface. 
+    # Lines are drawn from each polygon vertex to the test point. Points that are inside will force these lines
+    # to intersect an edge of the face. Points outside will cause at least one of the these lines to only meet
+    # the polygon at the vertex and not touch any other edge.
     for f in range(n_faces):
 
         face_vertices = vertices[f]
-        face_edges = edges[f]
+        face_edges = np.array(edges[f])
 
         # fig, ax = plt.subplots(figsize=(8, 8))
         # for e in np.array(edges[f]):
@@ -417,74 +449,76 @@ def is_point_in_surface(points, obj, tolerance=0.001):
         # ax.plot(points[0][0], points[0][1], marker="X", markersize=20)
 
         # number of intersections the edges make with lines from the object vertices to the point
-        n_edge_intersections = np.zeros((len(face_vertices),) + points.shape[:-1], dtype=np.int64)
+        is_point_within_vertex = np.zeros((len(face_vertices),) + points.shape[:-1], dtype=np.uint8)
 
+        # for each vertices in the closed face
         for i, v in enumerate(face_vertices):
 
-            for edge in face_edges:
+            # get single value "x/y" coordinates for vertex
+            vx, vy = v[c1_axis], v[c2_axis]
 
-                edge = np.array(edge)
-                
-                # skip if base point is on either end point of the edge
-                if np.any(np.sum(np.abs(edge - v[None]), axis=1) < _zero_tol):
-                    continue
+            # get the two edges that meet this vertex
+            edges_x, edges_y = face_edges[..., c1_axis], face_edges[..., c2_axis]
+            # check if both x and y of edge points are on vertex, if either end point is on vertex on a given
+            # mark edge as True.
+            is_edge_on_vertex = np.any((np.abs(edges_x - vx) < _zero_tol) & (np.abs(edges_y - vy) < _zero_tol), axis=1)
+            # select the two edges with a point on the vertex
+            edge_on_vertex_idx = np.argwhere(is_edge_on_vertex).squeeze()
 
-                # get "x/y" coordinates for vertices
-                x1, y1 = v[c1_axis], v[c2_axis]
+            if len(edge_on_vertex_idx) != 2:
+                raise RuntimeError(f"{len(edge_on_vertex_idx)}")
+            
+            # get the endpoints of the edges, the other endpoint is the vertex
+            edge_1 = face_edges[edge_on_vertex_idx[0]]
+            edge_2 = face_edges[edge_on_vertex_idx[1]]
 
-                # get "x/y" coordinates for test points
-                x2, y2 = points[..., c1_axis], points[..., c2_axis]
+            endpoint1_idx = np.argmax(np.linalg.norm((v - edge_1), axis=-1))
+            endpoint2_idx = np.argmax(np.linalg.norm((v - edge_2), axis=-1))
 
-                with np.errstate(divide='ignore', invalid='ignore'):
-                    # slope of edge line and line from the object vertices to the test point
-                    # m = (y2 - y1) / (x2 - x1)
-                    m1 = (y2 - y1) / (x2 - x1)
-                    m2 = (edge[1, c2_axis] - edge[0, c2_axis]) / (edge[1, c1_axis] - edge[0, c1_axis])
+            p1 = edge_1[endpoint1_idx]
+            p2 = edge_2[endpoint2_idx]
 
-                    # y intercept point
-                    b1 = y1 - m1 * x1
-                    b2 = edge[0, c2_axis] - m2 * edge[0, c1_axis]
+            # vectors from vertex to the endpoint of each line attached to vertex
+            v_p1 = (p1 - v)
+            v_p2 = (p2 - v)
 
-                    # intersection coordinate.
-                    # if m1 is infinite, the line is vertical and the x intersection coordinate is just the x
-                    # coordinate of the line.
-                    x_int = np.where(
-                        ~np.isfinite(m1), x1, np.where(~np.isfinite(m2), edge[0, c1_axis], (b2 - b1) / (m1 - m2))
-                    )
-                    # plug x_int into the line equation with a finite slope to get the y intersection point
-                    y_int = np.where(np.isfinite(m1), m1 * x_int + b1, m2 * x_int + b2)
+            # angle between the two lines
+            len_v_p1 = np.clip(np.linalg.norm(v_p1), _zero_tol, None)
+            len_v_p2 = np.clip(np.linalg.norm(v_p2), _zero_tol, None)
+            vertex_ang = np.arccos(np.clip(np.dot(v_p1, v_p2) / (len_v_p1 * len_v_p2), -1, 1))
 
-                # increment if the vertex line and edge intersect
-                n_edge_intersections[i] += (
-                    ((x_int - tolerance) <= np.max(edge[:, c1_axis])) & ((x_int + tolerance) >= np.min(edge[:, c1_axis])) &
-                    ((y_int - tolerance) <= np.max(edge[:, c2_axis])) & ((y_int + tolerance) >= np.min(edge[:, c2_axis]))
-                )
-                
-                # ax.plot(x_int, y_int, marker="o")
-                # ax.set_xlim([p0[0], p1[0]])
-                # ax.set_ylim([p0[1], p1[1]])
+            # compute angle with every test point in the grid and the two edges
+            v_tp = points - v
+            len_tp_v = np.clip(np.linalg.norm(v_tp, axis=-1), _zero_tol, None)
 
-        # point is in the face if the line from each vertices intersects with an edge 
+            e1_tp_dot = np.einsum("...i, i->...", v_tp, v_p1)
+            e2_tp_dot = np.einsum("...i, i->...", v_tp, v_p2) 
+            e1_ang = np.arccos(np.clip(e1_tp_dot / (len_v_p1 * len_tp_v), -1, 1))
+            e2_ang = np.arccos(np.clip(e2_tp_dot / (len_v_p2 * len_tp_v), -1, 1))
+
+            # sum the angles between both edges
+            tot_ang = e1_ang + e2_ang
+
+            # if the total angle is the same as the vertex angle, the point is between the two edge lines.
+            # this doesn't ensure the point is inside the face yet because the point must be between all vertex
+            # angles, not just this one.
+            is_point_within_vertex[i] = (
+                (np.abs(tot_ang - vertex_ang) < tolerance)
+            )
+
+            # include point in surface if it is very close to a vertex. These can suffer from numerical errors when
+            # computing angles.
+            if d_min is not None:
+                is_point_within_vertex[i] |= (np.linalg.norm(points - v, axis=-1) < (d_min / 3))
+
+
+        # point is in the face if it is within the edge lines from all vertices
         in_face[f] = (
-            np.all(n_edge_intersections, axis=0) & 
+            np.all(is_point_within_vertex, axis=0) & 
+            # check that all points are in the same plane as the surface (obj is a surface so all points have
+            # the same value along axis)
             (np.abs(points[..., axis] - obj.points[0, axis]) < _zero_tol)
         )
-
-        # if point is far away from the face, lines become nearly parallel and tolerances can lead to false
-        # intersections. Correct points that are wholly outside the face bounding box
-        f_pmin = np.min(face_vertices, axis=0)
-        f_pmax = np.max(face_vertices, axis=0)
-        x0, y0 = f_pmin[c1_axis], f_pmin[c2_axis]
-        x1, y1 = f_pmax[c1_axis], f_pmax[c2_axis]
-
-        xp, yp = points[..., c1_axis], points[..., c2_axis]
-
-        bbox_in_shape = (
-            ((xp - tolerance) <= x1) & ((xp + tolerance) >= x0) &
-            ((yp - tolerance) <= y1) & ((yp + tolerance) >= y0)
-        )
-
-        in_face[f] = np.where(bbox_in_shape, in_face[f], 0)
 
     # return True if point is contained in any face of the surface
     return (np.sum(in_face, axis=0) > 0)

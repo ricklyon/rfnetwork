@@ -410,7 +410,7 @@ class FDTD_Solver():
         return tuple(idx)
     
     
-    def generate_mesh(self, d_max: float = None, d_min: float = None):
+    def generate_mesh(self, d_max, d_min: float = None, surface_tolerance: float = 0.1):
         """
         Generate the grid and FDTD coefficients for the model geometry.
 
@@ -420,9 +420,17 @@ class FDTD_Solver():
             nominal cell width, inches. This cell width is used in open regions far from geometry features.
         d_min : float, optional
             cell width around geometry edges, inches. Must be smaller than d_max if provided.
+        surface_tolerance : float, optional
+            tolerance in inches used to determine if grid cells are inside or outside a conductor object.
+            Default is 1/3 the minimum grid cell width.
         """
 
         self._meshed = True
+
+        if d_min is None:
+            d_min = d_max
+        elif d_min > (d_max / 1.5):
+            raise ValueError("d_min must be less than d_max.")
 
         self._init_grid(d_max=d_max, d_min=d_min)
         # init dielectrics sets the cell sigma and er but does not set the coefficients
@@ -436,7 +444,7 @@ class FDTD_Solver():
             self._init_PML(pml_side)
 
         self._init_image_coefficients()
-        self._init_conductors() # allow conductors to override image layers
+        self._init_conductors(surface_tolerance=surface_tolerance, d_min=d_min) # allow conductors to override image layers
         self._init_lumped_elements()
         self.invalidate_solution()
 
@@ -623,7 +631,7 @@ class FDTD_Solver():
 
         return all_points
 
-    def _init_grid(self, d_max: float = None, d_min: float = None):
+    def _init_grid(self, d_max: float, d_min: float):
         """ Initialize model grid. """
 
         dtype_ = np.float32
@@ -692,20 +700,9 @@ class FDTD_Solver():
             hz=(dx, dy, dz_hp)
         )
 
-    def _create_grid(self, d_max: float, d_min: float = None):
+    def _create_grid(self, d_max: float, d_min):
         """ Create model grid """
-
-        if d_max is None:
-            raise ValueError("d_max must be provided")
         
-        if d_min is not None and d_min > (d_max / 1.5):
-            raise ValueError("d_min must be less than d_max.")
-        
-        d_min = d_max if d_min is None else d_min
-        
-        self._d_max = d_max
-        self._d_min = d_min
-
         all_points = self._get_mesh_points(d_min)
 
         if not isinstance(d_max, list):
@@ -811,11 +808,11 @@ class FDTD_Solver():
                 sub_sigma, 
             )
 
-    def _init_conductors(self):
+    def _init_conductors(self, surface_tolerance: float = 0.1, d_min: float = None):
         """
         Write the coefficient values for the conductors. 
         """
-
+        
         # epsilon at each field component
         e_eps = dict(ex=self.eps_ex, ey=self.eps_ey, ez=self.eps_ez)
 
@@ -846,9 +843,9 @@ class FDTD_Solver():
 
                 if is_surface:
                     # get an array the same shape as the grid_points with zeros for points outside the object and ones 
-                    # for points inside
+                    # for points inside. Put xyz position axis last
                     points = np.transpose(e_grid_points, axes=(1, 2, 3, 0))
-                    inside_mask = utils_mesh.is_point_in_surface(points, obj, tolerance=self._d_min / 3)
+                    inside_mask = utils_mesh.is_point_in_surface(points, obj, tolerance=surface_tolerance, d_min=d_min)
 
                 else:
                     dist = e_pdata.compute_implicit_distance(obj)
@@ -1369,13 +1366,20 @@ class FDTD_Solver():
         self.invalidate_solution()
         self.check_mesh()
 
-        # check that waveforms all have identical lengths
-        if self._time is not None:
-            if len(self._time) != len(waveform):
-                raise ValueError("All excitations must have identical lengths.")
-        else:
+        if self._time is None:
             self._time = np.arange(0, self.dt * len(waveform), self.dt)
+        
+        # all waveforms must have identical lengths
+        # zero pad waveform
+        if len(self._time) > len(waveform):
+            waveform_pad = np.zeros_like(self._time)
+            waveform_pad[:len(waveform)] = waveform
+            waveform = waveform_pad
 
+        # truncate waveform
+        if len(self._time) < len(waveform):
+            waveform = waveform[:len(self._time)]
+                
         for p in np.atleast_1d(ports):
             self.ports[p-1]["src"] = waveform.astype(np.float32)
 
