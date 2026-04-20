@@ -14,7 +14,6 @@ import numpy as np
 import matplotlib.pyplot as plt 
 
 import pyvista as pv
-from np_struct import ldarray
 
 import rfnetwork as rfn
 from rfnetwork import conv
@@ -27,14 +26,6 @@ plt.style.use(rfn.DEFAULT_STYLE)
 
 pv.set_jupyter_backend("trame")
 sys.argv = sys.argv[0:1]
-
-# todo:
-# fix mesh granularity
-# 3. add angled msline tests
-# 4. parallel threads for far-field calculation
-# 5. ldarray interpolation tests
-# 6. make function to combine s-data into a single matrix
-
 
 try:
     dir_ = Path(__file__).parent
@@ -56,11 +47,11 @@ er_top = 3.66
 h_top = 0.06
 
 # parameters from table 3-1 in [1]
-len_patch = conv.in_mm(30)
-w_patch = conv.in_mm(30)
-w_slot = conv.in_mm(1.55)
-len_slot = conv.in_mm(7.5)
-len_leg = conv.in_mm(4.5)
+len_patch = 1.181 #conv.in_mm(30)
+w_patch = 1.181 #conv.in_mm(30)
+w_slot = 0.061 #conv.in_mm(1.55)
+len_slot = 0.295 #conv.in_mm(7.5)
+len_leg = 0.177 #conv.in_mm(4.5)
 w_ms = 0.09
 len_stub1 = 0.15#0.6
 len_stub2 = 0.4
@@ -150,15 +141,13 @@ s.add_lumped_port(2, port2_face, "z-")
 # PML boundaries
 s.assign_PML_boundaries("x-", "x+", "y-", "y+", "z+", "z-", n_pml=5)
 
-d_edge=0.02
-d0 = 0.08
+s.generate_mesh(d_max = 0.08, d_min=0.02, surface_tolerance=0.1)
 
-s.generate_mesh(d0 = 0.08, d_edge=0.02)
-
-s.render().show()
+# s.render().show()
 
 
-# s.plot_coefficients("ex_z", "b", "z", 0).show()
+s.plot_coefficients("ex_z", "a", "z", 0).show()
+
 
 # setup far-field monitor
 s.add_farfield_monitor(frequency=f0)
@@ -181,29 +170,12 @@ s.add_field_monitor("mon1", "ez", "z", 0, n_step=50)
 # vsrc1 = s.gaussian_modulated_source(f0, width=5000e-12, t0=2500e-12, t_len=5000e-12)
 
 
-# # apply a phase delay to the vertically polarized port to get RHCP
-# wt0 = np.pi / 2
-# t_delay = wt0 / (2 * np.pi * f0)
-# # number of steps that fit in the delay (rounded, no interpolation)
-# n_delay = int(np.around(t_delay / s.dt))
-# vsrc2 = np.roll(vsrc1, n_delay)
-
-# plt.plot(vsrc1)
-# plt.plot(vsrc2)
-
-# s.assign_excitation(vsrc1, 1)
-# s.assign_excitation(vsrc2, 2)
-
-# s.solve(n_threads=4)
-
-# gif_setup = dict(file = dir_ / "dp_patch.gif", fps=20, step_ps=20, stop_ps=2000)
-# s.plot_monitor("mon1", opacity="linear", gif_setup=gif_setup)
 
 
 # %%
 # Setup Excitation and Solve
 # ------------------------
-vsrc1 = s.gaussian_modulated_source(f0, width=100e-12, t0=60e-12, t_len=5000e-12)
+vsrc1 = s.gaussian_modulated_source(f0, width=100e-12, t0=60e-12, t_len=10000e-12)
 
 
 # apply a phase delay to the vertically polarized port to get RHCP
@@ -263,17 +235,13 @@ ant = rfn.Component_Data(sdata)
 fig, ax = plt.subplots()
 ant.plot(11, fmt="smith", axes=ax)
 
-
 fig, ax = plt.subplots()
 ant.plot(11, fmt="db", axes=ax)
-
-
-mplm.line_marker(x=f0 / 1e9, xlabel=True)
-
-
-fig, ax = plt.subplots()
 ant.plot(21, fmt="db", axes=ax)
-# %%
+ax.set_ylim([-30, 5])
+
+mplm.axis_marker(x=f0 / 1e9, xlabel=True)
+
 plt.show()
 
 

@@ -131,7 +131,7 @@ s.add_resistor(resistor, 100, integration_line="y+")
 s.assign_PML_boundaries("z+", n_pml=5)
 
 # create mesh with a nominal width of 20mils far from geometry edges, and 5mils near edges.
-s.generate_mesh(d0 = 0.02, d_edge=0.005)
+s.generate_mesh(d_max=0.02, d_min=0.005)
 
 # plot model 
 fig, ax = plt.subplots()
@@ -139,7 +139,7 @@ plotter = s.render(axes=ax, zoom=1)
 fig.tight_layout()
 
 # show coefficient values at the substrate
-# p = s.plot_coefficients("ey_z", "a", "z", sub_h, point_size=15, cmap="brg")
+# p = s.plot_coefficients("ex_z", "a", "z", sub_h, point_size=15, cmap="brg")
 # p.camera_position = "xy"
 # p.show()
 
@@ -169,7 +169,7 @@ for port in range(1, 4):
     s.solve()
 
     # populate the column of the s-matrix with this port as the input wave 
-    sdata[dict(a=port)] = s.get_sparameters(frequency, source_port=port, downsample=False)
+    sdata[dict(a=port)] = s.get_sparameters(frequency, source_port=port, downsample=False).sel(a=port)
 
 
 # plot s-parameter results

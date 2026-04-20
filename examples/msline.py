@@ -77,7 +77,7 @@ s.assign_PML_boundaries("z+", n_pml=7)
 
 self = s
 
-s.generate_mesh(d0 = 0.02, d_edge=0.005)
+s.generate_mesh(d_max = 0.02, d_min=0.005)
 
 # edge correction
 p1 = (ms_x[0], + ms_w/2, sub_h)
