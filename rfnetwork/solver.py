@@ -149,6 +149,9 @@ class FDTD_Solver():
             rendering style arguments passed into pv.Plotter.add_mesh()
 
         """
+        if "color" not in style:
+            style["color"] = "gold"
+
         self._add_object(self.conductors, objects, properties=dict(sigma=sigma, style=style), name=name)
 
     def add_lumped_port(
@@ -169,7 +172,13 @@ class FDTD_Solver():
         face : pv.PolyData
             pyvista PolyData object of 2D face. Must be aligned with the cartesian axis
         integration_line : str, {"x+", "x-", "y+", "y-", "z+", "z-"}
-            axis that the port voltage is evaluated across.
+            axis that the port voltage is evaluated across. The line direction defines the positive current direction
+            when the port is acting as a source. The direction is important if computing s-parameters, the direction
+            should be pointing into the port from the reference ground into the conducting structure.
+            
+            PolyData lines are also supported. The line direction from the first point to the second is used
+            as the integration direction. For stripline ports, the face should extend across the full height of the
+            substrate, and the integration line should start from one ground plane and end on the stripline. 
         r0 : float, default: 50
             port impedance
         """
@@ -401,21 +410,29 @@ class FDTD_Solver():
         return tuple(idx)
     
     
-    def generate_mesh(self, d0: float = None, d_edge: float = None):
+    def generate_mesh(self, d_max, d_min: float = None, surface_tolerance: float = 0.1):
         """
         Generate the grid and FDTD coefficients for the model geometry.
 
         Parameters
         ----------
-        d0 : float
+        d_max : float
             nominal cell width, inches. This cell width is used in open regions far from geometry features.
-        d_edge : float, optional
-            cell width around geometry edges, inches. Must be smaller than d0 if provided.
+        d_min : float, optional
+            cell width around geometry edges, inches. Must be smaller than d_max if provided.
+        surface_tolerance : float, optional
+            tolerance in inches used to determine if grid cells are inside or outside a conductor object.
+            Default is 1/3 the minimum grid cell width.
         """
 
         self._meshed = True
 
-        self._init_grid(d0=d0, d_edge=d_edge)
+        if d_min is None:
+            d_min = d_max
+        elif d_min > (d_max / 1.5):
+            raise ValueError("d_min must be less than d_max.")
+
+        self._init_grid(d_max=d_max, d_min=d_min)
         # init dielectrics sets the cell sigma and er but does not set the coefficients
         self._init_dielectrics()
         # initialize coefficients from the cell sigma and er set by the dielectrics
@@ -427,11 +444,11 @@ class FDTD_Solver():
             self._init_PML(pml_side)
 
         self._init_image_coefficients()
-        self._init_conductors() # allow conductors to override image layers
+        self._init_conductors(surface_tolerance=surface_tolerance, d_min=d_min) # allow conductors to override image layers
         self._init_lumped_elements()
         self.invalidate_solution()
 
-    def _get_points_from_img(self, d_edge):
+    def _get_points_from_img(self, d_min):
         """
         Compile locations of all edges in a gerber image.
         """
@@ -480,12 +497,12 @@ class FDTD_Solver():
 
         # add soft points around the hard points, one edge cell away
         for axis in range(3):
-            soft_points[axis] = np.concatenate((soft_points[axis], [edge - d_edge for edge in hard_points[axis]]))
-            soft_points[axis] = np.concatenate((soft_points[axis], [edge + d_edge for edge in hard_points[axis]]))
+            soft_points[axis] = np.concatenate((soft_points[axis], [edge - d_min for edge in hard_points[axis]]))
+            soft_points[axis] = np.concatenate((soft_points[axis], [edge + d_min for edge in hard_points[axis]]))
                 
         return [np.unique(a) for a in hard_points], [np.unique(a) for a in soft_points]
 
-    def _get_mesh_points(self, d_edge: float):
+    def _get_mesh_points(self, d_min: float):
         """
         Compile all points defined by model geometry, as well as edge cells around geometry features.
         """
@@ -498,102 +515,115 @@ class FDTD_Solver():
         sub_objects = [self.bounding_box] + [sub["obj"] for sub in self.dielectrics.values()]
 
         # get a list of 2x3 arrays, coordinates of each endpoint of the edges of the model objects
-        obj_edges = []
+        obj_edges = np.zeros(shape=(0, 2, 3))
+        # flag each edge if it is not aligned with one of the cartesian axes
+        obj_edges_oblique = np.zeros(shape=(0))
         for obj in cond_objects:
-            obj_edges += utils_mesh.get_object_edges(obj, group_faces=False)
+            
+            is_surface = utils_mesh.is_object_surface(obj)
 
+            # get all edges of a surface mesh that forms the mesh boundaries
+            if is_surface:
+                obj_edges_i = utils_mesh.get_object_edges(obj, group_faces=False)
+                obj_edges_i = utils_mesh.remove_interior_edges(obj_edges_i)
+                # is edge not aligned with cartesian axis
+                obj_edge_v_i = np.diff(obj_edges_i, axis=1)[:, 0, :]
+                obj_edges_oblique_i = np.count_nonzero(np.abs(obj_edge_v_i) > d_min / 2, axis=1) > 1
+
+            # if object is 3D, attempt to use the built in pyvista method to extract boundary edges.
+            else:
+                obj_extracted = obj.extract_feature_edges(
+                    non_manifold_edges=False, feature_edges=True, manifold_edges=False, clear_data=False
+                )
+                obj_edges_i = utils_mesh.get_object_edges(obj_extracted, group_faces=False)
+                # do not grade oblique edges for 3D objects
+                obj_edges_oblique_i = np.zeros(len(obj_edges_i))
+
+            obj_edges = np.concatenate((obj_edges, obj_edges_i), axis=0)
+            obj_edges_oblique = np.concatenate((obj_edges_oblique, obj_edges_oblique_i), axis=0)
+
+        # round to tolerance
         obj_edges = np.around(obj_edges, decimals=self._places).astype(np.float32)
-
-        # array of angled edges broken up into sections, and edge cells that aren't on a geometry boundary
-        soft_points = [np.array([]), np.array([]), np.array([])]
-
-        if len(obj_edges):
-            edge_len = np.abs(np.diff(obj_edges, axis=1).squeeze())
-            # compute the area of a box bound by this edge and the cardinal axis. If area is above a certain threshold
-            # related to d_edge, create soft points along the axis to keep the area below the threshold. 
-            edge_area = np.prod(edge_len[:, :2], axis=-1)
-
-            # add small edge cells around object transitions to reduce error
-            for i, edge in enumerate(obj_edges):
-                if edge_area[i] > (d_edge ** 2):
-                    # break angled edges along x and y into sub-cells separated by d_edge
-                    nx_ny = np.around(np.abs(edge_len[i][:2]) / d_edge).astype(int)
-
-                    for axis in range(2):
-                        soft_points[axis] = np.append(
-                            soft_points[axis], np.linspace(edge[0, axis], edge[1, axis], nx_ny[axis])
-                        )
-                
-                # add edge cells on either side of edges aligned with the cardinal axis
-                elif np.abs(edge_area[i]) < self._tol:
-                    
-                    for axis in range(3):
-                        # if edge is normal to the axis (both endpoints are at the same value), add edge cells on 
-                        # either side. Skip if edge is at the bounding box edge
-                        at_bbox_edge = (
-                            (np.abs(edge[0][axis] - self.sbox_max[axis]) < self._tol) |
-                            (np.abs(edge[0][axis] - self.sbox_min[axis]) < self._tol)
-                        )
-
-                        if (edge_len[i][axis] < self._tol) and not at_bbox_edge:
-                            soft_points[axis] = np.append(
-                                soft_points[axis], [edge[0][axis] - d_edge, edge[0][axis] + d_edge]
-                            )
+        # vector from starting point to end point of each edge
+        obj_edge_v = np.diff(obj_edges, axis=1)[:, 0, :]
 
         # object vertices and points for the mesh around angled sections
         all_points = [np.array([]), np.array([]), np.array([])]
 
         # add points from any gerber layers
-        gbr_hard_points, gbr_soft_points = self._get_points_from_img(d_edge)
+        gbr_hard_points, gbr_soft_points = self._get_points_from_img(d_min)
 
         for axis in range(3):
             
-            # object vertices
+            # assign points as hard points if they define an edge parallel to one of the cartesian axes
+            hard_points = np.array([])
+            # soft points are suggestions for the mesh grid locations, but are flexible
+            soft_points = np.array([])
+
             if len(obj_edges):
-                hard_points = np.unique(obj_edges[..., axis].flatten())
-            else:
-                hard_points = []
+                # get list of edge vertices along the current axis
+                points = np.unique(obj_edges[..., axis])
+                for p in points:
+                    # if both points from any edge are at the point p, it is aligned with the current axis, 
+                    # add to list of hard points
+                    if np.any(np.all(np.abs(obj_edges[..., axis] - p) < self._tol, axis=-1)):
+                        hard_points = np.append(hard_points, p)
+
+                        # add soft points on either edge of point separated by d_min, if point is not on the edge
+                        # of solve box
+                        if (abs(p - self.sbox_max[axis]) > self._tol) and (abs(p - self.sbox_min[axis]) > self._tol):
+                            soft_points = np.append(soft_points, [p - d_min, p + d_min])
+
+            for i, edge in enumerate(obj_edges):
+                # grade mesh cells along angled edges
+                if obj_edges_oblique[i] and obj_edge_v[i][axis] > d_min:
+                    # break angled edges along x and y into sub-cells separated by d_min
+                    nx_ny = np.around(np.abs(obj_edge_v[i][axis]) / d_min).astype(int)
+
+                    soft_points = np.append(
+                        soft_points, np.linspace(edge[0, axis], edge[1, axis], nx_ny)
+                    )
 
             # add gerber vertices
             hard_points = np.concatenate((hard_points, gbr_hard_points[axis]))
-            soft_points[axis] = np.concatenate((soft_points[axis], gbr_soft_points[axis]))
+            soft_points = np.concatenate((soft_points, gbr_soft_points[axis]))
 
-            # add points for lumped elements
+            # add points for lumped elements and dielectric boundaries
             for obj in  (lumped_ele_objects + sub_objects):
                 hard_points = np.concatenate([hard_points, obj.points[:, axis]])
-
-            # remove any conductor points that are less than d_edge away from other conductor points
-            for i in range(len(hard_points)):
-                # remove by setting other values that are very close to this one equal. 
-                p = hard_points[i]
-                hard_points = np.where(np.abs(p - hard_points) < (d_edge * 0.8), p, hard_points)
 
             # remove redundant values
             hard_points = np.sort(np.unique(np.around(hard_points, decimals=self._places)))
 
-            # remove any soft points that are less than d_edge away from an object point
+            # remove any points that are less than d_min away from other conductor points
+            for i in range(len(hard_points)):
+                # remove by setting other values that are very close to this one equal. 
+                p = hard_points[i]
+                hard_points = np.where(np.abs(p - hard_points) < (d_min * 0.8), p, hard_points)
+
+            # remove any soft points that are less than d_min away from an object point
             for p in hard_points:
-                soft_points[axis] = np.where(np.abs(p - soft_points[axis]) < (d_edge * 0.8), np.nan, soft_points[axis])
+                soft_points = np.where(np.abs(p - soft_points) < (d_min * 0.8), np.nan, soft_points)
             
             # clean up and sort soft mesh points
-            sp_axis = np.sort(np.unique(np.around(soft_points[axis], decimals=self._places)))
-            # create a reduced set of mesh points that are spaced no less than d_edge. Walk through all soft points
-            # and only add points to the reduced list if they are at least d_edge away from the last point.
-            if len(sp_axis):
-                sp_axis_reduced = [sp_axis[0]]
-                last_p = sp_axis[0]
-                for i, p in enumerate(sp_axis[1:]):
-                    if (p - last_p) >= d_edge:
+            soft_points = np.sort(np.unique(np.around(soft_points, decimals=self._places)))
+            # create a reduced set of mesh points that are spaced no less than d_min. Walk through all soft points
+            # and only add points to the reduced list if they are at least d_min away from the last point.
+            if len(soft_points):
+                last_p = soft_points[0]
+                sp_axis_reduced = [last_p]
+                for i, p in enumerate(soft_points[1:]):
+                    if (p - last_p) >= d_min:
                         sp_axis_reduced += [p]
                         last_p = p
 
-                soft_points[axis] = sp_axis_reduced
+                soft_points = sp_axis_reduced
 
             # clip points outside of the sbox limits
-            soft_points[axis] = np.clip(soft_points[axis], self.sbox_min[axis], self.sbox_max[axis])
+            soft_points = np.clip(soft_points, self.sbox_min[axis], self.sbox_max[axis])
             hard_points = np.clip(hard_points, self.sbox_min[axis], self.sbox_max[axis])
 
-            all_points_axis = np.concatenate([hard_points, soft_points[axis]])
+            all_points_axis = np.concatenate([hard_points, soft_points])
 
             # combine object points with soft points
             all_points[axis] = all_points_axis
@@ -607,12 +637,12 @@ class FDTD_Solver():
 
         return all_points
 
-    def _init_grid(self, d0: float = None, d_edge: float = None):
+    def _init_grid(self, d_max: float, d_min: float):
         """ Initialize model grid. """
 
         dtype_ = np.float32
 
-        self._create_grid(d0, d_edge)
+        self._create_grid(d_max, d_min)
 
         gx, gy, gz = self.grid.x, self.grid.y, self.grid.z
         dx, dy, dz = np.diff(gx).astype(dtype_), np.diff(gy).astype(dtype_), np.diff(gz).astype(dtype_)
@@ -676,20 +706,13 @@ class FDTD_Solver():
             hz=(dx, dy, dz_hp)
         )
 
-
-    def _create_grid(self, d0: float, d_edge: float = None):
+    def _create_grid(self, d_max: float, d_min):
         """ Create model grid """
-
-        if d0 is None:
-            raise ValueError("d0 must be provided")
         
-        if d_edge is not None and d_edge > (d0 / 1.5):
-            raise ValueError("d_edge must be less than d0.")
-        
-        all_points = self._get_mesh_points(d_edge=d0 if d_edge is None else d_edge)
+        all_points = self._get_mesh_points(d_min)
 
-        if not isinstance(d0, list):
-            d0 = [d0] * 3
+        if not isinstance(d_max, list):
+            d_max = [d_max] * 3
 
         dtype_ = np.float32
 
@@ -706,8 +729,8 @@ class FDTD_Solver():
 
             for i, d in enumerate(cells_d):
 
-                # split cells larger than d0*5 into multiple cells, this prevents grading over large spans
-                split_threshold = d0[axis] * 3
+                # split cells larger than d_max*5 into multiple cells, this prevents grading over large spans
+                split_threshold = d_max[axis] * 3
                 if int(d / split_threshold) >= 1:
                     n_split = int(d / split_threshold)
                     # split cell width into equal parts
@@ -723,7 +746,7 @@ class FDTD_Solver():
             # The larger cells have more room to work in and
             # it's easier to blend. The smaller cells have less work to do because the
             # larger cells have already stepped down to meet their widths.
-            # Leave PEC cells for last so they don't blend up to the (typically) larger d0 cells
+            # Leave PEC cells for last so they don't blend up to the (typically) larger d_max cells
             d_order = np.flip(np.argsort(subcells_d))
             
             graded_subcells_d = [None] * len(subcells_d)
@@ -736,24 +759,24 @@ class FDTD_Solver():
                 if (i > 0) and (graded_subcells_d[i - 1] is not None):
                     dprev = graded_subcells_d[i - 1][-1]
                 elif (i > 0):
-                    dprev = np.clip(subcells_d[i - 1], 0, d0[axis] )
-                # If on the edge of the grid, match to d0 if the cell width is near d0, otherwise match
+                    dprev = np.clip(subcells_d[i - 1], 0, d_max[axis] )
+                # If on the edge of the grid, match to d_max if the cell width is near d_max, otherwise match
                 # to the edge width
                 else:
-                    dprev = d0[axis] if d >= (d0[axis] * 0.9) else d_edge
+                    dprev = d_max[axis] if d >= (d_max[axis] * 0.9) else d_min
 
                 # next cell width
                 if (i < len(subcells_d) - 1) and (graded_subcells_d[i + 1] is not None):
                     dnext = graded_subcells_d[i + 1][0]
                 elif (i < len(subcells_d) - 1) :
-                    dnext = np.clip(subcells_d[i + 1], 0, d0[axis] )
+                    dnext = np.clip(subcells_d[i + 1], 0, d_max[axis] )
                 # If on the edge of the grid, match to the boundary width
                 else:
-                    dnext = d0[axis] if d >= (d0[axis] * 0.9) else d_edge
+                    dnext = d_max[axis] if d >= (d_max[axis] * 0.9) else d_min
 
-                # if cell is bounded by d0 cells on either side, divide the cell equally 
-                if all([(g / d0[axis] ) > 0.8 for g in [dprev, dnext, d]]):
-                    n_split = int(np.around(d / d0[axis] ))
+                # if cell is bounded by d_max cells on either side, divide the cell equally 
+                if all([(g / d_max[axis] ) > 0.8 for g in [dprev, dnext, d]]):
+                    n_split = int(np.around(d / d_max[axis] ))
                     graded_subcells_d[i] = [d / n_split] * n_split
                 # create a gradient of cell widths to span the space that minimizes the growth rate. 
                 else:
@@ -791,11 +814,11 @@ class FDTD_Solver():
                 sub_sigma, 
             )
 
-    def _init_conductors(self):
+    def _init_conductors(self, surface_tolerance: float = 0.1, d_min: float = None):
         """
         Write the coefficient values for the conductors. 
         """
-
+        
         # epsilon at each field component
         e_eps = dict(ex=self.eps_ex, ey=self.eps_ey, ez=self.eps_ez)
 
@@ -813,7 +836,7 @@ class FDTD_Solver():
                 p0 = list(self.field_pos_to_idx(np.min(obj.points, axis=0), field))
                 p1 = list(self.field_pos_to_idx(np.max(obj.points, axis=0), field))
 
-                is_surface = np.any(np.diff([p0, p1], axis=0) == 0)
+                is_surface = utils_mesh.is_object_surface(obj)
 
                 # index for the bounding box of the object
                 bbox_idx = tuple([slice(p0[i], p1[i] + 1) for i in range(3)])
@@ -826,9 +849,9 @@ class FDTD_Solver():
 
                 if is_surface:
                     # get an array the same shape as the grid_points with zeros for points outside the object and ones 
-                    # for points inside
+                    # for points inside. Put xyz position axis last
                     points = np.transpose(e_grid_points, axes=(1, 2, 3, 0))
-                    inside_mask = utils_mesh.is_point_in_surface(points, obj)
+                    inside_mask = utils_mesh.is_point_in_surface(points, obj, tolerance=surface_tolerance, d_min=d_min)
 
                 else:
                     dist = e_pdata.compute_implicit_distance(obj)
@@ -1179,12 +1202,15 @@ class FDTD_Solver():
             if port is not None:
 
                 group = self.ports if port > 0 else self.ports_inv
+                
+                # if element is a source, the sign on the added Vs_a term in the time stepping loop is negative,
+                # voltage should increase along the integration line.
+                # Unlike passive loads, where the voltage should decrease along the integration line.
 
                 # assign face as a port if specified. resistive element acts as the port termination.
-                # direction indicates the voltage integration direction from higher voltage to lower.
                 group[abs(port) - 1] = dict(
                     idx = efield_idx, 
-                    Vs_a = f_dir / (denom * rterm * nf), 
+                    Vs_a = -f_dir / (denom * rterm * nf), 
                     field = f"e{fa}", 
                     axis = n_axis, 
                     r0 = r, 
@@ -1346,13 +1372,20 @@ class FDTD_Solver():
         self.invalidate_solution()
         self.check_mesh()
 
-        # check that waveforms all have identical lengths
-        if self._time is not None:
-            if len(self._time) != len(waveform):
-                raise ValueError("All excitations must have identical lengths.")
-        else:
+        if self._time is None:
             self._time = np.arange(0, self.dt * len(waveform), self.dt)
+        
+        # all waveforms must have identical lengths
+        # zero pad waveform
+        if len(self._time) > len(waveform):
+            waveform_pad = np.zeros_like(self._time)
+            waveform_pad[:len(waveform)] = waveform
+            waveform = waveform_pad
 
+        # truncate waveform
+        if len(self._time) < len(waveform):
+            waveform = waveform[:len(self._time)]
+                
         for p in np.atleast_1d(ports):
             self.ports[p-1]["src"] = waveform.astype(np.float32)
 
@@ -1548,10 +1581,10 @@ class FDTD_Solver():
                 fn = frequency / fs
                 omega = 2 * np.pi * fn
                 # phase terms of the DTFT at a single frequency for each time step
-                mon_config["values"] = np.zeros(((len(frequency),) + m["shape"]), dtype=np.complex128, order="C")
+                mon_config["values"] = np.zeros(((len(frequency),) + m["shape"]), dtype=np.complex64, order="C")
                 # dtft phase is ordered (n_m, frequency)
                 mon_config["dtft_phase"] = np.exp(
-                    -1j * omega[None] * np.arange(n_m)[:, None], dtype=np.complex128, order="C" 
+                    -1j * omega[None] * np.arange(n_m)[:, None], dtype=np.complex64, order="C" 
                 )
                 mon_config["n_frequencies"] = int(len(frequency))
             else:
@@ -1560,10 +1593,14 @@ class FDTD_Solver():
 
             monitors.append(mon_config)
 
+        n_cells = self.Nx * self.Ny * self.Nz
         if show_progress:
             sys.stdout.flush()
-            print(f"Running solver with {self.Nx * self.Ny * self.Nz / 1e3:.1f}k cells, and {Nt} time steps...")
-            update_interval = int(Nt / 20)
+            print(f"Running solver with {n_cells / 1e3:.1f}k cells, and {Nt} time steps...")
+            # push an update to the console each X%. If there are more solve cells or time steps, push more
+            # frequently.
+            update_percentage = np.clip(n_cells * len(self._time) / 100e6, 20, 100)
+            update_interval = int(Nt / update_percentage)
             stime = time.time()
         else:
             update_interval = 0
@@ -1795,7 +1832,8 @@ class FDTD_Solver():
     def add_current_probe(self, name: str, face: pv.PolyData):
         """
         Add a probe that collects the current through a 2D surface. Calling vi_probe_values() with name
-        will return the current through this surface.
+        will return the current through this surface, with the current direction being defined along the positive 
+        cartesian axis.
 
         Parameters
         ----------
@@ -1929,7 +1967,9 @@ class FDTD_Solver():
         name : str
             unique name for field monitor
         line : pv.PolyData
-            PolyData object defining a line. Must be aligned with the cartesian axes.
+            PolyData object defining a line. Must be aligned with the cartesian axes. The voltage is defined as 
+            V = (p1 - p2) where p1 is the starting point of the line and p2 is the end point. When plotted with 
+            render, the probe arrows are shown in the p1 -> p2 direction.
         """
         line_length = np.diff(line.points, axis=0)
 
@@ -1968,13 +2008,14 @@ class FDTD_Solver():
         fcell_w = self.fcell_w[field]
 
         # direction of line, +1 if oriented along positive axis direction, -1 if along negative direction
-        p0, p1 = line.points
-        direction = 1 if p1[axis] > p0[axis] else -1
+        p1, p2 = line.points
+        # the field integration direction is p1 -> p2
+        direction = -1 if p1[axis] > p2[axis] else 1
 
         for i, idx in enumerate(ijk_probes):
             # get cell width along the given axis
             cw = [fcell_w[axis][i] for axis, i in enumerate(idx)][axis]
-            self.probes[f"{name}_{i}"] = dict(field=field, index=(idx), d=direction * conv.m_in(cw))
+            self.probes[f"{name}_{i}"] = dict(field=field, index=(idx), d=(direction) * conv.m_in(cw))
         
         
     def render(
@@ -2118,6 +2159,8 @@ class FDTD_Solver():
                 # axis of the probe field direction
                 axis_str = probe["field"][1]
                 axis = dict(x=0, y=1, z=2)[axis_str]
+                # field direction
+                direction = np.sign(probe["d"])
 
                 # scale arrow to be smaller than the grid cell, e-probes are in the center of the cell along
                 # the axis the point in, h-cells are on the edges
@@ -2131,13 +2174,13 @@ class FDTD_Solver():
                 colors[i] = 0 if field_type == "e" else 0.5
                 
                 # orient arrow in direction of field component
-                vectors[i] = [1 if i == axis else 0 for i in range(3)]
+                vectors[i] = [direction if i == axis else 0 for i in range(3)]
 
                 # get physical position of probe from the grid index
                 probe_pos[i] = [f[p] for f, p in zip(floc, pos_idx)]
                 # move the position of the arrow so the middle is at the probe location instead of the tail
                 arrow_pos[i] = probe_pos[i]
-                arrow_pos[i, axis] -= (mag[i] / 2)
+                arrow_pos[i, axis] -= direction * (mag[i] / 2)
 
             mesh = pv.PolyData(arrow_pos)
             # assign colormap values
@@ -2337,14 +2380,15 @@ class FDTD_Solver():
 
     def get_sparameters(self, frequency: np.ndarray, source_port: int = 1, downsample: bool = False) -> ldarray:
         """
-        Returns a column of the s-parameter matrix for solutions that have an excitation applied to a single port.
+        Returns a column of the s-parameter matrix with source_port as the excited port. If other ports have non-zero
+        excitations this returns the active S-matrix.
 
         Parameters
         ----------
         frequency : np.ndarray
             frequency vector in Hz
         source_port : int, default: 1
-            port number where the excitation was applied in run(), all other ports should have no excitation applied.
+            port number to use as the reference source. 
         downsample : bool, default: True
             Downsample the time domain solution before applying the DTFT. The DTFT is used instead of an FFT because
             the FFT returns only a few points within the frequency band of interest, the rest are far out of band
@@ -2354,82 +2398,76 @@ class FDTD_Solver():
         Returns
         -------
         ldarray:
-            labeled numpy array with dimensions frequency, b (exiting port wave), a (entering port waves).
+            labeled numpy array with dimensions: frequency, b (exiting port), a (entering port).
         """
         self.check_solution()
 
         nports = len(self.ports)
         nfrequency = len(frequency)
 
-        src_port = self.ports[source_port-1]
+        # frequency domain voltage and current at each port termination
+        Vp = np.zeros((nports, nfrequency), dtype=np.complex128)
+        Ip = np.zeros((nports, nfrequency), dtype=np.complex128)
+        
+        for i, port in enumerate(self.ports):
 
-        field_idx = src_port["idx"]
-        field = src_port["field"]
+            field_idx = port["idx"]
+            field = port["field"]
+            direction = port["direction"]
 
-        # source port applied voltage
-        src_applied = src_port["src"]
+            # integration axis along field components
+            f_axis = dict(x=0, y=1, z=2)[field[1]]
+            # width of each field component along integration line, in meters
+            cell_w = conv.m_in(self.d_cells[f_axis][field_idx[f_axis]])
+            # source port voltage at each component, shape is x, y, z, time
+            # broadcast cell widths across other axis (x,y,z,time)
+            cell_w_b = [None] * 4
+            cell_w_b[f_axis] = slice(None)
+            component_v = port["values"] * cell_w[tuple(cell_w_b)]
 
-        # integration axis along field components
-        f_axis = dict(x=0, y=1, z=2)[field[1]]
-        # width of each field component along integration line, in meters
-        cell_w = conv.m_in(self.d_cells[f_axis][field_idx[f_axis]])
-        # source port voltage at each component, shape is x, y, z, time
-        # broadcast cell widths across other axis (x,y,z,time)
-        cell_w_b = [None] * 4
-        cell_w_b[f_axis] = slice(None)
-        src_component_v = src_port["values"] * cell_w[tuple(cell_w_b)]
+            # add voltage along integration axis, remove unitary axis along port face normal.
+            # direction is inverted because V = -E dx.
+            direction = port["direction"]
+            vp = (-direction) * np.sum(component_v, axis=f_axis).squeeze()
 
-        # add voltage along integration axis, remove unitary axis along port face normal
-        direction = src_port["direction"]
-        src_vp = direction * np.sum(src_component_v, axis=f_axis).squeeze()
+            # average voltage across width of port
+            if len(vp.shape) > 1:
+                vp = np.mean(vp, axis=0)
 
-        # average voltage across width of port
-        if len(src_vp.shape) > 1:
-            src_vp = np.mean(src_vp, axis=0)
+            # convert voltage to frequency domain
+            Vp[i] = utils.dtft(vp, frequency, 1 / self.dt, downsample)
 
-        # convert to frequency domain
-        V_applied = utils.dtft(src_applied, frequency, 1 / self.dt, downsample)
-        V_src = utils.dtft(src_vp, frequency, 1 / self.dt, downsample)
-
-        # get the frequency domain current across each port termination
-        I_term = np.zeros((nports, nfrequency), dtype=np.complex128)
-        for i, p in enumerate(self.ports):
-
-            # voltage generated by termination due the current through it. 
+            # current through termination, positive current is defined along the positive cartesian axis
             ip = self.vi_probe_values(f"port_{i+1}")
+            # h-fields are 1/2 time step ahead of the e-fields. Delay current so they are at the same time step
+            # flip current direction if integration axis is along negative cartesian axis.
+            Ip[i] = direction * utils.dtft(ip, frequency, 1 / self.dt, downsample) #* np.exp(-1j * frequency * 2 * np.pi * (self.dt / 2))
 
-            # h-fields are 1/2 time step ahead of the e-fields. Dely current so they are at the same time step
-            I_term[i] = utils.dtft(ip, frequency, 1 / self.dt, downsample) #* np.exp(-1j * frequency * 2 * np.pi * (self.dt / 2))
+        # V0+ and V0- at each port. see equation 4.58 in Pozar 4th ed.
+        # positive current direction is into the port
+        r0 = np.array([p["r0"] for p in self.ports])[..., None]
+        Ap = (Vp + r0 * Ip ) / 2
+        Bp = (Vp - r0 * Ip) / 2
+        
+        # single column of the s-parameter matrix (constant source port)
+        S = Bp / Ap[source_port -1][None]
 
-        # exiting waves (B) from each port
-        B = np.zeros((nfrequency, nports), dtype=np.complex128)
-
-        # source port S11, reflected wave (b) is the difference of the total voltage across the port,
-        # and the incident wave V = a + b
-        B[:, source_port-1] = V_src - V_applied
-
-        # alternate way to separate out foward and reverse waves using the voltage and current.
-        # see equation 4.58 in Pozar 4th ed.
-        # r_src = self.ports[source_port-1]["r0"]
-        # I_src = I_term[source_port-1]
-        # I_src = I_src * np.exp(1j * 2 * np.pi * frequency * self.dt /2)
-        # B[:, source_port-1]  = (V_src - r_src * I_src) / (2)
-        # As = (V_src + r_src * I_src) / (2)
+        # S11 can be computed a different way that seems to have less error than the (Vp + r0 * Ip) equation.
+        # The source port reflected wave (b) is the difference of the total voltage across the port V,
+        # and the applied wave (a),  V = a + b.
+        # src_applied = self.ports[source_port - 1]["src"]
+        # V_applied = utils.dtft(src_applied, frequency, 1 / self.dt, downsample)
+        # S[source_port-1] = (-Vp[source_port - 1] - V_applied) / V_applied
 
         # the exiting waves on other ports is the voltage that appears across the terminations. This is
         # different than the total voltage across the port because that is the sum of the reflected wave that
         # doesn't make it into the load, and the wave transmitted through the load.
-        # The positive current direction for the exiting b wave is into the termination from the line, I_term is 
-        # defined as the current along the z axis so the current is inverted. 
-        exit_ports = [i for i in range(nports) if i+1 != source_port]
-        for i in exit_ports:
-            B[:, i] = -I_term[i] * self.ports[i]["r0"]
-        
-        # return a single column of the full s-matrix
-        s_column = B / V_applied[..., None]
+        # exit_ports = [i for i in range(nports) if i+1 != source_port]
+        # for i in exit_ports:
+        #     Bp[i] = -Ip[i] * r0
 
         return ldarray(
-            s_column, coords=dict(frequency=frequency, b=np.arange(1, nports + 1))
+            S.T[..., None], coords=dict(frequency=frequency, b=np.arange(1, nports + 1), a=[source_port])
         )
     
     def edge_correction(self, p1: tuple, p2: tuple, integration_line: str, CFe: float = None, CFh: float = 1):
@@ -2681,7 +2719,7 @@ class FDTD_Solver():
             else:
                 return ldarray(monitor["values"], coords=dict(time=time_values, **spatial_coords))
 
-    def get_farfield_gain(self, theta: np.ndarray, phi: np.ndarray) -> ldarray:
+    def get_farfield_gain(self, theta: np.ndarray, phi: np.ndarray, polarization: np.ndarray = None) -> ldarray:
         """
         Compile farfield realized gain from the farfield monitor attached to the solver.
 
@@ -2692,6 +2730,9 @@ class FDTD_Solver():
 
         phi : np.ndarray | float
             spatial phi values in degrees
+        
+        polarization : {"thetapol", "phipol", "rhcp", "lhcp"}, optional
+            List of multiple polarizations, or a single polarization. Default is ["thetapol", "phipol"]
 
         Returns
         -------
@@ -2700,6 +2741,23 @@ class FDTD_Solver():
         """
 
         rE = self.get_farfield_rE(theta, phi)
+
+        if polarization is None:
+            polarization = ["thetapol", "phipol"]
+
+        # project phi/theta to specified polarization. project vectors project from thetapol, phipol to a
+        # different polarization. 
+        projection_vectors = dict(
+            thetapol = [1, 0],
+            phipol = [0, 1],
+            rhcp = [1 / np.sqrt(2), 1j / np.sqrt(2)],  # advance phi component by 90 deg for rhcp
+            lhcp = [1 / np.sqrt(2), -1j / np.sqrt(2)]  # delay phi component by 90 deg for lhcp
+        )
+        
+        # assmeble the projection vectors into a matrix, each specified pol is in it's own row
+        projection_matrix = np.array([projection_vectors[k] for k in polarization])
+        # take dot product with each polarization vector, for multiple rows this is just a matrix multiplication
+        rE_pol = np.einsum("ij, j...->i...", projection_matrix, rE)
 
         frequency = self.farfield["frequency"]
 
@@ -2718,11 +2776,14 @@ class FDTD_Solver():
         # radiation intensity,
         # U_theta = (1 / 2 eta) * |E_theta|^2
         # U_phi = (1 / 2 eta) * |E_phi|^2
-        U = (1 / (2 * const.eta0)) * np.abs(rE)**2
+        U = (1 / (2 * const.eta0)) * np.abs(rE_pol)**2
 
         # compute gain. broadcast Pin across polarization, theta, and phi
-        return (4 * np.pi / Pin[None, :, None, None]) * U
+        gain = (4 * np.pi / Pin[None, :, None, None]) * U
 
+        return ldarray(
+            gain, coords=dict(polarization=polarization, frequency=frequency, theta=theta, phi=phi)
+        )
 
     def get_farfield_rE(self, theta: np.ndarray, phi: np.ndarray) -> ldarray:
         """
@@ -2762,8 +2823,8 @@ class FDTD_Solver():
         # meshgrid of x/y positions on grid, same for each face on the same axis
         r_grid = [[None, None] for i in range(3)]
 
-        # meshgrid of cell widths along each surface axis, same for each face on the same axis
-        w_grid = [[None, None] for i in range(3)]
+        # meshgrid of cell areas along each surface axis, same for each face on the same axis
+        ds_grid = [[None] for i in range(3)]
 
         # indices of each face on farfield box
         ff_idx = self.farfield["idx"]
@@ -2783,9 +2844,10 @@ class FDTD_Solver():
             r_grid[axis][0] = np.array(self.farfield["cell_pos"][axis][0], dtype=np.float32, order="C")
             r_grid[axis][1] = np.array(self.farfield["cell_pos"][axis][1], dtype=np.float32, order="C")
 
-            # grid cell widths
-            w_grid[axis][0] = np.array(self.farfield["cell_w"][axis][0], dtype=np.float32, order="C")
-            w_grid[axis][1] = np.array(self.farfield["cell_w"][axis][1], dtype=np.float32, order="C")
+            # grid cell areas, cast as complex to save time since dS is multiplied by a complex phase term
+            # in C++ and would require a cast operation otherwise.
+            ds = self.farfield["cell_w"][axis][0] * self.farfield["cell_w"][axis][1]
+            ds_grid[axis] = np.array(ds, dtype=np.complex64, order="C")
 
             # for each face on either side of the far-field box
             for j, side in enumerate(["n", "p"]):
@@ -2796,8 +2858,8 @@ class FDTD_Solver():
                 surf_shape = self.farfield["cell_pos"][axis][0].shape
                 
                 # initialize surface field at the cell centers
-                e_xyz = np.zeros(((3, n_frequencies) + surf_shape), dtype=np.complex128, order="C")
-                h_xyz = np.zeros(((3, n_frequencies) + surf_shape), dtype=np.complex128, order="C")
+                e_xyz = np.zeros(((3, n_frequencies) + surf_shape), dtype=np.complex64, order="C")
+                h_xyz = np.zeros(((3, n_frequencies) + surf_shape), dtype=np.complex64, order="C")
                 
                 for f in (sf0, sf1):
                     # string value for field direction
@@ -2851,9 +2913,9 @@ class FDTD_Solver():
                 normal_axis_v[axis] = (-1 if j == 0 else 1)
                 # magnetic equivalent surface currents, n X Hs
                 # equation 7-43 in Advanced Engineering Electromagnetics, 2nd Edition 
-                J_xyz[axis][j] = np.array(np.cross(normal_axis_v, h_xyz, axis=0), order="C")
+                J_xyz[axis][j] = np.array(np.cross(normal_axis_v, h_xyz, axis=0), order="C", dtype=np.complex64)
                 # electric equivalent surface currents, -n X Es
-                M_xyz[axis][j] = np.array(np.cross(-normal_axis_v, e_xyz, axis=0), order="C")
+                M_xyz[axis][j] = np.array(np.cross(-normal_axis_v, e_xyz, axis=0), order="C", dtype=np.complex64)
 
         # max grid length for temporary working grid
         max_grid_length = np.max([len(d) for d in self.d_cells])
@@ -2862,12 +2924,12 @@ class FDTD_Solver():
             beta = np.array(2 * np.pi * frequency / const.c0, dtype=np.float32, order="C"),
             theta = np.array(np.deg2rad(theta), dtype=np.float32, order="C"),
             phi = np.array(np.deg2rad(phi), dtype=np.float32, order="C"),
-            data = np.zeros((2, n_frequencies, len(theta), len(phi)), dtype=np.complex128, order="C"),
-            working_grid_cmplx = np.zeros((max_grid_length, max_grid_length), dtype=np.complex128, order="C"),
+            data = np.zeros((2, n_frequencies, len(theta), len(phi)), dtype=np.complex64, order="C"),
+            working_grid_cmplx = np.zeros((max_grid_length, max_grid_length), dtype=np.complex64, order="C"),
             working_grid_float = np.zeros((max_grid_length, max_grid_length), dtype=np.float32, order="C")
         )
 
-        core.core_func.nf2ff(J_xyz, M_xyz, r_grid, w_grid, surf_pos, ff_data)
+        core.core_func.nf2ff(J_xyz, M_xyz, r_grid, ds_grid, surf_pos, ff_data)
 
         # cast as labeled array
         return ldarray(

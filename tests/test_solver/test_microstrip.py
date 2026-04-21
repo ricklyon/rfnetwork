@@ -87,13 +87,13 @@ class TestMicroStrip(unittest.TestCase):
         s.add_dielectric(substrate, er=3.66, style=dict(opacity=0.0))
         s.add_conductor(ms1_trace, style=dict(color="gold"))
 
-        int_axis = ["x-", "y-", "z-"][normal_axis]
+        int_axis = ["x+", "y+", "z+"][normal_axis]
         s.add_lumped_port(1, port1_face, integration_line=int_axis)
 
         pml_side = ["x", "y", "z"][len_axis]
         s.assign_PML_boundaries(f"{pml_side}+", n_pml=10)
 
-        s.generate_mesh(d0 = 0.02)
+        s.generate_mesh(d_max = 0.02)
         
         # edge correction
         p1 = build_dims(ms_ends[0], + ms_w/2, sub_h)

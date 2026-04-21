@@ -35,7 +35,6 @@ except:
 # Design Parameters 
 # ------------------------
 
-
 er = 3.66  # dielectric constant
 b = 0.06  # substrate height, inches
 
@@ -200,7 +199,10 @@ s.render(show_mesh=False, show_rulers=False, axes=ax, camera_position=cpos)
 
 # mesh with a minimum grid cell size of 5mils. This is fairly coarse for line spacings of 15mils and 
 # requires edge correction
-s.generate_mesh(d0 = 0.02, d_edge = 0.005)
+s.generate_mesh(d_max = 0.02, d_min = 0.005)
+
+# s.render().show()
+# s.plot_coefficients("ey_z", "b", "z", 0).show()
 
 # %%
 # Apply Edge Correction

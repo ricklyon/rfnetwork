@@ -116,7 +116,7 @@ ring = pv.Disc(
 )
 
 # remove section in ring for resistor
-ring = ring.clip_box((0, outer_radius + 0.1, -gap / 2, gap / 2, 0, sub_h)).extract_surface()
+ring = ring.clip_box((0, outer_radius + 0.1, -gap / 2, gap / 2, 0, sub_h)).extract_surface(algorithm="dataset_surface")
 s.add_conductor(ring, style=dict(color="gold"))
 
 # add 100 ohm resistor lumped element
@@ -131,7 +131,7 @@ s.add_resistor(resistor, 100, integration_line="y+")
 s.assign_PML_boundaries("z+", n_pml=5)
 
 # create mesh with a nominal width of 20mils far from geometry edges, and 5mils near edges.
-s.generate_mesh(d0 = 0.02, d_edge=0.005)
+s.generate_mesh(d_max=0.02, d_min=0.005)
 
 # plot model 
 fig, ax = plt.subplots()
@@ -139,7 +139,7 @@ plotter = s.render(axes=ax, zoom=1)
 fig.tight_layout()
 
 # show coefficient values at the substrate
-# p = s.plot_coefficients("ey_z", "a", "z", sub_h, point_size=15, cmap="brg")
+# p = s.plot_coefficients("ex_z", "a", "z", sub_h, point_size=15, cmap="brg")
 # p.camera_position = "xy"
 # p.show()
 
@@ -169,7 +169,7 @@ for port in range(1, 4):
     s.solve()
 
     # populate the column of the s-matrix with this port as the input wave 
-    sdata[dict(a=port)] = s.get_sparameters(frequency, source_port=port, downsample=False)
+    sdata[dict(a=port)] = s.get_sparameters(frequency, source_port=port, downsample=False).sel(a=port)
 
 
 # plot s-parameter results
@@ -186,9 +186,14 @@ plt.show()
 # %%
 # Visualize Fields
 # --------------
-# Plot the total electric field from the filed monitor, for the port 3 simulation. 
+# Plot the total electric field from the filed monitor when used as a combiner with equal signals on port 2 and 3.
 #
 # .. image:: ../_static/img/wilkinson.gif
+
+s.reset_excitations()
+s.assign_excitation(vsrc, 2)
+s.assign_excitation(vsrc, 3)
+s.solve()
 
 # To generate the full s-parameter matrix, each port needs to be solved individually.
 gif_setup = dict(file = dir_ / "../docs/_static/img/wilkinson.gif", fps=15, step_ps=5)

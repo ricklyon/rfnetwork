@@ -25,7 +25,7 @@ using Eigen::MatrixXd;
 
 typedef Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> MatrixFloatType;
 typedef Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>, 0, Eigen::Stride<Eigen::Dynamic, Eigen::Dynamic>> MatrixFloatStride;
-typedef Eigen::Map<Eigen::Matrix<std::complex<double>, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> MatrixComplexType;
+typedef Eigen::Map<Eigen::Matrix<std::complex<float>, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> MatrixComplexType;
 
 #define DATA_NDIM 3
 
@@ -204,7 +204,7 @@ float * get_source_array(PyObject * dict, int Nt)
 }
 
 
-std::complex<double> * get_complex_array(PyObject * dict, const char * name, int * shape, int ndim) 
+std::complex<float> * get_complex_array(PyObject * dict, const char * name, int * shape, int ndim) 
 {   
 
     PyObject* py_arr = PyDict_GetItemString(dict, name);
@@ -219,9 +219,9 @@ std::complex<double> * get_complex_array(PyObject * dict, const char * name, int
         throw std::runtime_error("Invalid data array. Wrong number of dimensions.");
     }
 
-    if (PyArray_TYPE(array) != NPY_CDOUBLE)
+    if (PyArray_TYPE(array) != NPY_CFLOAT)
     {
-        throw std::runtime_error("Invalid data array. Must be complex double type.");
+        throw std::runtime_error("Invalid data array. Must be complex float32 type.");
     }
 
     if (!(PyArray_FLAGS(array) & NPY_ARRAY_C_CONTIGUOUS))
@@ -236,7 +236,7 @@ std::complex<double> * get_complex_array(PyObject * dict, const char * name, int
         }
     }
 
-    return (std::complex<double> *) PyArray_DATA(array);
+    return (std::complex<float> *) PyArray_DATA(array);
 }
 
 
@@ -1204,18 +1204,18 @@ int update_phasor_monitor(Monitor * mon, float * mon_field, int m_n, int x_start
 
     for (int f = 0; f < mon->n_phasors; f++)
     {
-        std::complex<double> * m_values_p = ((std::complex<double> *) (mon->values)) + (f * (mon->N1N2));
+        std::complex<float> * m_values_p = ((std::complex<float> *) (mon->values)) + (f * (mon->N1N2));
 
         // pointer to matrix that holds the monitor results
         MatrixComplexType m_values (m_values_p, mon->N1, mon->N2);
         // get dtft exponential phase term at time step and frequency
-        std::complex<double> * dtft_phase_p = ((std::complex<double> *) (mon->dtft_phase)) + ((m_n * (mon->n_phasors)) + f);
-        std::complex<double> dtft_phase = *dtft_phase_p;
+        std::complex<float> * dtft_phase_p = ((std::complex<float> *) (mon->dtft_phase)) + ((m_n * (mon->n_phasors)) + f);
+        std::complex<float> dtft_phase = *dtft_phase_p;
 
         if (mon->axis == 0)
         {
             MatrixFloatType m_field (mon_field + ((mon->position - x_start) * (mon->NyNz)), mon->Ny, mon->Nz);
-            m_values += ((m_field.cast<std::complex<double>>()) * dtft_phase);
+            m_values += ((m_field.cast<std::complex<float>>()) * dtft_phase);
         }
 
         else if (mon->axis == 1)
@@ -1225,7 +1225,7 @@ int update_phasor_monitor(Monitor * mon, float * mon_field, int m_n, int x_start
             for (int i = x_start; i < x_stop; i++)
             {
                 MatrixFloatType m_field (mon_field + ((i - x_start) * (mon->NyNz)), mon->Ny, mon->Nz);
-                m_values.row(i + mon->x_offset) += ((m_field.cast<std::complex<double>>()).row(mon->position) * dtft_phase);
+                m_values.row(i + mon->x_offset) += ((m_field.cast<std::complex<float>>()).row(mon->position) * dtft_phase);
             }
         }
 
@@ -1234,7 +1234,7 @@ int update_phasor_monitor(Monitor * mon, float * mon_field, int m_n, int x_start
             for (int i = x_start; i < x_stop; i++)
             {
                 MatrixFloatType m_field (mon_field + ((i - x_start) * (mon->NyNz)), mon->Ny, mon->Nz);
-                m_values.row(i + mon->x_offset) += ((m_field.cast<std::complex<double>>()).col(mon->position) * dtft_phase);
+                m_values.row(i + mon->x_offset) += ((m_field.cast<std::complex<float>>()).col(mon->position) * dtft_phase);
             }
         }
     }
