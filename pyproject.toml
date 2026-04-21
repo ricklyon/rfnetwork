@@ -19,7 +19,7 @@ dependencies = [
     "numpy>=2.0.0", 
     "matplotlib", 
     "scipy", 
-    "np-struct", 
+    "np-struct>=0.0.7", 
     "mpl-markers", 
     "pyside6", 
     "pyvista",
