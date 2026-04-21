@@ -2,6 +2,7 @@ import numpy as np
 from rfnetwork import const, conv
 import pyvista as pv
 import matplotlib.pyplot as plt
+import warnings
 
 import rfnetwork as rfn
 import unittest
@@ -41,9 +42,11 @@ class TestMeshUtils(unittest.TestCase):
         slot_v = (-len_slot/2, len_slot/2, y_pos_v - w_slot/2, y_pos_v + w_slot/2, 0, 0)
         leg1_v = (-len_slot/2 - w_slot/2, -len_slot/2 + w_slot/2, y_pos_v - len_leg/2, y_pos_v + len_leg/2, 0, 0)
         leg2_v = (len_slot/2 - w_slot/2, len_slot/2 + w_slot/2, y_pos_v - len_leg/2, y_pos_v + len_leg/2, 0, 0)
-
-        for cutout in (slot_h, leg1_h, leg2_h, slot_v, leg1_v, leg2_v):
-            gnd_plane = gnd_plane.clip_box(cutout).extract_surface(algorithm="dataset_surface")
+        
+        # ignore warning in extract_surface about algorithm keyword
+        with warnings.catch_warnings(record=True) as captured:
+            for cutout in (slot_h, leg1_h, leg2_h, slot_v, leg1_v, leg2_v):
+                gnd_plane = gnd_plane.clip_box(cutout).extract_surface()
 
         # get all edges in surface
         obj_edges = rfn.utils_mesh.get_object_edges(gnd_plane, group_faces=False)
