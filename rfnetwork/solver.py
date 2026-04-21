@@ -516,6 +516,8 @@ class FDTD_Solver():
 
         # get a list of 2x3 arrays, coordinates of each endpoint of the edges of the model objects
         obj_edges = np.zeros(shape=(0, 2, 3))
+        # flag each edge if it is not aligned with one of the cartesian axes
+        obj_edges_oblique = np.zeros(shape=(0))
         for obj in cond_objects:
             
             is_surface = utils_mesh.is_object_surface(obj)
@@ -524,6 +526,9 @@ class FDTD_Solver():
             if is_surface:
                 obj_edges_i = utils_mesh.get_object_edges(obj, group_faces=False)
                 obj_edges_i = utils_mesh.remove_interior_edges(obj_edges_i)
+                # is edge not aligned with cartesian axis
+                obj_edge_v_i = np.diff(obj_edges_i, axis=1)[:, 0, :]
+                obj_edges_oblique_i = np.count_nonzero(np.abs(obj_edge_v_i) > d_min / 2, axis=1) > 1
 
             # if object is 3D, attempt to use the built in pyvista method to extract boundary edges.
             else:
@@ -531,15 +536,16 @@ class FDTD_Solver():
                     non_manifold_edges=False, feature_edges=True, manifold_edges=False, clear_data=False
                 )
                 obj_edges_i = utils_mesh.get_object_edges(obj_extracted, group_faces=False)
+                # do not grade oblique edges for 3D objects
+                obj_edges_oblique_i = np.zeros(len(obj_edges_i))
 
             obj_edges = np.concatenate((obj_edges, obj_edges_i), axis=0)
+            obj_edges_oblique = np.concatenate((obj_edges_oblique, obj_edges_oblique_i), axis=0)
 
         # round to tolerance
         obj_edges = np.around(obj_edges, decimals=self._places).astype(np.float32)
-
+        # vector from starting point to end point of each edge
         obj_edge_v = np.diff(obj_edges, axis=1)[:, 0, :]
-        # flag each edge if it is not aligned with one of the cartesian axes
-        obj_edge_oblique = np.count_nonzero(np.abs(obj_edge_v) > d_min / 2, axis=1) > 1
 
         # object vertices and points for the mesh around angled sections
         all_points = [np.array([]), np.array([]), np.array([])]
@@ -570,7 +576,7 @@ class FDTD_Solver():
 
             for i, edge in enumerate(obj_edges):
                 # grade mesh cells along angled edges
-                if obj_edge_oblique[i] and obj_edge_v[i][axis] > d_min:
+                if obj_edges_oblique[i] and obj_edge_v[i][axis] > d_min:
                     # break angled edges along x and y into sub-cells separated by d_min
                     nx_ny = np.around(np.abs(obj_edge_v[i][axis]) / d_min).astype(int)
 
