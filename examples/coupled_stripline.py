@@ -82,7 +82,7 @@ s.assign_PML_boundaries("x+", n_pml=5)
 
 # create mesh with a nominal width of 20mils far from geometry edges, and 2.5mils near edges.
 # cell widths are tapered to minimize errors
-s.generate_mesh(d0 = 0.01, d_edge = 0.0025)
+s.generate_mesh(d_max = 0.01, d_min = 0.0025)
 
 # apply edge singularity correction to the edges along the length of the microstrip lines
 for i, y in enumerate((line1_y, line1_y)):

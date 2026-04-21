@@ -19,7 +19,6 @@ import mpl_markers as mplm
 # set matplotlib style
 plt.style.use(rfn.DEFAULT_STYLE)
 
-
 try:
     dir_ = Path(__file__).parent
 except:

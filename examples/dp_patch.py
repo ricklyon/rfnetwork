@@ -2,7 +2,9 @@
 Dual-Polarized Patch Antenna
 ============
 
-Build a dual polarized patch antenna based on [1].
+Build a dual polarized patch antenna.
+
+Based on [1].
 
 [1] Meltem Yildirim, "Design of Dual Polarized Wideband Microstrip Antennas", pp. 54-70.
 """
@@ -18,9 +20,7 @@ import pyvista as pv
 from np_struct import ldarray
 
 import rfnetwork as rfn
-from rfnetwork import conv
 import mpl_markers as mplm
-import sys
 
 # set matplotlib style
 plt.style.use(rfn.DEFAULT_STYLE)

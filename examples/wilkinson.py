@@ -186,9 +186,14 @@ plt.show()
 # %%
 # Visualize Fields
 # --------------
-# Plot the total electric field from the filed monitor, for the port 3 simulation. 
+# Plot the total electric field from the filed monitor when used as a combiner with equal signals on port 2 and 3.
 #
 # .. image:: ../_static/img/wilkinson.gif
+
+s.reset_excitations()
+s.assign_excitation(vsrc, 2)
+s.assign_excitation(vsrc, 3)
+s.solve()
 
 # To generate the full s-parameter matrix, each port needs to be solved individually.
 gif_setup = dict(file = dir_ / "../docs/_static/img/wilkinson.gif", fps=15, step_ps=5)

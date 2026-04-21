@@ -35,7 +35,6 @@ except:
 # Design Parameters 
 # ------------------------
 
-
 er = 3.66  # dielectric constant
 b = 0.06  # substrate height, inches
 
