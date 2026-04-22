@@ -2,7 +2,7 @@
 Dual-Polarized Patch Antenna
 ============
 
-Build a dual polarized patch antenna.
+Form RHCP pattern with a dual polarized patch antenna.
 
 Based on [1].
 
@@ -42,8 +42,9 @@ def phase_delay_signal(signal: ldarray, phase: float, f0: float):
 
 
 # %%
-# User defined Parameters [inches]
+# User Defined Parameters 
 # ------------------------
+# units are inches
 
 f0 = 2.4e9
 lam0 = rfn.const.c0_in / f0
@@ -81,7 +82,6 @@ y_pos_v = -0.37
 # Build Model
 # ------------------------
 
-# create model 
 sbox = pv.Cube(center=(0, 0, 0), x_length=w_patch*2.5, y_length=w_patch*2.5, z_length=lam0 / 5)
 s = rfn.FDTD_Solver(sbox)
 
@@ -140,26 +140,26 @@ ms_stub_v = pv.Rectangle(
 )
 s.add_conductor(ms_trace_v, ms_stub_v)
 
-# add ports
+# add ports from ground plane to microstrip trace
 port1_face = pv.Rectangle([(port_x, -w_ms/2, 0), (port_x, w_ms/2, 0), (port_x, w_ms/2, -h_btm)])
 s.add_lumped_port(1, port1_face, "z-")
 
 port2_face = pv.Rectangle([(-w_ms/2, port_y, 0), (w_ms/2, port_y, 0), (w_ms/2, port_y, -h_btm)])
 s.add_lumped_port(2, port2_face, "z-")
 
-# PML boundaries on all sides
+# PML boundaries on all sides of the solve box, 5 cells wide.
 s.assign_PML_boundaries("x-", "x+", "y-", "y+", "z+", "z-", n_pml=5)
 
-# build mesh
+# build mesh with a minimum cell size near feature edges of 0.02in, and a maximum size of 0.08in
 s.generate_mesh(d_max=0.08, d_min=0.02)
 # s.plot_coefficients("ex_z", "a", "z", 0).show()
 
 # setup far-field monitor
 s.add_farfield_monitor(frequency=f0)
 # add near-field monitor at the plane of the slots
-s.add_field_monitor("mon1", "ez", "z", 0, n_step=50)
+s.add_field_monitor("mon1", "ez", "z", 0, n_step=30)
 
-# # show model rendering
+# show model rendering
 cpos_top = pv.CameraPosition(position=(0, -3, 3), focal_point=(0, 0, 0), viewup=(0, 0.0, 1.0))
 cpos_btm = pv.CameraPosition(position=(0, -3, -3), focal_point=(0, 0, 0), viewup=(0, 0.0, -1.0))
 
@@ -170,8 +170,8 @@ ax1.set_title("Top Side")
 ax2.set_title("Bottom Side")
 
 # %%
-# Setup RHCP excitation
-# ------------------------
+# Setup RHCP Excitation
+# ---------------------
 
 # Delay the vertically polarized element excitation by 90 degrees
 vsrc_h = 1e-2 * s.gaussian_modulated_source(f0, width=2000e-12, t0=1100e-12, t_len=2500e-12)
@@ -188,20 +188,20 @@ s.assign_excitation(vsrc_h, 1)
 s.assign_excitation(vsrc_v, 2)
 
 # %%
-# Plot Fields of RHCP excitation
-# ------------------------
+# Fields of RHCP Excitation
+# --------------------------
 #
 # .. image:: ../_static/img/dp_patch.gif
 
 s.solve(n_threads=4)
 
 # plot near field data
-gif_setup = dict(file = dir_ / "../docs/_static/img/dp_patch.gif", fps=15, step_ps=20)
+gif_setup = dict(file = dir_ / "../docs/_static/img/dp_patch.gif", fps=18, step_ps=15)
 s.plot_monitor("mon1", camera_position="xy", gif_setup=gif_setup)
 
 # %%
-# Get Far-field Patterns
-# ------------------------
+# Plot Far-field Pattern
+# ----------------------
 
 # solve again with a longer time window to allow all the energy to escape the solve box.
 vsrc_h_long = s.gaussian_modulated_source(f0, width=100e-12, t0=60e-12, t_len=10000e-12)
@@ -241,7 +241,7 @@ mplm.line_marker(x=0)
 
 # %%
 # Plot S11
-# ------------------------
+# --------
 # both port 1 and 2 are driven with an excitation, so the s-parameters plotted here are
 # active s-parameters. 
 
