@@ -393,6 +393,52 @@ static PyObject* solver_run(PyObject* self, PyObject* args) {
     return PyLong_FromLong(0);
 }
 
+static PyObject* solver_run_cu(PyObject* self, PyObject* args) {
+
+    PyObject *coefficients;
+    PyObject *probes;
+    PyObject *monitors;
+    PyObject *mem;
+    
+    int Nx;
+    int Ny;
+    int Nz;
+    int Nt;
+    int n_threads;
+    int update_interval;
+
+    // Parse arguments: expecting a single Python object
+    if (!PyArg_ParseTuple(
+        args, "OOOOIIIIII", &coefficients, &probes, &monitors, &mem, &Nx, &Ny, &Nz, &Nt, &n_threads, &update_interval
+    )) {
+        return PyLong_FromLong(1);
+    }
+
+    if (!PyDict_Check(coefficients)) {
+        PyErr_SetString(PyExc_TypeError, "Expected a coefficients dictionary");
+        return PyLong_FromLong(1);
+    }
+
+    if (!PyList_Check(monitors)) {
+        PyErr_SetString(PyExc_TypeError, "Expected a monitors list");
+        return PyLong_FromLong(1);
+    }
+
+    if (!PyList_Check(probes)) {
+        PyErr_SetString(PyExc_TypeError, "Expected a probes list");
+        return PyLong_FromLong(1);
+    }
+
+    SolverFDTD s;
+    s.solver_init_fields(mem, coefficients, Nx, Ny, Nz);
+    s.solver_init_monitors(monitors, Nt);
+    s.solver_init_probes(probes, Nt);
+
+    s.solver_run_cu(Nt);
+
+    return PyLong_FromLong(0);
+}
+
 static PyObject* nf2ff(PyObject* self, PyObject* args) {
 
     PyObject *J_xyz;
@@ -452,6 +498,7 @@ static PyMethodDef moduleMethods[] = {
     {"cascade_self_ndata",  cascade_self_ndata_bind, METH_VARARGS, ""},
     {"nf2ff",  nf2ff, METH_VARARGS, ""},
     {"solver_run",  solver_run, METH_VARARGS, ""},
+    {"solver_run_cu",  solver_run_cu, METH_VARARGS, ""},
     {NULL, NULL, 0, NULL}        /* Sentinel */
 };
 

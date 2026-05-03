@@ -1,24 +1,13 @@
 #ifndef SOLVER_H
 #define SOLVER_H
 
-#define PY_SSIZE_T_CLEAN
-#include <Python.h>
-#include <numpy/arrayobject.h>
-
-#include <stdio.h>
-#include <cstdint>
-#include <stdlib.h>
-#include <time.h>
-#include <iostream>
-#include <cstring>
-#include <complex>
-#include <random>
-#include <math.h>
-#include <iostream>
-#include <thread>
 #include <condition_variable>
 #include <atomic>
-#include <vector>
+#include <thread>
+#include <complex>
+
+struct _object;
+typedef _object PyObject;
 
 #define N_FIELDS 18
 #define N_COEFF 24
@@ -239,6 +228,8 @@ public:
 
     int solver_run(int Nt, int n_threads, int update_interval);
     void solver_controller(int Nt, int n_threads, int update_interval);
+
+    void solver_run_cu(int Nt);
 };
 
 

@@ -9,6 +9,7 @@ __pycache__/
 /docs/scripts
 *archive/
 *.so
+*.o
 build/
 *.gz
 _autosummary/

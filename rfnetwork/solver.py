@@ -1605,7 +1605,7 @@ class FDTD_Solver():
         else:
             update_interval = 0
 
-        core.core_func.solver_run(coefficients, probes, monitors, mem, Nx, Ny, Nz, Nt, n_threads, update_interval)
+        core.core_func.solver_run_cu(coefficients, probes, monitors, mem, Nx, Ny, Nz, Nt, n_threads, update_interval)
 
         if show_progress:
             sys.stdout.write(f"\rDone in {time.time() - stime:.3f}s" + (" " * 20) + "\n")
