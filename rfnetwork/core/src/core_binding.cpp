@@ -383,11 +383,12 @@ static PyObject* solver_run(PyObject* self, PyObject* args) {
         return PyLong_FromLong(1);
     }
 
-    solver_init_fields(mem, coefficients, Nx, Ny, Nz);
-    solver_init_monitors(monitors, Nt);
-    solver_init_probes(probes, Nt);
+    SolverFDTD s;
+    s.solver_init_fields(mem, coefficients, Nx, Ny, Nz);
+    s.solver_init_monitors(monitors, Nt);
+    s.solver_init_probes(probes, Nt);
 
-    solver_run(Nt, n_threads, update_interval);
+    s.solver_run(Nt, n_threads, update_interval);
 
     return PyLong_FromLong(0);
 }

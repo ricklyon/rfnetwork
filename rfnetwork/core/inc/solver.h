@@ -1,13 +1,32 @@
 #ifndef SOLVER_H
 #define SOLVER_H
 
-#include <string>
-#include <vector>
-#include <thread>
+#define PY_SSIZE_T_CLEAN
+#include <Python.h>
+#include <numpy/arrayobject.h>
+
+#include <stdio.h>
+#include <cstdint>
+#include <stdlib.h>
+#include <time.h>
+#include <iostream>
+#include <cstring>
 #include <complex>
+#include <random>
+#include <math.h>
+#include <iostream>
+#include <thread>
+#include <condition_variable>
+#include <atomic>
+#include <vector>
 
 #define N_FIELDS 18
 #define N_COEFF 24
+
+#define MAX_MONITORS 50
+#define MAX_PROBES 5000
+#define MAX_THREADS 20
+
 
 struct mbuffer_t
 {
@@ -159,20 +178,68 @@ struct ThreadData {
     float * ez;
 };
 
-int solver_init_fields(PyObject * py_mem, PyObject * coefficients, int Nx, int Ny, int Nz);
+class SolverFDTD {
 
-int solver_init_monitors(PyObject * py_monitors, int Nt);
+private:
+    // coefficient values
+    Field_Ex Ex;
+    Field_Ey Ey;
+    Field_Ez Ez;
 
-int solver_init_sources(PyObject * py_sources, int Nt);
+    Field_Hx Hx;
+    Field_Hy Hy;
+    Field_Hz Hz;
 
-int solver_init_probes(PyObject * py_probes, int Nt);
+    Coeff_Ex Cx;
+    Coeff_Ey Cy;
+    Coeff_Ez Cz;
 
-int solver_run(int Nt, int n_threads, int update_interval);
+    Coeff_Hx Dx;
+    Coeff_Hy Dy;
+    Coeff_Hz Dz;
 
-void solver_thread(int x_start, int x_stop, int Nt, int thread_idx);
-void solver_controller(int Nt, int n_threads, int update_interval);
+    Monitor monitors[MAX_MONITORS];
+    int n_monitors;
 
-int update_monitor(Monitor * mon, float * mon_field, int m_n, int x_start, int x_stop);
-int update_phasor_monitor(Monitor * mon, float * mon_field, int m_n, int x_start, int x_stop);
+    Probe probes[MAX_PROBES];
+    int n_probes;
+
+    std::thread threads[MAX_THREADS];
+    ThreadData thread_data[MAX_THREADS + 2];
+    int n_threads;
+
+    // conditional variables used by the thread controller and update threads for synchronization
+    std::condition_variable cv;
+    std::condition_variable cv_th;
+
+    // shared variables protected by mutex
+    std::mutex mutex;
+    std::atomic<int> th_init{0};
+    std::atomic<int> e_updates{0};
+    std::atomic<int> h_updates{0};
+    bool e_updates_done = false;
+    bool h_updates_done = false;
+    bool th_init_done = false;
+
+    mbuffer_t m_pool{NULL, NULL, 0};
+
+    float * mbuffer_allocate(uint64_t size);
+
+    void mbuffer_init(float * base_addr, uint64_t size);
+    void solver_thread(int x_start, int x_stop, int Nt, int thread_idx);
+
+    int update_monitor(Monitor * mon, float * mon_field, int m_n, int x_start, int x_stop);
+    int update_phasor_monitor(Monitor * mon, float * mon_field, int m_n, int x_start, int x_stop);
+
+public:
+    SolverFDTD();          // constructor
+    int solver_init_fields(PyObject * py_mem, PyObject * coefficients, int Nx, int Ny, int Nz);
+    int solver_init_monitors(PyObject * py_monitors, int Nt);
+    int solver_init_probes(PyObject * py_probes, int Nt);
+
+    int solver_run(int Nt, int n_threads, int update_interval);
+    void solver_controller(int Nt, int n_threads, int update_interval);
+};
+
 
 #endif /* SOLVER_H */

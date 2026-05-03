@@ -29,101 +29,44 @@ typedef Eigen::Map<Eigen::Matrix<std::complex<float>, Eigen::Dynamic, Eigen::Dyn
 
 #define DATA_NDIM 3
 
-#define MAX_MONITORS 50
-#define MAX_PROBES 5000
-#define MAX_THREADS 20
 
-Field_Ex Ex;
-Field_Ey Ey;
-Field_Ez Ez;
 
-Field_Hx Hx;
-Field_Hy Hy;
-Field_Hz Hz;
-
-Coeff_Ex Cx;
-Coeff_Ey Cy;
-Coeff_Ez Cz;
-
-Coeff_Hx Dx;
-Coeff_Hy Dy;
-Coeff_Hz Dz;
-
-Monitor monitors[MAX_MONITORS];
-int n_monitors = 0;
-
-Probe probes[MAX_PROBES];
-int n_probes = 0;
-
-std::thread threads[MAX_THREADS];
-ThreadData thread_data[MAX_THREADS + 2];
-int n_threads = 1;
-
-// conditional variables used by the thread controller and update threads for synchronization
-std::condition_variable cv;
-std::condition_variable cv_th;
-
-// shared variables protected by mutex
-std::mutex mutex;
-std::atomic<int> th_init{0};
-std::atomic<int> e_updates{0};
-std::atomic<int> h_updates{0};
-bool e_updates_done = false;
-bool h_updates_done = false;
-bool th_init_done = false;
-
-static struct mbuffer_t m_pool = {NULL, NULL, 0};
 
 long long get_milliseconds()
 {
 
     long long ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                       std::chrono::system_clock::now().time_since_epoch()
-                   ).count();
+                    std::chrono::system_clock::now().time_since_epoch()
+                ).count();
 
     return ms;
 }
 
-void mbuffer_init(float * base_addr, uint64_t size)
+// ensures stdout is flushed so it works in jupyter notebooks
+void print_stdout(std::stringstream& msg) {
+    std::cout << msg.str();
+    std::cout.flush();
+}
+
+// send progress bar to stdout
+void print_progress(int n, int Nt)
 {
-    m_pool.base_addr = base_addr;
-    m_pool.next_addr = base_addr;
-    m_pool.available_size = size;
-}
+    std::stringstream msg;
+    int percent_completed = ((n + 1) * 100 / Nt);
+    int n_dots = percent_completed / 5;
+    int n_space = 20 - n_dots;
 
-/*
-Reserves a contigious section of memory of given size (size is number of floats) 
-and returns the pointer to the memory section.
-Returns NULL if requested size does not fit within the memory block.
-*/
-float * mbuffer_allocate(uint64_t size)
-{   
-    // allow only one thread at a time
-    std::unique_lock<std::mutex> lock(mutex);
-
-    // check that buffer has been initialized
-    if (m_pool.base_addr == NULL)
-    {
-        throw std::runtime_error("Memory buffer not initialized.");
-        return NULL;
+    msg << "\r|";
+    for (int i = 0; i < n_dots; ++i) {
+        msg << '.';
+    }
+    for (int i = 0; i < n_space; ++i) {
+        msg << ' ';
     }
 
-    // check that buffer has enough space
-    if (size > m_pool.available_size)
-    {
-        throw std::runtime_error("Memory buffer has insufficent space.");
-        return NULL;
-    }
-
-    float * addr = m_pool.next_addr;
-    // increment buffer pointer for the next allocation
-    m_pool.next_addr = m_pool.next_addr + size;
-    // update available size
-    m_pool.available_size -= size;
-
-    return addr;
+    msg << "| " << percent_completed << "%  ";
+    print_stdout(msg);
 }
-
 
 // get the array of the given name from a python dictionary. Validate the shape
 // matches Nx, Ny, Nz
@@ -203,7 +146,6 @@ float * get_source_array(PyObject * dict, int Nt)
     return (float *) PyArray_DATA(array);
 }
 
-
 std::complex<float> * get_complex_array(PyObject * dict, const char * name, int * shape, int ndim) 
 {   
 
@@ -240,9 +182,54 @@ std::complex<float> * get_complex_array(PyObject * dict, const char * name, int 
 }
 
 
-int solver_init_fields(PyObject * py_mem, PyObject * coefficients, int Nx, int Ny, int Nz)
-{
+/*
+Reserves a contigious section of memory of given size (size is number of floats) 
+and returns the pointer to the memory section.
+Returns NULL if requested size does not fit within the memory block.
+*/
+float * SolverFDTD::mbuffer_allocate(uint64_t size)
+{   
+    // allow only one thread at a time
+    std::unique_lock<std::mutex> lock(mutex);
 
+    // check that buffer has been initialized
+    if (m_pool.base_addr == NULL)
+    {
+        throw std::runtime_error("Memory buffer not initialized.");
+        return NULL;
+    }
+
+    // check that buffer has enough space
+    if (size > m_pool.available_size)
+    {
+        throw std::runtime_error("Memory buffer has insufficent space.");
+        return NULL;
+    }
+
+    float * addr = m_pool.next_addr;
+    // increment buffer pointer for the next allocation
+    m_pool.next_addr = m_pool.next_addr + size;
+    // update available size
+    m_pool.available_size -= size;
+
+    return addr;
+}
+
+void SolverFDTD::mbuffer_init(float * base_addr, uint64_t size)
+{
+    m_pool.base_addr = base_addr;
+    m_pool.next_addr = base_addr;
+    m_pool.available_size = size;
+}
+
+SolverFDTD::SolverFDTD(){
+    n_monitors = 0;
+    n_probes = 0;
+    n_threads = 0;
+}
+
+int SolverFDTD::solver_init_fields(PyObject * py_mem, PyObject * coefficients, int Nx, int Ny, int Nz)
+{
     // error check memory buffer
     std::ostringstream oss;
     PyArrayObject * mem_array = (PyArrayObject *) py_mem;
@@ -379,7 +366,7 @@ int solver_init_fields(PyObject * py_mem, PyObject * coefficients, int Nx, int N
     return 0;
 }
 
-int solver_init_monitors(PyObject * py_monitors, int Nt)
+int SolverFDTD::solver_init_monitors(PyObject * py_monitors, int Nt)
 {
     // initialize field monitors
     n_monitors = (int) PyList_Size(py_monitors);
@@ -482,7 +469,7 @@ int solver_init_monitors(PyObject * py_monitors, int Nt)
     return 0;
 }
 
-int solver_init_probes(PyObject * py_probes, int Nt)
+int SolverFDTD::solver_init_probes(PyObject * py_probes, int Nt)
 {
     // shapes of field components
     // int Nx[6] = {Ex.Nx, Ey.Nx, Ez.Nx, Hx.Nx, Hy.Nx, Hz.Nx};
@@ -546,7 +533,7 @@ int solver_init_probes(PyObject * py_probes, int Nt)
     return 0;
 }
 
-int solver_run(int Nt, int n_th, int update_interval)
+int SolverFDTD::solver_run(int Nt, int n_th, int update_interval)
 {
     n_threads = n_th;
     th_init = 0;
@@ -577,7 +564,7 @@ int solver_run(int Nt, int n_th, int update_interval)
     thread_data[n_threads+1].hz = mbuffer_allocate(Hz.Ny * Hz.Nz);
 
     // start controller thread
-    std::thread control_th = std::thread(solver_controller, Nt, n_threads, update_interval);
+    std::thread control_th = std::thread(&SolverFDTD::solver_controller, this, Nt, n_threads, update_interval);
 
     // divide up the x slices into batches for each thread. The slices indicate the cells to compute
     // values for. Components that have an extra index on the x axis (ey, ez, and hx) are not updated on the edges and 
@@ -599,7 +586,7 @@ int solver_run(int Nt, int n_th, int update_interval)
         }
         // offset the thread index by one so the thread accesses the dummy endpoint data if it's the
         // first or last thread.
-        threads[t] = std::thread(solver_thread, x_start_th, x_stop_th, Nt, t+1);
+        threads[t] = std::thread(&SolverFDTD::solver_thread, this, x_start_th, x_stop_th, Nt, t+1);
     }
 
     // wait for all threads to complete
@@ -613,34 +600,10 @@ int solver_run(int Nt, int n_th, int update_interval)
     return 0;
 }
 
-// ensures stdout is flushed so it works in jupyter notebooks
-void print_stdout(std::stringstream& msg) {
-    std::cout << msg.str();
-    std::cout.flush();
-}
 
-// send progress bar to stdout
-void print_progress(int n, int Nt)
-{
-    std::stringstream msg;
-    int percent_completed = ((n + 1) * 100 / Nt);
-    int n_dots = percent_completed / 5;
-    int n_space = 20 - n_dots;
-
-    msg << "\r|";
-    for (int i = 0; i < n_dots; ++i) {
-        msg << '.';
-    }
-    for (int i = 0; i < n_space; ++i) {
-        msg << ' ';
-    }
-
-    msg << "| " << percent_completed << "%  ";
-    print_stdout(msg);
-}
 
 // thread responsible for synchronizing field update threads
-void solver_controller(int Nt, int n_threads, int update_interval)
+void SolverFDTD::solver_controller(int Nt, int n_threads, int update_interval)
 {
     std::stringstream msg;
 
@@ -650,7 +613,7 @@ void solver_controller(int Nt, int n_threads, int update_interval)
         std::unique_lock<std::mutex> lock(mutex);
 
         // wait until all threads are done with memory allocation
-        cv.wait(lock, [n_threads] { return th_init.load() == n_threads; });
+        cv.wait(lock, [n_threads, this] { return th_init.load() == n_threads; });
         th_init_done = true;
         cv_th.notify_all();
     }
@@ -672,7 +635,7 @@ void solver_controller(int Nt, int n_threads, int update_interval)
             // send notification to threads that H-field updates are done. On the first iteration, the threads
             // will ignore this because they are first waiting that e-field updates are done.
             cv_th.notify_all();
-            cv.wait(lock, [n_threads] { return e_updates.load() == n_threads; });
+            cv.wait(lock, [n_threads, this] { return e_updates.load() == n_threads; });
         }
 
 
@@ -686,7 +649,7 @@ void solver_controller(int Nt, int n_threads, int update_interval)
             h_updates_done = false;
             // send notification to threads that E-field updates are done.
             cv_th.notify_all();
-            cv.wait(lock, [n_threads] { return h_updates.load() == n_threads; });
+            cv.wait(lock, [n_threads, this] { return h_updates.load() == n_threads; });
         }
 
         // write update
@@ -710,11 +673,9 @@ void solver_controller(int Nt, int n_threads, int update_interval)
     {
         print_progress(Nt, Nt);
     }
-
-
 }
 
-void solver_thread(int x_start, int x_stop, int Nt, int thread_idx)
+void SolverFDTD::solver_thread(int x_start, int x_stop, int Nt, int thread_idx)
 {
     // each grid cell contains the ex, ey, hz components in the middle of the x axis of the cell, and the
     // ey, ez, hx components on the RIGHT side of the cell. The first cell does not update the ey, ez, hx components
@@ -735,6 +696,10 @@ void solver_thread(int x_start, int x_stop, int Nt, int thread_idx)
     // only Nx components are created for all fields, the Ey, Ez, and Hx components that have one extra 
     // component do not track the fields on the first index. They are not updated as they are on the edge of the grid
     // and always remain at zero.
+
+    // allow only one thread at a time
+    // std::unique_lock<std::mutex> lock(mutex);
+    
     float * p_ex_y = mbuffer_allocate(Nx * Ex.Ny * Ex.Nz); // 
     float * p_ex_z = mbuffer_allocate(Nx * Ex.Ny * Ex.Nz); // 
     float * p_ex   = mbuffer_allocate(Nx * Ex.Ny * Ex.Nz); // 
@@ -820,7 +785,7 @@ void solver_thread(int x_start, int x_stop, int Nt, int thread_idx)
 
         cv.notify_all(); 
         // wait for all threads to reach this point before moving on to h-field updates.
-        cv_th.wait(lock, [] { return th_init_done; });
+        cv_th.wait(lock, [this] { return th_init_done; });
     }
 
     // main time stepping loop
@@ -972,7 +937,7 @@ void solver_thread(int x_start, int x_stop, int Nt, int thread_idx)
 
             cv.notify_all(); 
             // wait for all threads to reach this point before moving on to h-field updates.
-            cv_th.wait(lock, [] { return e_updates_done; });
+            cv_th.wait(lock, [this] { return e_updates_done; });
         }
 
         // h-updates
@@ -1102,7 +1067,7 @@ void solver_thread(int x_start, int x_stop, int Nt, int thread_idx)
         for (Probe * p : h_probes) 
         {
             // apply soft source
-          if (p->is_source)
+        if (p->is_source)
             {
                 *(p->field_s1_p) = *(p->field_s1_p) + (p->values)[n];
                 *(p->field_s2_p) = *(p->field_s2_p) + (p->values)[n];
@@ -1121,7 +1086,7 @@ void solver_thread(int x_start, int x_stop, int Nt, int thread_idx)
 
             // notify controller that h_updates has been changed
             cv.notify_all(); 
-            cv_th.wait(lock, [] { return h_updates_done; });
+            cv_th.wait(lock, [this] { return h_updates_done; });
         }
 
         // update monitors.
@@ -1163,7 +1128,7 @@ void solver_thread(int x_start, int x_stop, int Nt, int thread_idx)
 }
 
 
-int update_monitor(Monitor * mon, float * mon_field, int m_n, int x_start, int x_stop)
+int SolverFDTD::update_monitor(Monitor * mon, float * mon_field, int m_n, int x_start, int x_stop)
 {
 
     MatrixFloatType m_values (((float *) (mon->values)) + (m_n * (mon->N1N2)), mon->N1, mon->N2);
@@ -1199,7 +1164,7 @@ int update_monitor(Monitor * mon, float * mon_field, int m_n, int x_start, int x
 }
 
 
-int update_phasor_monitor(Monitor * mon, float * mon_field, int m_n, int x_start, int x_stop)
+int SolverFDTD::update_phasor_monitor(Monitor * mon, float * mon_field, int m_n, int x_start, int x_stop)
 {
 
     for (int f = 0; f < mon->n_phasors; f++)
