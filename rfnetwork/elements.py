@@ -3,7 +3,7 @@ import numpy as np
 from typing import Union, List, Tuple
 
 from .component import Component
-from .network import DynamicNetwork, Network
+from .network import Network
 from .core.units import conv, const
 from .core import core
 from . import utils
@@ -863,7 +863,7 @@ class Stripline(Line):
         return properties
 
 
-class LumpedElementFilter(DynamicNetwork):
+class LumpedElementFilter(Network):
 
     @classmethod
     def from_chebyshev(cls, fc: tuple, btype: str, n: int, ripple: float = 0.5):
@@ -881,7 +881,7 @@ class LumpedElementFilter(DynamicNetwork):
         """
         prototype = utils.chebyshev_prototype(n, ripple=ripple)
 
-        return cls(fc, btype, prototype)
+        return cls.from_prototype(fc, btype, prototype)
     
     @classmethod
     def from_butterworth(cls, fc: tuple, btype: str, n: int):
@@ -897,10 +897,10 @@ class LumpedElementFilter(DynamicNetwork):
         """
         prototype = utils.butterworth_prototype(n)
 
-        return cls(fc, btype, prototype)
+        return cls.from_prototype(fc, btype, prototype)
 
-    
-    def __init__(cls, fc: tuple, btype: str, prototype: list):
+    @classmethod
+    def from_prototype(cls, fc: tuple, btype: str, prototype: list):
 
         components = dict()
         r0 = 50
@@ -954,5 +954,5 @@ class LumpedElementFilter(DynamicNetwork):
                     C = (g_k * fb) / (w0 * r0)
                     components[f"P{i+1}"] = LC_Series(L=L, C=C, shunt=True)
 
-        cascades = [["P1"] + list(components.values()) + ["P2"]]
-        super().__init__(components, cascades=cascades, passive=True)
+        cascades = [["P1"] + list(components.keys()) + ["P2"]]
+        return cls.from_nodes(components, cascades=cascades, passive=True)

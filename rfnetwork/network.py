@@ -96,6 +96,54 @@ class Network(Component, metaclass=NetworkMeta):
         data returned by evaluate. 
 
     """
+
+    @classmethod
+    def from_nodes(
+        cls, 
+        components: dict, 
+        nodes: list = list(), 
+        cascades: list = list(), 
+        probes: dict = dict(),
+        shunt: bool = False, 
+        passive: bool = False, 
+        state: dict = dict()
+    ):
+        """
+        Parameters
+        ----------
+        components : dict
+            dictionary of Component objects where the keys are the reference designators.
+        nodes : list
+            list of tuples, where each tuple is a group of component ports that are connected into a single node.
+        cascades : list
+            list of tuples, where each tuple is a group of components that are connected end to end, port 2 to port 1.
+        probes: dict
+            dictionary of probe names to the component port they attach to. Probe voltage waves are defined as the 
+            wave leaving the component from the specified port. For example, `dict(probe1=c1|1)`, would attach a probe
+            to port 1 of the "c1" component. Probe names will appear in the coords of the "b" dimension of s-matrix
+            data returned by evaluate. 
+        shunt : bool, default: False
+            If True, port 2 is connected to ground and port 1 is transformed into a 2-port component that can be 
+            cascaded with other components.
+        passive : bool, default: True
+            if True, ``evaluate`` calls ``evaluate_sdata`` instead of ``evaluate_data`` and noise correlation
+            matrix is computed passively.
+        state : dict, optional
+            dictionary of state variables specific to each component. Keys must be component designators.
+            The state values can be read with the ``state`` property and changed later with `set_state()`. Attempting
+            to set the state of variables that were not included in the initial dictionary will raise an error.
+        """
+        ports, netlist, probe_netlist, probe_names = network_assemble(components, nodes, cascades, probes)
+
+        cls.ports = ports
+        cls.netlist = netlist
+        cls.probe_netlist = probe_netlist
+        cls.probe_names = probe_names
+        cls.cls_components = components
+        cls.probes = probes
+        
+        return cls(shunt=shunt, passive=passive, state=state)
+
     def __init__(self, shunt: bool = False, passive: bool = False, state: dict = dict()):
         """
         Parameters
@@ -483,54 +531,3 @@ class Network(Component, metaclass=NetworkMeta):
         # return the square matrix sdata (excluding probes), and the noise data
         return sdata, ndata
 
-
-class DynamicNetwork(Network):
-    """
-    Network that allows the netlist to be defined at runtime instead of statically declared.
-    """
-    def __init__(self, 
-        components: dict, 
-        nodes: list = list(), 
-        cascades: list = list(), 
-        probes: dict = dict(),
-        shunt: bool = False, 
-        passive: bool = False, 
-        state: dict = dict()
-    ):
-        """
-        Parameters
-        ----------
-        components : dict
-            dictionary of Component objects where the keys are the reference designators.
-        nodes : list
-            list of tuples, where each tuple is a group of component ports that are connected into a single node.
-        cascades : list
-            list of tuples, where each tuple is a group of components that are connected end to end, port 2 to port 1.
-        probes: dict
-            dictionary of probe names to the component port they attach to. Probe voltage waves are defined as the 
-            wave leaving the component from the specified port. For example, `dict(probe1=c1|1)`, would attach a probe
-            to port 1 of the "c1" component. Probe names will appear in the coords of the "b" dimension of s-matrix
-            data returned by evaluate. 
-        shunt : bool, default: False
-            If True, port 2 is connected to ground and port 1 is transformed into a 2-port component that can be 
-            cascaded with other components.
-        passive : bool, default: True
-            if True, ``evaluate`` calls ``evaluate_sdata`` instead of ``evaluate_data`` and noise correlation
-            matrix is computed passively.
-        state : dict, optional
-            dictionary of state variables specific to each component. Keys must be component designators.
-            The state values can be read with the ``state`` property and changed later with `set_state()`. Attempting
-            to set the state of variables that were not included in the initial dictionary will raise an error.
-        """
-        ports, netlist, probe_netlist, probe_names = network_assemble(components, nodes, cascades, probes)
-
-        self.ports = ports
-        self.netlist = netlist
-        self.probe_netlist = probe_netlist
-        self.probe_names = probe_names
-        self.cls_components = components
-        self.probes = probes
-        
-        super().__init__(shunt=shunt, passive=passive, state=state)
-
-    

@@ -86,7 +86,7 @@ f2 = 1.6e9
 g = rfn.utils.chebyshev_prototype(5, 0.25)
 print(g)
 
-bpf = rfn.elements.LumpedElementFilter(fc=(f1, f2), btype="bandpass", prototype=g)
+bpf = rfn.elements.LumpedElementFilter.from_prototype(fc=(f1, f2), btype="bandpass", prototype=g)
 
 frequency = np.arange(10e6, 3e9, 1e6)
 

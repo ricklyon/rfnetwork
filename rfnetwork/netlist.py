@@ -61,16 +61,16 @@ def cascade_to_nodes(cascades: list) -> list:
         # use 2nd port by default of first component, and 1st port of last component.
         cas = list(cas)
         first_port = cas[0]|2 if isinstance(cas[0], Component) else cas[0]
-        nodes.append((first_port, cas[1]|1))
+        nodes.append((first_port, (cas[1], 1)))
 
         for j in range(2, len(cas)-1):
             # connect the second port from the last component to the first port of the current one,
             # if the prev component is the first item in the list, use the port directly
-            nodes.append((cas[j-1]|2, cas[j]|1))
+            nodes.append(((cas[j-1], 2), (cas[j], 1)))
 
         # last item can be port or component
-        last_port = cas[-1]|1 if isinstance(cas[-1], Component) else cas[-1]
-        nodes.append((cas[-2]|2, last_port))
+        last_port = (cas[-1], 1) if isinstance(cas[-1], Component) else cas[-1]
+        nodes.append(((cas[-2], 2), last_port))
 
     return nodes
 
@@ -105,18 +105,25 @@ def convert_to_refdes(nodes: list, components: dict) -> Tuple[list, dict]:
             # each node item should be a component pointer and a port number
             obj, port = item
 
+            # if component is already a reference designator string and not an object, copy object from the components
+            # dictionary
+            if isinstance(obj, str):
+                designator = obj
+                refdes[designator] = components[designator]
+
             # If component is declared in the class, get the designator
-            if id(obj) in refdes_lookup_by_obj.keys():
+            elif id(obj) in refdes_lookup_by_obj.keys():
                 designator = refdes_lookup_by_obj[id(obj)]
+                # add designator to component dictionary
+                refdes[designator] = obj
+
             # otherwise assign a designator automatically
             else:
                 designator = "u__{:04}".format(auto_designator_counter)
                 auto_designator_counter += 1
                 # add the designator to the lookup table so duplicates are avoided
                 refdes_lookup_by_obj[id(obj)] = designator
-
-            # add designator to component dictionary
-            if designator not in refdes.keys():
+                # add designator to component dictionary
                 refdes[designator] = obj
 
             # add object port pair to the current node
