@@ -1508,6 +1508,8 @@ class FDTD_Solver():
             Db_hz_y2 = self.Db["hz_y2"] * dy_inv,
         )
 
+        # TODO: drop endpoints of coefficients in running GPU
+
         temp_mem_size = 0
         for s in self.fshape.values():
             # three copies of each field, two for the split fields and one combined field
