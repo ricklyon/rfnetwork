@@ -1407,7 +1407,6 @@ class FDTD_Solver():
             if p is not None:
                 p["src"] = None
 
-
     def solve(self, n_threads: int = 4, show_progress: bool = True):
         """
         Run FDTD algorithm. At least one port must have an excitation defined before running. Results will be written
@@ -1449,9 +1448,11 @@ class FDTD_Solver():
         dy_h_inv = 1 / dy_h[None, :, None]
         dz_h_inv = 1 / dz_h[None, None, :]
 
-        # dx with an extra component for the last component at the x edge of the grid that has no neighboring
+        # dx, dy, dz with an extra component for the last component at the edge of the grid that has no neighboring
         # cell.
-        dx1_h_inv = np.vstack([dx_h_inv, [[[0]]]])
+        dx1_h_inv = np.concatenate([dx_h_inv, [[[0]]]], axis=0)
+        dy1_h_inv = np.concatenate([dy_h_inv, [[[0]]]], axis=1)
+        dz1_h_inv = np.concatenate([dz_h_inv, [[[0]]]], axis=2)
 
         # to avoid inefficiently indexing the coefficients at every update, the ends of the coefficients are indexed
         # out so they can be directly multiplied with the difference operations in the update equations. 
@@ -1460,25 +1461,25 @@ class FDTD_Solver():
         # the grid are not included in any cell and are not updated (PEC boundary.) 
         coefficients = dict(
             # ex coefficients, edges along y and z do not get updated
-            Ca_ex_y = np.array(self.Ca["ex_y"][:, 1:-1, 1:-1], order="C", dtype=dtype_),
-            Ca_ex_z = np.array(self.Ca["ex_z"][:, 1:-1, 1:-1], order="C", dtype=dtype_),
+            Ca_ex_y = np.array(self.Ca["ex_y"][:, 1:, 1:], order="C", dtype=dtype_),
+            Ca_ex_z = np.array(self.Ca["ex_z"][:, 1:, 1:], order="C", dtype=dtype_),
             
-            Cb_ex_y = np.array(self.Cb["ex_y"][:, 1:-1, 1:-1] * dy_h_inv, order="C", dtype=dtype_),
-            Cb_ex_z = np.array(-self.Cb["ex_z"][:, 1:-1, 1:-1] * dz_h_inv, order="C", dtype=dtype_),
+            Cb_ex_y = np.array(self.Cb["ex_y"][:, 1:, 1:] * dy1_h_inv, order="C", dtype=dtype_),
+            Cb_ex_z = np.array(-self.Cb["ex_z"][:, 1:, 1:] * dz1_h_inv, order="C", dtype=dtype_),
 
             # ey coefficients, edges along x and z do not get updated
-            Ca_ey_z = np.array(self.Ca["ey_z"][1:, :, 1:-1], order="C", dtype=dtype_),
-            Ca_ey_x = np.array(self.Ca["ey_x"][1:, :, 1:-1], order="C", dtype=dtype_),
+            Ca_ey_z = np.array(self.Ca["ey_z"][1:, :, 1:], order="C", dtype=dtype_),
+            Ca_ey_x = np.array(self.Ca["ey_x"][1:, :, 1:], order="C", dtype=dtype_),
             
-            Cb_ey_z = np.array(self.Cb["ey_z"][1:, :, 1:-1] * dz_h_inv, order="C", dtype=dtype_),
-            Cb_ey_x = np.array(-self.Cb["ey_x"][1:, :, 1:-1] * dx1_h_inv, order="C", dtype=dtype_),
+            Cb_ey_z = np.array(self.Cb["ey_z"][1:, :, 1:] * dz1_h_inv, order="C", dtype=dtype_),
+            Cb_ey_x = np.array(-self.Cb["ey_x"][1:, :, 1:] * dx1_h_inv, order="C", dtype=dtype_),
 
             # ez coefficients, edges along x and y do not get updated
-            Ca_ez_x = np.array(self.Ca["ez_x"][1:, 1:-1, :], order="C", dtype=dtype_),
-            Ca_ez_y = np.array(self.Ca["ez_y"][1:, 1:-1, :], order="C", dtype=dtype_),
+            Ca_ez_x = np.array(self.Ca["ez_x"][1:, 1:, :], order="C", dtype=dtype_),
+            Ca_ez_y = np.array(self.Ca["ez_y"][1:, 1:, :], order="C", dtype=dtype_),
             
-            Cb_ez_x = np.array(self.Cb["ez_x"][1:, 1:-1, :] * dx1_h_inv, order="C", dtype=dtype_),
-            Cb_ez_y = np.array(-self.Cb["ez_y"][1:, 1:-1, :] * dy_h_inv, order="C", dtype=dtype_),
+            Cb_ez_x = np.array(self.Cb["ez_x"][1:, 1:, :] * dx1_h_inv, order="C", dtype=dtype_),
+            Cb_ez_y = np.array(-self.Cb["ez_y"][1:, 1:, :] * dy1_h_inv, order="C", dtype=dtype_),
 
             # hx coefficients
             Da_hx_y = self.Da["hx_y"][1:],
@@ -1490,25 +1491,25 @@ class FDTD_Solver():
             Db_hx_z2 = self.Db["hx_z2"][1:] * dz_inv,
 
             # hy coefficients
-            Da_hy_z = self.Da["hy_z"],
-            Da_hy_x = self.Da["hy_x"],
+            Da_hy_z = self.Da["hy_z"][:, 1:],
+            Da_hy_x = self.Da["hy_x"][:, 1:],
             
-            Db_hy_z1 = -self.Db["hy_z1"] * dz_inv,
-            Db_hy_z2 = -self.Db["hy_z2"] * dz_inv,
-            Db_hy_x1 = self.Db["hy_x1"] * dx_inv,
-            Db_hy_x2 = self.Db["hy_x2"] * dx_inv,
+            Db_hy_z1 = -self.Db["hy_z1"][:, 1:] * dz_inv,
+            Db_hy_z2 = -self.Db["hy_z2"][:, 1:] * dz_inv,
+            Db_hy_x1 = self.Db["hy_x1"][:, 1:] * dx_inv,
+            Db_hy_x2 = self.Db["hy_x2"][:, 1:] * dx_inv,
 
             # hz coefficients
-            Da_hz_x = self.Da["hz_x"],
-            Da_hz_y = self.Da["hz_y"],
+            Da_hz_x = self.Da["hz_x"][:, :, 1:],
+            Da_hz_y = self.Da["hz_y"][:, :, 1:],
             
-            Db_hz_x1 = -self.Db["hz_x1"] * dx_inv,
-            Db_hz_x2 = -self.Db["hz_x2"] * dx_inv,
-            Db_hz_y1 = self.Db["hz_y1"] * dy_inv,
-            Db_hz_y2 = self.Db["hz_y2"] * dy_inv,
+            Db_hz_x1 = -self.Db["hz_x1"][:, :, 1:] * dx_inv,
+            Db_hz_x2 = -self.Db["hz_x2"][:, :, 1:] * dx_inv,
+            Db_hz_y1 = self.Db["hz_y1"][:, :, 1:] * dy_inv,
+            Db_hz_y2 = self.Db["hz_y2"][:, :, 1:] * dy_inv,
         )
 
-        # TODO: drop endpoints of coefficients in running GPU
+        # TODO: drop endpoints of coefficients if running CPU
 
         temp_mem_size = 0
         for s in self.fshape.values():

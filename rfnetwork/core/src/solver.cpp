@@ -501,6 +501,8 @@ int SolverFDTD::solver_init_probes(PyObject * py_probes, int Nt)
         
         // cell that the field component belongs to
         probes[s].x_cell = (int) PyLong_AsLong(PyList_GetItem(py_idx, 0));
+        probes[s].y_cell = (int) PyLong_AsLong(PyList_GetItem(py_idx, 1));
+        probes[s].z_cell = (int) PyLong_AsLong(PyList_GetItem(py_idx, 2));
 
         int field_type = PyLong_AsLong(PyDict_GetItemString(probe_dict, "field"));
         probes[s].field_type = field_type;
@@ -508,12 +510,23 @@ int SolverFDTD::solver_init_probes(PyObject * py_probes, int Nt)
         // if component's first index is at x=0 instead of x=0.5, the first usable component
         // is at index=1. The first thread does not capture the Ey, Ez, and Hx components at x=0. Each cell
         // contains the components in the middle and end of each yee grid cell along x.
+        // offset x index for ey, ez, and hx components
         if ((field_type == 1) || (field_type == 2) || (field_type == 3))
         {
             probes[s].x_cell -= 1;
         }
+        // offset y index for ex, ez, and hy components
+        if ((field_type == 0) || (field_type == 2) || (field_type == 4))
+        {
+            probes[s].y_cell -= 1;
+        }
+        // offset z index for ex, ey and hz components
+        if ((field_type == 0) || (field_type == 1) || (field_type == 5))
+        {
+            probes[s].z_cell -= 1;
+        }
 
-        if (probes[s].x_cell < 0)
+        if ((probes[s].x_cell < 0) || (probes[s].y_cell < 0) || (probes[s].z_cell < 0))
         {
             throw std::runtime_error("Source cannot be placed on grid edge");
         }
@@ -1067,7 +1080,7 @@ void SolverFDTD::solver_thread(int x_start, int x_stop, int Nt, int thread_idx)
         for (Probe * p : h_probes) 
         {
             // apply soft source
-        if (p->is_source)
+            if (p->is_source)
             {
                 *(p->field_s1_p) = *(p->field_s1_p) + (p->values)[n];
                 *(p->field_s2_p) = *(p->field_s2_p) + (p->values)[n];

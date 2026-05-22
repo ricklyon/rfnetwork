@@ -155,6 +155,8 @@ struct Probe {
     float * field_s2_p; // pointer to second split field in grid
     int field_type;
     int x_cell; // cell index where the probe is located
+    int y_cell;
+    int z_cell;
     int yz_offset;
     int NyNz;
     bool is_source;
