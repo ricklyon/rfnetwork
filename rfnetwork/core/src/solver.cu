@@ -130,10 +130,10 @@ __global__ void update_ez_y(float* Ca_ez_y, float* Cb_ez_y, float* ez_y, float* 
 
     // grid indexing starts at the second ey component along x and z (edge components are not updated)
     int ez_idx  = (x_idx * Ny * Nz) + (y_idx * Nz) + z_idx;
-    int hx0_idx = (x_idx * Ny * Nz) + (y_idx * Nz) + z_idx;
-    int hx1_idx = (x_idx * Ny * Nz) + ((y_idx + 1) * Nz) + z_idx;
+    int hx1_idx = (x_idx * Ny * Nz) + (y_idx * Nz) + z_idx;
+    int hx2_idx = (x_idx * Ny * Nz) + ((y_idx + 1) * Nz) + z_idx;
 
-    ez_y[ez_idx] = Ca_ez_y[ez_idx] * ez_y[ez_idx] + Cb_ez_y[ez_idx] * (hx[hx1_idx] - hx[hx0_idx]);
+    ez_y[ez_idx] = Ca_ez_y[ez_idx] * ez_y[ez_idx] + Cb_ez_y[ez_idx] * (hx[hx2_idx] - hx[hx1_idx]);
 }
 
 // Add split e-field components
@@ -330,7 +330,7 @@ __global__ void update_hz_y(float* Da_hz_y, float* Db_hz_y1, float * Db_hz_y2, f
 }
 
 // Add split e-field components
-__global__ void combine_hx(float* hx , float* hx_y, float* hx_z, int Nx, int Ny, int Nz)
+__global__ void combine_hx(float* hx, float* hx_y, float* hx_z, int Nx, int Ny, int Nz)
 {
     int x_idx = threadIdx.x + blockIdx.x * blockDim.x;
     int y_idx = threadIdx.y + blockIdx.y * blockDim.y;
@@ -346,7 +346,7 @@ __global__ void combine_hx(float* hx , float* hx_y, float* hx_z, int Nx, int Ny,
     hx[hx_idx] = hx_y[hx_idx] + hx_z[hx_idx];
 }
 
-__global__ void combine_hy(float* hy , float* hy_z, float* hy_x, int Nx, int Ny, int Nz)
+__global__ void combine_hy(float* hy, float* hy_z, float* hy_x, int Nx, int Ny, int Nz)
 {
     int x_idx = threadIdx.x + blockIdx.x * blockDim.x;
     int y_idx = threadIdx.y + blockIdx.y * blockDim.y;
@@ -362,7 +362,7 @@ __global__ void combine_hy(float* hy , float* hy_z, float* hy_x, int Nx, int Ny,
     hy[hy_idx] = hy_z[hy_idx] + hy_x[hy_idx];
 }
 
-__global__ void combine_hz(float* hz , float* hz_x, float* hz_y, int Nx, int Ny, int Nz)
+__global__ void combine_hz(float* hz, float* hz_x, float* hz_y, int Nx, int Ny, int Nz)
 {
     int x_idx = threadIdx.x + blockIdx.x * blockDim.x;
     int y_idx = threadIdx.y + blockIdx.y * blockDim.y;
@@ -374,8 +374,8 @@ __global__ void combine_hz(float* hz , float* hz_x, float* hz_y, int Nx, int Ny,
         return;
     }
 
-    int ez_idx  = (x_idx * Ny * Nz) + (y_idx * Nz) + z_idx;
-    hz[ez_idx] = hz_x[ez_idx] + hz_y[ez_idx];
+    int hz_idx  = (x_idx * Ny * Nz) + (y_idx * Nz) + z_idx;
+    hz[hz_idx] = hz_x[hz_idx] + hz_y[hz_idx];
 }
 
 __global__ void update_source(float* field, float* field_sp1, float* field_sp2, float value)
@@ -475,7 +475,7 @@ void SolverFDTD::solver_run_cu(int Nt)
     cudaMalloc(&Ca_ey_z, f_size);
     cudaMalloc(&Ca_ey_x, f_size);
     cudaMalloc(&Cb_ey_z, f_size);
-    cudaMalloc(&Cb_ey_z, f_size);
+    cudaMalloc(&Cb_ey_x, f_size);
 
     float * Ca_ez_x = nullptr;
     float * Ca_ez_y = nullptr;
@@ -625,7 +625,6 @@ void SolverFDTD::solver_run_cu(int Nt)
 
     for (int i = 0; i < n_probes; i++)
     {   
-
         Probe * p = &(probes[i]);
 
         int idx = ((p->x_cell) * Nx) + ((p->y_cell) * Ny) + ((p->z_cell) * Nz);
@@ -642,11 +641,11 @@ void SolverFDTD::solver_run_cu(int Nt)
         update_ex_y<<<grid_size, block_size>>>(Ca_ex_y, Cb_ex_y, p_ex_y, p_hz, Nx, Ny, Nz);
         update_ex_z<<<grid_size, block_size>>>(Ca_ex_z, Cb_ex_z, p_ex_z, p_hy, Nx, Ny, Nz);
 
-        update_ey_z<<<grid_size, block_size>>>(Ca_ey_z, Cb_ey_z, p_ex_y, p_hx, Nx, Ny, Nz);
-        update_ey_x<<<grid_size, block_size>>>(Ca_ey_x, Cb_ey_x, p_ex_y, p_hz, Nx, Ny, Nz);
+        update_ey_z<<<grid_size, block_size>>>(Ca_ey_z, Cb_ey_z, p_ey_z, p_hx, Nx, Ny, Nz);
+        update_ey_x<<<grid_size, block_size>>>(Ca_ey_x, Cb_ey_x, p_ey_x, p_hz, Nx, Ny, Nz);
 
         update_ez_x<<<grid_size, block_size>>>(Ca_ez_x, Cb_ez_x, p_ez_x, p_hy, Nx, Ny, Nz);
-        update_ez_y<<<grid_size, block_size>>>(Ca_ez_y, Cb_ez_x, p_ez_y, p_hx, Nx, Ny, Nz);
+        update_ez_y<<<grid_size, block_size>>>(Ca_ez_y, Cb_ez_y, p_ez_y, p_hx, Nx, Ny, Nz);
 
         // Wait for the kernel to complete execution
         cudaDeviceSynchronize();
@@ -661,7 +660,7 @@ void SolverFDTD::solver_run_cu(int Nt)
         update_hx_y<<<grid_size, block_size>>>(Da_hx_y, Db_hx_y1, Db_hx_y2, p_hx_y, p_ez, Nx, Ny, Nz);
         update_hx_z<<<grid_size, block_size>>>(Da_hx_z, Db_hx_z1, Db_hx_z2, p_hx_z, p_ey, Nx, Ny, Nz);
 
-        update_hy_z<<<grid_size, block_size>>>(Da_hy_z, Db_hy_z1, Db_hy_z2, p_hx_y, p_ex, Nx, Ny, Nz);
+        update_hy_z<<<grid_size, block_size>>>(Da_hy_z, Db_hy_z1, Db_hy_z2, p_hy_z, p_ex, Nx, Ny, Nz);
         update_hy_x<<<grid_size, block_size>>>(Da_hy_x, Db_hy_x1, Db_hy_x2, p_hy_x, p_ez, Nx, Ny, Nz);
 
         update_hz_x<<<grid_size, block_size>>>(Da_hz_x, Db_hz_x1, Db_hz_x2, p_hz_x, p_ey, Nx, Ny, Nz);
