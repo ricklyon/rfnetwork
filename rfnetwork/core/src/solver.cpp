@@ -267,10 +267,10 @@ int SolverFDTD::solver_init_fields(PyObject * py_mem, PyObject * coefficients, i
     // y and z endpoints do not get updated and don't have coefficients 
     Cx.Ny = Ny - 1; 
     Cx.Nz = Nz - 1;
-    Cx.Cb_ex_y = get_solver_array(coefficients, "Cb_ex_y", Nx, Cx.Ny, Cx.Nz);
-    Cx.Cb_ex_z = get_solver_array(coefficients, "Cb_ex_z", Nx, Cx.Ny, Cx.Nz);
-    Cx.Ca_ex_y = get_solver_array(coefficients, "Ca_ex_y", Nx, Cx.Ny, Cx.Nz);
-    Cx.Ca_ex_z = get_solver_array(coefficients, "Ca_ex_z", Nx, Cx.Ny, Cx.Nz);
+    Cx.Cb_ex_y = get_solver_array(coefficients, "Cb_ex_y", Nx, Ny, Nz);
+    Cx.Cb_ex_z = get_solver_array(coefficients, "Cb_ex_z", Nx, Ny, Nz);
+    Cx.Ca_ex_y = get_solver_array(coefficients, "Ca_ex_y", Nx, Ny, Nz);
+    Cx.Ca_ex_z = get_solver_array(coefficients, "Ca_ex_z", Nx, Ny, Nz);
     Cx.NyNz = Cx.Ny * Cx.Nz;
 
     // initialize ey pointers
@@ -282,16 +282,16 @@ int SolverFDTD::solver_init_fields(PyObject * py_mem, PyObject * coefficients, i
     // x and z endpoints do not get updated and don't have coefficients 
     Cy.Ny = Ny; 
     Cy.Nz = Nz - 1;
-    Cy.Cb_ey_z = get_solver_array(coefficients, "Cb_ey_z", Nx, Cy.Ny, Cy.Nz);
-    Cy.Cb_ey_x = get_solver_array(coefficients, "Cb_ey_x", Nx, Cy.Ny, Cy.Nz);
-    Cy.Ca_ey_z = get_solver_array(coefficients, "Ca_ey_z", Nx, Cy.Ny, Cy.Nz);
-    Cy.Ca_ey_x = get_solver_array(coefficients, "Ca_ey_x", Nx, Cy.Ny, Cy.Nz);
-    Cy.NyNz = Cy.Ny * Cy.Nz;
+    Cy.Cb_ey_z = get_solver_array(coefficients, "Cb_ey_z", Nx, Ny, Nz);
+    Cy.Cb_ey_x = get_solver_array(coefficients, "Cb_ey_x", Nx, Ny, Nz);
+    Cy.Ca_ey_z = get_solver_array(coefficients, "Ca_ey_z", Nx, Ny, Nz);
+    Cy.Ca_ey_x = get_solver_array(coefficients, "Ca_ey_x", Nx, Ny, Nz);
+    int NyNz = Ny * Nz;
     // ensure coefficients at the end of the x-axis are zero to create a PEC boundary
-    memset(Cy.Cb_ey_z + ((Nx - 1) * Cy.NyNz), 0, Cy.NyNz * sizeof(float));
-    memset(Cy.Cb_ey_x + ((Nx - 1) * Cy.NyNz), 0, Cy.NyNz * sizeof(float));
-    memset(Cy.Ca_ey_z + ((Nx - 1) * Cy.NyNz), 0, Cy.NyNz * sizeof(float));
-    memset(Cy.Ca_ey_x + ((Nx - 1) * Cy.NyNz), 0, Cy.NyNz * sizeof(float));
+    memset(Cy.Cb_ey_z + ((Nx - 1) * NyNz), 0, NyNz * sizeof(float));
+    memset(Cy.Cb_ey_x + ((Nx - 1) * NyNz), 0, NyNz * sizeof(float));
+    memset(Cy.Ca_ey_z + ((Nx - 1) * NyNz), 0, NyNz * sizeof(float));
+    memset(Cy.Ca_ey_x + ((Nx - 1) * NyNz), 0, NyNz * sizeof(float));
 
 
     // initialize ez pointers
@@ -303,16 +303,16 @@ int SolverFDTD::solver_init_fields(PyObject * py_mem, PyObject * coefficients, i
     // x and y endpoints do not get updated and don't have coefficients 
     Cz.Ny = Ny - 1; 
     Cz.Nz = Nz;
-    Cz.Cb_ez_x = get_solver_array(coefficients, "Cb_ez_x", Nx, Cz.Ny, Cz.Nz);
-    Cz.Cb_ez_y = get_solver_array(coefficients, "Cb_ez_y", Nx, Cz.Ny, Cz.Nz);
-    Cz.Ca_ez_x = get_solver_array(coefficients, "Ca_ez_x", Nx, Cz.Ny, Cz.Nz);
-    Cz.Ca_ez_y = get_solver_array(coefficients, "Ca_ez_y", Nx, Cz.Ny, Cz.Nz);
+    Cz.Cb_ez_x = get_solver_array(coefficients, "Cb_ez_x", Nx, Ny, Nz);
+    Cz.Cb_ez_y = get_solver_array(coefficients, "Cb_ez_y", Nx, Ny, Nz);
+    Cz.Ca_ez_x = get_solver_array(coefficients, "Ca_ez_x", Nx, Ny, Nz);
+    Cz.Ca_ez_y = get_solver_array(coefficients, "Ca_ez_y", Nx, Ny, Nz);
     Cz.NyNz = Cz.Ny * Cz.Nz;
     // ensure coefficients at the end of the x-axis are zero to create a PEC boundary
-    memset(Cz.Cb_ez_x + ((Nx - 1) * Cz.NyNz), 0, Cz.NyNz * sizeof(float));
-    memset(Cz.Cb_ez_y + ((Nx - 1) * Cz.NyNz), 0, Cz.NyNz * sizeof(float));
-    memset(Cz.Ca_ez_x + ((Nx - 1) * Cz.NyNz), 0, Cz.NyNz * sizeof(float));
-    memset(Cz.Ca_ez_y + ((Nx - 1) * Cz.NyNz), 0, Cz.NyNz * sizeof(float));
+    memset(Cz.Cb_ez_x + ((Nx - 1) * NyNz), 0, NyNz * sizeof(float));
+    memset(Cz.Cb_ez_y + ((Nx - 1) * NyNz), 0, NyNz * sizeof(float));
+    memset(Cz.Ca_ez_x + ((Nx - 1) * NyNz), 0, NyNz * sizeof(float));
+    memset(Cz.Ca_ez_y + ((Nx - 1) * NyNz), 0, NyNz * sizeof(float));
 
     // initialize hx pointers
     Hx.Nx = Nx;
@@ -320,20 +320,20 @@ int SolverFDTD::solver_init_fields(PyObject * py_mem, PyObject * coefficients, i
     Hx.Nz = Nz;
     Hx.NyNz = Hx.Ny * Hx.Nz;
 
-    Dx.Db_hx_y1 = get_solver_array(coefficients, "Db_hx_y1", Nx, Hx.Ny, Hx.Nz);
-    Dx.Db_hx_y2 = get_solver_array(coefficients, "Db_hx_y2", Nx, Hx.Ny, Hx.Nz);
-    Dx.Db_hx_z1 = get_solver_array(coefficients, "Db_hx_z1", Nx, Hx.Ny, Hx.Nz);
-    Dx.Db_hx_z2 = get_solver_array(coefficients, "Db_hx_z2", Nx, Hx.Ny, Hx.Nz);
+    Dx.Db_hx_y1 = get_solver_array(coefficients, "Db_hx_y1", Nx, Ny, Nz);
+    Dx.Db_hx_y2 = get_solver_array(coefficients, "Db_hx_y2", Nx, Ny, Nz);
+    Dx.Db_hx_z1 = get_solver_array(coefficients, "Db_hx_z1", Nx, Ny, Nz);
+    Dx.Db_hx_z2 = get_solver_array(coefficients, "Db_hx_z2", Nx, Ny, Nz);
     
-    Dx.Da_hx_y = get_solver_array(coefficients, "Da_hx_y", Nx, Hx.Ny, Hx.Nz);
-    Dx.Da_hx_z = get_solver_array(coefficients, "Da_hx_z", Nx, Hx.Ny, Hx.Nz);
+    Dx.Da_hx_y = get_solver_array(coefficients, "Da_hx_y", Nx, Ny, Nz);
+    Dx.Da_hx_z = get_solver_array(coefficients, "Da_hx_z", Nx, Ny, Nz);
     // ensure coefficients at the end of the x-axis are zero to create a PEC boundary
-    memset(Dx.Db_hx_y1 + ((Nx - 1) * Hx.Ny * Hx.Nz), 0, Hx.Ny * Hx.Nz * sizeof(float));
-    memset(Dx.Db_hx_y2 + ((Nx - 1) * Hx.Ny * Hx.Nz), 0, Hx.Ny * Hx.Nz * sizeof(float));
-    memset(Dx.Db_hx_z1 + ((Nx - 1) * Hx.Ny * Hx.Nz), 0, Hx.Ny * Hx.Nz * sizeof(float));
-    memset(Dx.Db_hx_z2 + ((Nx - 1) * Hx.Ny * Hx.Nz), 0, Hx.Ny * Hx.Nz * sizeof(float));
-    memset(Dx.Da_hx_y + ((Nx - 1) * Hx.Ny * Hx.Nz), 0, Hx.Ny * Hx.Nz * sizeof(float));
-    memset(Dx.Da_hx_z + ((Nx - 1) * Hx.Ny * Hx.Nz), 0, Hx.Ny * Hx.Nz * sizeof(float));
+    memset(Dx.Db_hx_y1 + ((Nx - 1) * Ny * Nz), 0, Ny * Nz * sizeof(float));
+    memset(Dx.Db_hx_y2 + ((Nx - 1) * Ny * Nz), 0, Ny * Nz * sizeof(float));
+    memset(Dx.Db_hx_z1 + ((Nx - 1) * Ny * Nz), 0, Ny * Nz * sizeof(float));
+    memset(Dx.Db_hx_z2 + ((Nx - 1) * Ny * Nz), 0, Ny * Nz * sizeof(float));
+    memset(Dx.Da_hx_y + ((Nx - 1) * Ny * Nz), 0, Ny * Nz * sizeof(float));
+    memset(Dx.Da_hx_z + ((Nx - 1) * Ny * Nz), 0, Ny * Nz * sizeof(float));
 
     // initialize hy pointers
     Hy.Nx = Nx;
@@ -341,13 +341,13 @@ int SolverFDTD::solver_init_fields(PyObject * py_mem, PyObject * coefficients, i
     Hy.Nz = Nz;
     Hy.NyNz = Hy.Ny * Hy.Nz;
 
-    Dy.Db_hy_z1 = get_solver_array(coefficients, "Db_hy_z1", Nx, Hy.Ny, Hy.Nz);
-    Dy.Db_hy_z2 = get_solver_array(coefficients, "Db_hy_z2", Nx, Hy.Ny, Hy.Nz);
-    Dy.Db_hy_x1 = get_solver_array(coefficients, "Db_hy_x1", Nx, Hy.Ny, Hy.Nz);
-    Dy.Db_hy_x2 = get_solver_array(coefficients, "Db_hy_x2", Nx, Hy.Ny, Hy.Nz);
+    Dy.Db_hy_z1 = get_solver_array(coefficients, "Db_hy_z1", Nx, Ny, Nz);
+    Dy.Db_hy_z2 = get_solver_array(coefficients, "Db_hy_z2", Nx, Ny, Nz);
+    Dy.Db_hy_x1 = get_solver_array(coefficients, "Db_hy_x1", Nx, Ny, Nz);
+    Dy.Db_hy_x2 = get_solver_array(coefficients, "Db_hy_x2", Nx, Ny, Nz);
 
-    Dy.Da_hy_z = get_solver_array(coefficients, "Da_hy_z", Nx, Hy.Ny, Hy.Nz);
-    Dy.Da_hy_x = get_solver_array(coefficients, "Da_hy_x", Nx, Hy.Ny, Hy.Nz);
+    Dy.Da_hy_z = get_solver_array(coefficients, "Da_hy_z", Nx, Ny, Nz);
+    Dy.Da_hy_x = get_solver_array(coefficients, "Da_hy_x", Nx, Ny, Nz);
 
     // initialize hz pointers
     Hz.Nx = Nx;
@@ -355,13 +355,13 @@ int SolverFDTD::solver_init_fields(PyObject * py_mem, PyObject * coefficients, i
     Hz.Nz = Nz + 1;
     Hz.NyNz = Hz.Ny * Hz.Nz;
 
-    Dz.Db_hz_x1 = get_solver_array(coefficients, "Db_hz_x1", Nx, Hz.Ny, Hz.Nz);
-    Dz.Db_hz_x2 = get_solver_array(coefficients, "Db_hz_x2", Nx, Hz.Ny, Hz.Nz);
-    Dz.Db_hz_y1 = get_solver_array(coefficients, "Db_hz_y1", Nx, Hz.Ny, Hz.Nz);
-    Dz.Db_hz_y2 = get_solver_array(coefficients, "Db_hz_y2", Nx, Hz.Ny, Hz.Nz);
+    Dz.Db_hz_x1 = get_solver_array(coefficients, "Db_hz_x1", Nx, Ny, Nz);
+    Dz.Db_hz_x2 = get_solver_array(coefficients, "Db_hz_x2", Nx, Ny, Nz);
+    Dz.Db_hz_y1 = get_solver_array(coefficients, "Db_hz_y1", Nx, Ny, Nz);
+    Dz.Db_hz_y2 = get_solver_array(coefficients, "Db_hz_y2", Nx, Ny, Nz);
 
-    Dz.Da_hz_x = get_solver_array(coefficients, "Da_hz_x", Nx, Hz.Ny, Hz.Nz);
-    Dz.Da_hz_y = get_solver_array(coefficients, "Da_hz_y", Nx, Hz.Ny, Hz.Nz);
+    Dz.Da_hz_x = get_solver_array(coefficients, "Da_hz_x", Nx, Ny, Nz);
+    Dz.Da_hz_y = get_solver_array(coefficients, "Da_hz_y", Nx, Ny, Nz);
 
     return 0;
 }

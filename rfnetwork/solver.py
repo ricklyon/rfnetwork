@@ -1482,31 +1482,31 @@ class FDTD_Solver():
             Cb_ez_y = np.array(-self.Cb["ez_y"][1:, 1:, :] * dy1_h_inv, order="C", dtype=dtype_),
 
             # hx coefficients
-            Da_hx_y = self.Da["hx_y"][1:],
-            Da_hx_z = self.Da["hx_z"][1:],
+            Da_hx_y = np.array(self.Da["hx_y"][1:], order="C", dtype=dtype_),
+            Da_hx_z = np.array(self.Da["hx_z"][1:], order="C", dtype=dtype_),
             
-            Db_hx_y1 = -self.Db["hx_y1"][1:] * dy_inv,
-            Db_hx_y2 = -self.Db["hx_y2"][1:] * dy_inv,
-            Db_hx_z1 = self.Db["hx_z1"][1:] * dz_inv,
-            Db_hx_z2 = self.Db["hx_z2"][1:] * dz_inv,
+            Db_hx_y1 = np.array(-self.Db["hx_y1"][1:] * dy_inv, order="C", dtype=dtype_),
+            Db_hx_y2 = np.array(-self.Db["hx_y2"][1:] * dy_inv, order="C", dtype=dtype_),
+            Db_hx_z1 = np.array(self.Db["hx_z1"][1:] * dz_inv, order="C", dtype=dtype_),
+            Db_hx_z2 = np.array(self.Db["hx_z2"][1:] * dz_inv, order="C", dtype=dtype_),
 
             # hy coefficients
-            Da_hy_z = self.Da["hy_z"][:, 1:],
-            Da_hy_x = self.Da["hy_x"][:, 1:],
+            Da_hy_z = np.array(self.Da["hy_z"][:, 1:], order="C", dtype=dtype_),
+            Da_hy_x = np.array(self.Da["hy_x"][:, 1:], order="C", dtype=dtype_),
             
-            Db_hy_z1 = -self.Db["hy_z1"][:, 1:] * dz_inv,
-            Db_hy_z2 = -self.Db["hy_z2"][:, 1:] * dz_inv,
-            Db_hy_x1 = self.Db["hy_x1"][:, 1:] * dx_inv,
-            Db_hy_x2 = self.Db["hy_x2"][:, 1:] * dx_inv,
+            Db_hy_z1 = np.array(-self.Db["hy_z1"][:, 1:] * dz_inv, order="C", dtype=dtype_),
+            Db_hy_z2 = np.array(-self.Db["hy_z2"][:, 1:] * dz_inv, order="C", dtype=dtype_),
+            Db_hy_x1 = np.array(self.Db["hy_x1"][:, 1:] * dx_inv, order="C", dtype=dtype_),
+            Db_hy_x2 = np.array(self.Db["hy_x2"][:, 1:] * dx_inv, order="C", dtype=dtype_),
 
             # hz coefficients
-            Da_hz_x = self.Da["hz_x"][:, :, 1:],
-            Da_hz_y = self.Da["hz_y"][:, :, 1:],
+            Da_hz_x = np.array(self.Da["hz_x"][:, :, 1:], order="C", dtype=dtype_),
+            Da_hz_y = np.array(self.Da["hz_y"][:, :, 1:], order="C", dtype=dtype_),
             
-            Db_hz_x1 = -self.Db["hz_x1"][:, :, 1:] * dx_inv,
-            Db_hz_x2 = -self.Db["hz_x2"][:, :, 1:] * dx_inv,
-            Db_hz_y1 = self.Db["hz_y1"][:, :, 1:] * dy_inv,
-            Db_hz_y2 = self.Db["hz_y2"][:, :, 1:] * dy_inv,
+            Db_hz_x1 = np.array(-self.Db["hz_x1"][:, :, 1:] * dx_inv, order="C", dtype=dtype_),
+            Db_hz_x2 = np.array(-self.Db["hz_x2"][:, :, 1:] * dx_inv, order="C", dtype=dtype_),
+            Db_hz_y1 = np.array(self.Db["hz_y1"][:, :, 1:] * dy_inv, order="C", dtype=dtype_),
+            Db_hz_y2 = np.array(self.Db["hz_y2"][:, :, 1:] * dy_inv, order="C", dtype=dtype_),
         )
 
         # TODO: drop endpoints of coefficients if running CPU
