@@ -282,7 +282,7 @@ __global__ void update_hy_x(float* Da_hy_x, float* Db_hy_x1, float * Db_hy_x2, f
     hy_x[hy_idx] = Da_hy_x[hy_idx] * hy_x[hy_idx] + (Db_hy_x2[hy_idx] * ez[ez2_idx]) - (Db_hy_x1[hy_idx] * ez1);
 }
 
-__global__ void update_hz_x(float* Da_hz_x, float* Db_hz_x1, float * Db_hz_x2, float* hy_z, float* ey, int Nx, int Ny, int Nz)
+__global__ void update_hz_x(float* Da_hz_x, float* Db_hz_x1, float * Db_hz_x2, float* hz_x, float* ey, int Nx, int Ny, int Nz)
 {
     int x_idx = threadIdx.x + blockIdx.x * blockDim.x;
     int y_idx = threadIdx.y + blockIdx.y * blockDim.y;
@@ -302,7 +302,7 @@ __global__ void update_hz_x(float* Da_hz_x, float* Db_hz_x1, float * Db_hz_x2, f
     // use ey=0 if referencing the ex component at the edge of the grid
     float ey1 = x_idx > 0 ? ey[ey1_idx] : 0;
 
-    hy_z[hx_idx] = Da_hz_x[hx_idx] * hy_z[hx_idx] + (Db_hz_x2[hx_idx] * ey[ey2_idx]) - (Db_hz_x1[hx_idx] * ey1);
+    hz_x[hx_idx] = Da_hz_x[hx_idx] * hz_x[hx_idx] + (Db_hz_x2[hx_idx] * ey[ey2_idx]) - (Db_hz_x1[hx_idx] * ey1);
 }
 
 __global__ void update_hz_y(float* Da_hz_y, float* Db_hz_y1, float * Db_hz_y2, float* hz_y, float* ex, int Nx, int Ny, int Nz)
@@ -324,7 +324,7 @@ __global__ void update_hz_y(float* Da_hz_y, float* Db_hz_y1, float * Db_hz_y2, f
     int ex2_idx = x_stride + ((y_idx) * Nz) + z_idx;
 
     // use ey=0 if referencing the ex component at the edge of the grid
-    float ex1 = x_idx > 0 ? ex[ex1_idx] : 0;
+    float ex1 = y_idx > 0 ? ex[ex1_idx] : 0;
 
     hz_y[hz_idx] = Da_hz_y[hz_idx] * hz_y[hz_idx] + (Db_hz_y2[hz_idx] * ex[ex2_idx]) - (Db_hz_y1[hz_idx] * ex1);
 }
@@ -383,6 +383,166 @@ __global__ void update_source(float* field, float* field_sp1, float* field_sp2, 
     field_sp1[0] = field_sp1[0] + value;
     field_sp2[0] = field_sp2[0] + value;
     field[0] = field_sp1[0] + field_sp2[0];
+}
+
+__global__ void field_update_kernel(
+    float* Ca_ex_y, float* Cb_ex_y, float* ex_y,
+    float* Ca_ex_z , float* Cb_ex_z, float* ex_z,
+    float* Ca_ey_z, float* Cb_ey_z, float* ey_z,
+    float* Ca_ey_x, float* Cb_ey_x, float* ey_x,
+    float* Ca_ez_x, float* Cb_ez_x, float* ez_x,
+    float* Ca_ez_y, float* Cb_ez_y, float* ez_y,
+    float* Da_hx_y, float* Db_hx_y1, float * Db_hx_y2, float* hx_y,
+    float* Da_hx_z, float* Db_hx_z1, float * Db_hx_z2, float* hx_z,
+    float* Da_hy_z, float* Db_hy_z1, float * Db_hy_z2, float* hy_z,
+    float* Da_hy_x, float* Db_hy_x1, float * Db_hy_x2, float* hy_x,
+    float* Da_hz_x, float* Db_hz_x1, float * Db_hz_x2, float* hz_x,
+    float* Da_hz_y, float* Db_hz_y1, float * Db_hz_y2, float* hz_y,
+    float* ex, float* ey, float* ez, float* hx, float* hy, float* hz,
+    int Nx, int Ny, int Nz, int Nt
+)
+{
+
+    int x_idx = threadIdx.z + blockIdx.z * blockDim.z;
+    int y_idx = threadIdx.y + blockIdx.y * blockDim.y;
+    int z_idx = threadIdx.x + blockIdx.x * blockDim.x;
+
+    // skip update if thread is after the global grid boundary. 
+    if ((x_idx >= (Nx)) | (y_idx >= (Ny)) | (z_idx >= (Nz)) )
+    {
+        return;
+    }
+
+    // field index, applies to e and h fields
+    int f_idx  = (x_idx * Ny * Nz) + (y_idx * Nz) + z_idx;
+
+    // h-field indices on either side of e-fields
+    int hz_y2_idx = (x_idx * Ny * Nz) + ((y_idx + 1) * Nz) + z_idx;
+    int hy_z2_idx = (x_idx * Ny * Nz) + (y_idx * Nz) + z_idx + 1;
+
+    int hx_z2_idx = (x_idx * Ny * Nz)  + (y_idx * Nz) + z_idx + 1;
+    int hz_x2_idx = ((x_idx + 1) * Ny * Nz) + (y_idx * Nz) + z_idx;
+
+    int hy_x2_idx = ((x_idx + 1) * Ny * Nz) + (y_idx * Nz) + z_idx;
+    int hx_y2_idx = (x_idx * Ny * Nz) + ((y_idx + 1) * Nz) + z_idx;
+
+    // e-field indices on either side of h-fields
+    int ez_y1_idx = (x_idx * Ny * Nz) + ((y_idx - 1) * Nz) + z_idx;
+    float ez_y1 = 0;
+
+    int ey_z1_idx = (x_idx * Ny * Nz) + ((y_idx) * Nz) + z_idx - 1;
+    float ey_z1 = 0;
+
+    int ex_z1_idx = (x_idx * Ny * Nz) + ((y_idx) * Nz) + z_idx - 1;
+    float ex_z1 = 0;
+
+    int ez_x1_idx = ((x_idx - 1) * Ny * Nz) + ((y_idx) * Nz) + z_idx;
+    float ez_x1 = 0;
+
+    int ey_x1_idx = ((x_idx - 1) * Ny * Nz) + ((y_idx) * Nz) + z_idx;
+    float ey_x1 = 0;
+
+    int ex_y1_idx = (x_idx * Ny * Nz) + ((y_idx - 1) * Nz) + z_idx;
+    float ex_y1 = 0;
+
+    // main time stepping loop
+    for (int n = 0; n < Nt; n++)
+    {
+        // update ex_y
+        if (hz_y2_idx < Ny)
+        {
+            ex_y[f_idx] = Ca_ex_y[f_idx] * ex_y[f_idx] + Cb_ex_y[f_idx] * (hz[hz_y2_idx] - hz[f_idx]);
+        }
+        
+        // update ex_z
+        if (hy_z2_idx < Nz)
+        {
+            ex_z[f_idx] = Ca_ex_z[f_idx] * ex_z[f_idx] + Cb_ex_z[f_idx] * (hy[hy_z2_idx] - hy[f_idx]);
+        }
+
+        // update ey_z
+        if (hx_z2_idx < Nz)
+        {
+            ey_z[f_idx] = Ca_ey_z[f_idx] * ey_z[f_idx] + Cb_ey_z[f_idx] * (hx[hx_z2_idx] - hx[f_idx]);
+        }
+
+        // update ey_x
+        if (hz_x2_idx < Nx)
+        {
+            ey_x[f_idx] = Ca_ey_x[f_idx] * ey_x[f_idx] + Cb_ey_x[f_idx] * (hz[hz_x2_idx] - hz[f_idx]);
+        }
+
+        // update ez_x
+        if (hy_x2_idx < Nx)
+        {
+            ez_x[f_idx] = Ca_ez_x[f_idx] * ez_x[f_idx] + Cb_ez_x[f_idx] * (hy[hy_x2_idx] - hy[f_idx]);
+        }
+        
+        //update ez_y
+        if (hx_y2_idx < Ny)
+        {
+            ez_y[f_idx] = Ca_ez_y[f_idx] * ez_y[f_idx] + Cb_ez_y[f_idx] * (hx[hx_y2_idx] - hx[f_idx]);
+        }
+
+        // combine E fields
+        ex[f_idx] = ex_y[f_idx] + ex_z[f_idx];
+        ey[f_idx] = ey_z[f_idx] + ey_x[f_idx];
+        ez[f_idx] = ez_x[f_idx] + ez_y[f_idx];
+
+        // cudaDeviceSynchronize();
+
+        // update hx_y
+        if (y_idx > 0)
+        {
+            ez_y1 = ez[ez_y1_idx];
+        }
+        hx_y[f_idx] = Da_hx_y[f_idx] * hx_y[f_idx] + (Db_hx_y2[f_idx] * ez[f_idx]) - (Db_hx_y1[f_idx] * ez_y1);
+
+        // update hx_z
+        if (z_idx > 0)
+        {
+            ey_z1 = ey[ey_z1_idx];
+        }
+        hx_z[f_idx] = Da_hx_z[f_idx] * hx_z[f_idx] + (Db_hx_z2[f_idx] * ey[f_idx]) - (Db_hx_z1[f_idx] * ey_z1);
+
+        // update hy_z
+        if (z_idx > 0)
+        {
+            ex_z1 = ex[ex_z1_idx];
+        }
+        hy_z[f_idx] = Da_hy_z[f_idx] * hy_z[f_idx] + (Db_hy_z2[f_idx] * ex[f_idx]) - (Db_hy_z1[f_idx] * ex_z1);
+
+        // update hy_x
+        if (z_idx > 0)
+        {
+            ez_x1 = ez[ez_x1_idx];
+        }
+        hy_x[f_idx] = Da_hy_x[f_idx] * hy_x[f_idx] + (Db_hy_x2[f_idx] * ez[f_idx]) - (Db_hy_x1[f_idx] * ez_x1);
+
+        // update hz_x
+        if (x_idx > 0){
+            ey_x1 = ey[ey_x1_idx];
+        }
+        hz_x[f_idx] = Da_hz_x[f_idx] * hz_x[f_idx] + (Db_hz_x2[f_idx] * ey[f_idx]) - (Db_hz_x1[f_idx] * ey_x1);
+
+        // update hz_y
+        if (y_idx > 0)
+        {
+            ex_y1 = ex[ex_y1_idx];
+        }
+        hz_y[f_idx] = Da_hz_y[f_idx] * hz_y[f_idx] + (Db_hz_y2[f_idx] * ex[f_idx]) - (Db_hz_y1[f_idx] * ex_y1);
+
+        // combine h-fields
+        hx[f_idx] = hx_y[f_idx] + hx_z[f_idx];
+        hy[f_idx] = hy_z[f_idx] + hy_x[f_idx];
+        hz[f_idx] = hz_x[f_idx] + hz_y[f_idx];
+
+        // Wait for the kernel to complete execution
+        // cudaDeviceSynchronize();
+
+
+
+    }
 }
 
 
@@ -634,64 +794,81 @@ void SolverFDTD::solver_run_cu(int Nt)
 
     }
 
-    // main time stepping loop
-    for (int n = 0; n < Nt; n++)
-    {
-        // update e-fields
-        update_ex_y<<<grid_size, block_size>>>(Ca_ex_y, Cb_ex_y, p_ex_y, p_hz, Nx, Ny, Nz);
-        update_ex_z<<<grid_size, block_size>>>(Ca_ex_z, Cb_ex_z, p_ex_z, p_hy, Nx, Ny, Nz);
+    field_update_kernel<<<grid_size, block_size>>>(
+        Ca_ex_y, Cb_ex_y, p_ex_y,
+        Ca_ex_z, Cb_ex_z, p_ex_z,
+        Ca_ey_z, Cb_ey_z, p_ey_z,
+        Ca_ey_x, Cb_ey_x, p_ey_x,
+        Ca_ez_x, Cb_ez_x, p_ez_x,
+        Ca_ez_y, Cb_ez_y, p_ez_y,
+        Da_hx_y, Db_hx_y1, Db_hx_y2, p_hx_y,
+        Da_hx_z, Db_hx_z1, Db_hx_z2, p_hx_z,
+        Da_hy_z, Db_hy_z1, Db_hy_z2, p_hy_z,
+        Da_hy_x, Db_hy_x1, Db_hy_x2, p_hy_x,
+        Da_hz_x, Db_hz_x1, Db_hz_x2, p_hz_x,
+        Da_hz_y, Db_hz_y1, Db_hz_y2, p_hz_y,
+        p_ex, p_ey, p_ez, p_hx, p_hy, p_hz,
+        Nx, Ny, Nz, Nt
+    );
 
-        update_ey_z<<<grid_size, block_size>>>(Ca_ey_z, Cb_ey_z, p_ey_z, p_hx, Nx, Ny, Nz);
-        update_ey_x<<<grid_size, block_size>>>(Ca_ey_x, Cb_ey_x, p_ey_x, p_hz, Nx, Ny, Nz);
+    // // main time stepping loop
+    // for (int n = 0; n < Nt; n++)
+    // {
+    //     // update e-fields
+    //     update_ex_y<<<grid_size, block_size>>>(Ca_ex_y, Cb_ex_y, p_ex_y, p_hz, Nx, Ny, Nz);
+    //     update_ex_z<<<grid_size, block_size>>>(Ca_ex_z, Cb_ex_z, p_ex_z, p_hy, Nx, Ny, Nz);
 
-        update_ez_x<<<grid_size, block_size>>>(Ca_ez_x, Cb_ez_x, p_ez_x, p_hy, Nx, Ny, Nz);
-        update_ez_y<<<grid_size, block_size>>>(Ca_ez_y, Cb_ez_y, p_ez_y, p_hx, Nx, Ny, Nz);
+    //     update_ey_z<<<grid_size, block_size>>>(Ca_ey_z, Cb_ey_z, p_ey_z, p_hx, Nx, Ny, Nz);
+    //     update_ey_x<<<grid_size, block_size>>>(Ca_ey_x, Cb_ey_x, p_ey_x, p_hz, Nx, Ny, Nz);
 
-        // Wait for the kernel to complete execution
-        cudaDeviceSynchronize();
+    //     update_ez_x<<<grid_size, block_size>>>(Ca_ez_x, Cb_ez_x, p_ez_x, p_hy, Nx, Ny, Nz);
+    //     update_ez_y<<<grid_size, block_size>>>(Ca_ez_y, Cb_ez_y, p_ez_y, p_hx, Nx, Ny, Nz);
 
-        combine_ex<<<grid_size, block_size>>>(p_ex, p_ex_y, p_ex_z, Nx, Ny, Nz);
-        combine_ey<<<grid_size, block_size>>>(p_ey, p_ey_z, p_ey_x, Nx, Ny, Nz);
-        combine_ez<<<grid_size, block_size>>>(p_ez, p_ez_x, p_ez_y, Nx, Ny, Nz);
+    //     // Wait for the kernel to complete execution
+    //     cudaDeviceSynchronize();
 
-        cudaDeviceSynchronize();
+    //     combine_ex<<<grid_size, block_size>>>(p_ex, p_ex_y, p_ex_z, Nx, Ny, Nz);
+    //     combine_ey<<<grid_size, block_size>>>(p_ey, p_ey_z, p_ey_x, Nx, Ny, Nz);
+    //     combine_ez<<<grid_size, block_size>>>(p_ez, p_ez_x, p_ez_y, Nx, Ny, Nz);
 
-        // update h-fields
-        update_hx_y<<<grid_size, block_size>>>(Da_hx_y, Db_hx_y1, Db_hx_y2, p_hx_y, p_ez, Nx, Ny, Nz);
-        update_hx_z<<<grid_size, block_size>>>(Da_hx_z, Db_hx_z1, Db_hx_z2, p_hx_z, p_ey, Nx, Ny, Nz);
+    //     cudaDeviceSynchronize();
 
-        update_hy_z<<<grid_size, block_size>>>(Da_hy_z, Db_hy_z1, Db_hy_z2, p_hy_z, p_ex, Nx, Ny, Nz);
-        update_hy_x<<<grid_size, block_size>>>(Da_hy_x, Db_hy_x1, Db_hy_x2, p_hy_x, p_ez, Nx, Ny, Nz);
+    //     // update h-fields
+    //     update_hx_y<<<grid_size, block_size>>>(Da_hx_y, Db_hx_y1, Db_hx_y2, p_hx_y, p_ez, Nx, Ny, Nz);
+    //     update_hx_z<<<grid_size, block_size>>>(Da_hx_z, Db_hx_z1, Db_hx_z2, p_hx_z, p_ey, Nx, Ny, Nz);
 
-        update_hz_x<<<grid_size, block_size>>>(Da_hz_x, Db_hz_x1, Db_hz_x2, p_hz_x, p_ey, Nx, Ny, Nz);
-        update_hz_y<<<grid_size, block_size>>>(Da_hz_y, Db_hz_y1, Db_hz_y2, p_hz_y, p_ex, Nx, Ny, Nz);
+    //     update_hy_z<<<grid_size, block_size>>>(Da_hy_z, Db_hy_z1, Db_hy_z2, p_hy_z, p_ex, Nx, Ny, Nz);
+    //     update_hy_x<<<grid_size, block_size>>>(Da_hy_x, Db_hy_x1, Db_hy_x2, p_hy_x, p_ez, Nx, Ny, Nz);
 
-        cudaDeviceSynchronize();
+    //     update_hz_x<<<grid_size, block_size>>>(Da_hz_x, Db_hz_x1, Db_hz_x2, p_hz_x, p_ey, Nx, Ny, Nz);
+    //     update_hz_y<<<grid_size, block_size>>>(Da_hz_y, Db_hz_y1, Db_hz_y2, p_hz_y, p_ex, Nx, Ny, Nz);
 
-        combine_hx<<<grid_size, block_size>>>(p_hx, p_hx_y, p_hx_z, Nx, Ny, Nz);
-        combine_hy<<<grid_size, block_size>>>(p_hy, p_hy_z, p_hy_x, Nx, Ny, Nz);
-        combine_hz<<<grid_size, block_size>>>(p_hz, p_hz_x, p_hz_y, Nx, Ny, Nz);
+    //     cudaDeviceSynchronize();
 
-        cudaDeviceSynchronize();
+    //     combine_hx<<<grid_size, block_size>>>(p_hx, p_hx_y, p_hx_z, Nx, Ny, Nz);
+    //     combine_hy<<<grid_size, block_size>>>(p_hy, p_hy_z, p_hy_x, Nx, Ny, Nz);
+    //     combine_hz<<<grid_size, block_size>>>(p_hz, p_hz_x, p_hz_y, Nx, Ny, Nz);
+
+    //     cudaDeviceSynchronize();
 
 
-        for (int i = 0; i < n_probes; i++)
-        {   
-            Probe * p = &(probes[i]);
+    //     for (int i = 0; i < n_probes; i++)
+    //     {   
+    //         Probe * p = &(probes[i]);
 
-            if (p->is_source)
-            {
-                update_source<<<1, 1>>>(p->field_p, p->field_s1_p, p->field_s2_p, (p->values)[n]);
-            }
+    //         if (p->is_source)
+    //         {
+    //             update_source<<<1, 1>>>(p->field_p, p->field_s1_p, p->field_s2_p, (p->values)[n]);
+    //         }
 
-            // update probes
-            // if this is a source, the values array is replaced with the resulting total voltage after it is used for
-            // each time step.
-            cudaMemcpy(((p->values) + n), (p->field_p), 4, cudaMemcpyDefault);
-        }
+    //         // update probes
+    //         // if this is a source, the values array is replaced with the resulting total voltage after it is used for
+    //         // each time step.
+    //         cudaMemcpy(((p->values) + n), (p->field_p), 4, cudaMemcpyDefault);
+    //     }
 
-        cudaDeviceSynchronize();
-    }
+    //     cudaDeviceSynchronize();
+    // }
     
     // Clean up field arrays
     cudaFree(p_ex_y);
