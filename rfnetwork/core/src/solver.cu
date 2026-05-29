@@ -10,6 +10,11 @@
 
 #include "solver.h"
 
+#include <stdio.h>
+#include <cooperative_groups.h>
+
+namespace cg = cooperative_groups;
+
 // Ex update kernel
 __global__ void update_ex_y(float* Ca_ex_y, float* Cb_ex_y, float* ex_y, float* hz, int Nx, int Ny, int Nz)
 {
@@ -399,9 +404,12 @@ __global__ void field_update_kernel(
     float* Da_hz_x, float* Db_hz_x1, float * Db_hz_x2, float* hz_x,
     float* Da_hz_y, float* Db_hz_y1, float * Db_hz_y2, float* hz_y,
     float* ex, float* ey, float* ez, float* hx, float* hy, float* hz,
-    int Nx, int Ny, int Nz, int Nt
+    int* probe_idx, int* probe_type, int* probe_is_src, float* probe_values, 
+    int Nx, int Ny, int Nz, int Nt, int Np
 )
 {
+
+    cg::grid_group grid = cg::this_grid();
 
     int x_idx = threadIdx.z + blockIdx.z * blockDim.z;
     int y_idx = threadIdx.y + blockIdx.y * blockDim.y;
@@ -415,6 +423,40 @@ __global__ void field_update_kernel(
 
     // field index, applies to e and h fields
     int f_idx  = (x_idx * Ny * Nz) + (y_idx * Nz) + z_idx;
+
+    // number of probes in this cell (up to 6 if all components have probes, only 3 are supported right now)
+    int n_probe = 0;
+    int i_probe[3];
+    float * p_probe[3];
+
+    for (int i = 0; i < Np; i++)
+    {   
+        if ((probe_idx[i] == f_idx) && (n_probe < 3))
+        {
+            i_probe[n_probe] = i;
+
+            if (probe_type[i] == 0){
+                p_probe[n_probe] = ex;
+            }
+            else if (probe_type[i] == 1){
+                p_probe[n_probe] = ey;
+            }
+            else if (probe_type[i] == 2){
+                p_probe[n_probe] = ez;
+            }
+            else if (probe_type[i] == 3){
+                p_probe[n_probe] = hx;
+            }
+            else if (probe_type[i] == 4){
+                p_probe[n_probe] = hy;
+            }
+            else if (probe_type[i] == 5){
+                p_probe[n_probe] = hz;
+            }
+            
+            n_probe += 1;
+        }
+    }
 
     // h-field indices on either side of e-fields
     int hz_y2_idx = (x_idx * Ny * Nz) + ((y_idx + 1) * Nz) + z_idx;
@@ -444,6 +486,8 @@ __global__ void field_update_kernel(
 
     int ex_y1_idx = (x_idx * Ny * Nz) + ((y_idx - 1) * Nz) + z_idx;
     float ex_y1 = 0;
+
+    int p_idx;
 
     // main time stepping loop
     for (int n = 0; n < Nt; n++)
@@ -490,6 +534,7 @@ __global__ void field_update_kernel(
         ez[f_idx] = ez_x[f_idx] + ez_y[f_idx];
 
         // cudaDeviceSynchronize();
+        grid.sync();
 
         // update hx_y
         if (y_idx > 0)
@@ -540,7 +585,57 @@ __global__ void field_update_kernel(
         // Wait for the kernel to complete execution
         // cudaDeviceSynchronize();
 
+        for (int i = 0; i < n_probe; i++)
+        {   
+            p_idx = i_probe[i];
 
+            if (probe_is_src[p_idx])
+            {
+                if (probe_type[p_idx] == 0)
+                {
+                    ex_y[f_idx] += probe_values[(p_idx * Nt) + n];
+                    ex_z[f_idx] += probe_values[(p_idx * Nt) + n];
+                    ex[f_idx] = ex_y[f_idx] + ex_z[f_idx];
+                }
+                else if (probe_type[p_idx] == 1)
+                {
+                    ey_z[f_idx] += probe_values[(p_idx * Nt) + n];
+                    ey_x[f_idx] += probe_values[(p_idx * Nt) + n];
+                    ey[f_idx] = ey_z[f_idx] + ey_x[f_idx];
+                }
+                else if (probe_type[p_idx] == 2)
+                {
+                    ez_x[f_idx] += probe_values[(p_idx * Nt) + n];
+                    ez_y[f_idx] += probe_values[(p_idx * Nt) + n];
+                    ez[f_idx] = ez_x[f_idx] + ez_y[f_idx];
+                }
+                else if (probe_type[p_idx] == 3)
+                {
+                    hx_y[f_idx] += probe_values[(p_idx * Nt) + n];
+                    hx_z[f_idx] += probe_values[(p_idx * Nt) + n];
+                    hx[f_idx] = hx_y[f_idx] + hx_z[f_idx];
+                }
+                else if (probe_type[p_idx] == 4)
+                {
+                    hy_z[f_idx] += probe_values[(p_idx * Nt) + n];
+                    hy_x[f_idx] += probe_values[(p_idx * Nt) + n];
+                    hy[f_idx] = hy_z[f_idx] + hy_x[f_idx];
+                }
+                else if (probe_type[p_idx] == 5)
+                {
+                    hz_x[f_idx] += probe_values[(p_idx * Nt) + n];
+                    hz_y[f_idx] += probe_values[(p_idx * Nt) + n];
+                    hz[f_idx] = hz_x[f_idx] + hz_y[f_idx];
+                }
+            }
+
+            // update probes
+            // if this is a source, the values array is replaced with the resulting total voltage after it is used for
+            // each time step.
+            probe_values[(p_idx * Nt) + n] = p_probe[i][f_idx];
+        }
+
+        grid.sync();
 
     }
 }
@@ -776,40 +871,87 @@ void SolverFDTD::solver_run_cu(int Nt)
     cudaMemcpy(Db_hz_y1, Dz.Db_hz_y1, f_size, cudaMemcpyDefault);
     cudaMemcpy(Db_hz_y2, Dz.Db_hz_y2, f_size, cudaMemcpyDefault);
 
-    float * fields_base[6] = {p_ex, p_ey, p_ez, p_hx, p_hy, p_hz};
-    float * fields_sp1_base[6] = {p_ex_y, p_ey_z, p_ez_x, p_hx_y, p_hy_z, p_hz_x};
-    float * fields_sp2_base[6] = {p_ex_z, p_ey_x, p_ez_y, p_hx_z, p_hy_x, p_hz_y};
+    int probe_idx[MAX_PROBES];
+    int probe_type[MAX_PROBES];
+    float * probe_values[MAX_PROBES];
+    int probe_is_src[MAX_PROBES];
 
-    dim3 block_size(Nx_th, Ny_th, Nz_th);
-    dim3 grid_size(Nx_b, Ny_b, Nz_b);
+    int * probe_idx_dev = nullptr;
+    int * probe_type_dev = nullptr;
+    float * probe_values_dev = nullptr;
+    int * probe_is_src_dev = nullptr;
+
+    int probe_size = n_probes * sizeof(int);
+    cudaMalloc(&probe_idx_dev, n_probes * sizeof(int));
+    cudaMalloc(&probe_type_dev, n_probes * sizeof(int));
+    cudaMalloc(&probe_values_dev, n_probes * Nt * sizeof(float));
+    cudaMalloc(&probe_is_src_dev, n_probes * sizeof(int));
 
     for (int i = 0; i < n_probes; i++)
     {   
         Probe * p = &(probes[i]);
 
-        int idx = ((p->x_cell) * Nx) + ((p->y_cell) * Ny) + ((p->z_cell) * Nz);
-        p->field_p = (fields_base[p->field_type]) + idx;
-        p->field_s1_p = (fields_sp1_base[p->field_type]) + idx;
-        p->field_s2_p = (fields_sp2_base[p->field_type]) + idx;
+        probe_idx[i] = ((p->x_cell) * Nx) + ((p->y_cell) * Ny) + ((p->z_cell) * Nz);
+        probe_type[i] = p->field_type;
+        probe_is_src[i] = p->is_source;
 
+        cudaMemcpy(probe_values_dev + (i * Nt), p->values, Nt * sizeof(float), cudaMemcpyDefault);
     }
 
-    field_update_kernel<<<grid_size, block_size>>>(
-        Ca_ex_y, Cb_ex_y, p_ex_y,
-        Ca_ex_z, Cb_ex_z, p_ex_z,
-        Ca_ey_z, Cb_ey_z, p_ey_z,
-        Ca_ey_x, Cb_ey_x, p_ey_x,
-        Ca_ez_x, Cb_ez_x, p_ez_x,
-        Ca_ez_y, Cb_ez_y, p_ez_y,
-        Da_hx_y, Db_hx_y1, Db_hx_y2, p_hx_y,
-        Da_hx_z, Db_hx_z1, Db_hx_z2, p_hx_z,
-        Da_hy_z, Db_hy_z1, Db_hy_z2, p_hy_z,
-        Da_hy_x, Db_hy_x1, Db_hy_x2, p_hy_x,
-        Da_hz_x, Db_hz_x1, Db_hz_x2, p_hz_x,
-        Da_hz_y, Db_hz_y1, Db_hz_y2, p_hz_y,
-        p_ex, p_ey, p_ez, p_hx, p_hy, p_hz,
-        Nx, Ny, Nz, Nt
+    cudaMemcpy(probe_idx_dev, probe_idx, n_probes * sizeof(int), cudaMemcpyDefault);
+    cudaMemcpy(probe_type_dev, probe_type, n_probes * sizeof(int), cudaMemcpyDefault);
+    cudaMemcpy(probe_is_src_dev, probe_is_src, n_probes * sizeof(int), cudaMemcpyDefault);
+
+    dim3 block_size(Nx_th, Ny_th, Nz_th);
+    dim3 grid_size(Nx_b, Ny_b, Nz_b);
+
+    void* args[] = { 
+        &Ca_ex_y, &Cb_ex_y, &p_ex_y,
+        &Ca_ex_z, &Cb_ex_z, &p_ex_z,
+        &Ca_ey_z, &Cb_ey_z, &p_ey_z,
+        &Ca_ey_x, &Cb_ey_x, &p_ey_x,
+        &Ca_ez_x, &Cb_ez_x, &p_ez_x,
+        &Ca_ez_y, &Cb_ez_y, &p_ez_y,
+        &Da_hx_y, &Db_hx_y1, &Db_hx_y2, &p_hx_y,
+        &Da_hx_z, &Db_hx_z1, &Db_hx_z2, &p_hx_z,
+        &Da_hy_z, &Db_hy_z1, &Db_hy_z2, &p_hy_z,
+        &Da_hy_x, &Db_hy_x1, &Db_hy_x2, &p_hy_x,
+        &Da_hz_x, &Db_hz_x1, &Db_hz_x2, &p_hz_x,
+        &Da_hz_y, &Db_hz_y1, &Db_hz_y2, &p_hz_y,
+        &p_ex, &p_ey, &p_ez, &p_hx, &p_hy, &p_hz,
+        &probe_idx_dev, &probe_type_dev, &probe_is_src_dev, &probe_values_dev, 
+        &Nx, &Ny, &Nz, &Nt, &n_probes
+    };
+
+    cudaLaunchCooperativeKernel(
+        field_update_kernel, grid_size, block_size, args
     );
+
+    // copy probe values from device to CPU
+    for (int i = 0; i < n_probes; i++)
+    {   
+        Probe * p = &(probes[i]);
+
+        cudaMemcpy(p->values, probe_values_dev + (i * Nt), Nt * sizeof(float), cudaMemcpyDefault);
+    }
+
+    // field_update_kernel<<<grid_size, block_size>>>(
+        // Ca_ex_y, Cb_ex_y, p_ex_y,
+        // Ca_ex_z, Cb_ex_z, p_ex_z,
+        // Ca_ey_z, Cb_ey_z, p_ey_z,
+        // Ca_ey_x, Cb_ey_x, p_ey_x,
+        // Ca_ez_x, Cb_ez_x, p_ez_x,
+        // Ca_ez_y, Cb_ez_y, p_ez_y,
+        // Da_hx_y, Db_hx_y1, Db_hx_y2, p_hx_y,
+        // Da_hx_z, Db_hx_z1, Db_hx_z2, p_hx_z,
+        // Da_hy_z, Db_hy_z1, Db_hy_z2, p_hy_z,
+        // Da_hy_x, Db_hy_x1, Db_hy_x2, p_hy_x,
+        // Da_hz_x, Db_hz_x1, Db_hz_x2, p_hz_x,
+        // Da_hz_y, Db_hz_y1, Db_hz_y2, p_hz_y,
+        // p_ex, p_ey, p_ez, p_hx, p_hy, p_hz,
+        // probe_idx_dev, probe_type_dev, probe_is_src_dev, probe_values_dev, 
+        // Nx, Ny, Nz, Nt, n_probes
+    // );
 
     // // main time stepping loop
     // for (int n = 0; n < Nt; n++)
@@ -937,5 +1079,11 @@ void SolverFDTD::solver_run_cu(int Nt)
 
     cudaFree(Da_hz_x);
     cudaFree(Da_hz_y);
+
+    // clean up probes
+    cudaFree(probe_idx_dev);
+    cudaFree(probe_type_dev);
+    cudaFree(probe_values_dev);
+    cudaFree(probe_is_src_dev);
 
 }
