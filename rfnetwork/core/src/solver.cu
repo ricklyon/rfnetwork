@@ -92,17 +92,6 @@ struct Fields
 
 };
 
-__global__ void my_kernel(int Nx, int Ny, int Nz)
-{
-    int x_idx = threadIdx.x + blockIdx.x * blockDim.x;
-    int y_idx = threadIdx.y + blockIdx.y * blockDim.y;
-    int z_idx = threadIdx.z + blockIdx.z * blockDim.z;
-
-    // field index, applies to e and h fields
-    int f_idx  = (x_idx * Ny * Nz) + (y_idx * Nz) + z_idx;
-
-    printf("idx = %d\n", f_idx);
-}
 
 __global__ void efield_update_kernel(
     EFieldCoefficients C, Fields F,
@@ -696,7 +685,7 @@ void SolverFDTD::solver_run_cu(int Nt)
     fields.hz_y = p_hz_y;
 
     dim3 block_size(Nx_th, Ny_th, Nz_th);
-    dim3 grid_size(Nx_b, Ny_b, Nz_b);
+    dim3 grid_size(Nz_b, Ny_b, Nx_b);
 
     // void* args[] = { 
     //     &ecoeff, &hcoeff, &fields,
