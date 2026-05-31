@@ -104,20 +104,16 @@ __global__ void my_kernel(int Nx, int Ny, int Nz)
     printf("idx = %d\n", f_idx);
 }
 
-__global__ void field_update_kernel(
-    EFieldCoefficients C, HFieldCoefficients D, Fields F,
-    int* probe_idx, int* probe_type, int* probe_is_src, float* probe_values, 
-    int Nx, int Ny, int Nz, int Nt, int Np
+__global__ void efield_update_kernel(
+    EFieldCoefficients C, Fields F,
+    int Nx, int Ny, int Nz, int Nt
 )
 {
-    cg::grid_group grid = cg::this_grid();
+    // cg::grid_group grid = cg::this_grid();
 
-    
-    int x_idx = threadIdx.x + blockIdx.x * blockDim.x;
+    int z_idx = threadIdx.x + blockIdx.x * blockDim.x;
     int y_idx = threadIdx.y + blockIdx.y * blockDim.y;
-    int z_idx = threadIdx.z + blockIdx.z * blockDim.z;
-
-    
+    int x_idx = threadIdx.z + blockIdx.z * blockDim.z;
 
     // skip update if thread is after the global grid boundary. 
     if ((x_idx >= (Nx)) | (y_idx >= (Ny)) | (z_idx >= (Nz)) )
@@ -131,49 +127,6 @@ __global__ void field_update_kernel(
 
     // printf("idx = %d, %d, %d, fidx=%d\n", x_idx, y_idx, z_idx, f_idx);
 
-
-    // number of probes in this cell (up to 6 if all components have probes, only 3 are supported right now)
-    int n_probe = 0;
-    int i_probe[3];
-    float * p_probe[3];
-
-    for (int i = 0; i < Np; i++)
-    {   
-        if ((probe_idx[i] == f_idx) && (n_probe < 3))
-        {
-            i_probe[n_probe] = i;
-
-            if (probe_type[i] == 0){
-                p_probe[n_probe] = F.ex;
-            }
-            else if (probe_type[i] == 1){
-                p_probe[n_probe] = F.ey;
-            }
-            else if (probe_type[i] == 2){
-                p_probe[n_probe] = F.ez;
-            }
-            else if (probe_type[i] == 3){
-                p_probe[n_probe] = F.hx;
-            }
-            else if (probe_type[i] == 4){
-                p_probe[n_probe] = F.hy;
-            }
-            else if (probe_type[i] == 5){
-                p_probe[n_probe] = F.hz;
-            }
-            
-            n_probe += 1;
-        }
-    }
-
-    if (n_probe > 0)
-    {
-        printf("idx = %d, %d, %d, np=%d, fidx=%d\n", x_idx, y_idx, z_idx, n_probe, f_idx);
-    }
-    
-
-    
-
     // h-field indices on either side of e-fields
     int hz_y2_idx = (x_idx * Ny * Nz) + ((y_idx + 1) * Nz) + z_idx;
     int hy_z2_idx = (x_idx * Ny * Nz) + (y_idx * Nz) + z_idx + 1;
@@ -183,6 +136,73 @@ __global__ void field_update_kernel(
 
     int hy_x2_idx = ((x_idx + 1) * Ny * Nz) + (y_idx * Nz) + z_idx;
     int hx_y2_idx = (x_idx * Ny * Nz) + ((y_idx + 1) * Nz) + z_idx;
+
+    // main time stepping loop
+    // for (int n = 0; n < Nt; n++)
+    // {
+    // update ex_y
+    if (y_idx < (Ny - 1))
+    {
+        F.ex_y[f_idx] = C.Ca_ex_y[f_idx] * F.ex_y[f_idx] + C.Cb_ex_y[f_idx] * (F.hz[hz_y2_idx] - F.hz[f_idx]);
+    }
+    
+    // update ex_z
+    if (z_idx < (Nz - 1))
+    {
+        F.ex_z[f_idx] = C.Ca_ex_z[f_idx] * F.ex_z[f_idx] + C.Cb_ex_z[f_idx] * (F.hy[hy_z2_idx] - F.hy[f_idx]);
+    }
+
+    // update ey_z
+    if (z_idx < (Nz - 1))
+    {
+        F.ey_z[f_idx] = C.Ca_ey_z[f_idx] * F.ey_z[f_idx] + C.Cb_ey_z[f_idx] * (F.hx[hx_z2_idx] - F.hx[f_idx]);
+    }
+
+    // update ey_x
+    if (x_idx < (Nx - 1))
+    {
+        F.ey_x[f_idx] = C.Ca_ey_x[f_idx] * F.ey_x[f_idx] + C.Cb_ey_x[f_idx] * (F.hz[hz_x2_idx] - F.hz[f_idx]);
+    }
+
+    // update ez_x
+    if (x_idx < (Nx - 1))
+    {
+        F.ez_x[f_idx] = C.Ca_ez_x[f_idx] * F.ez_x[f_idx] + C.Cb_ez_x[f_idx] * (F.hy[hy_x2_idx] - F.hy[f_idx]);
+    }
+    
+    //update ez_y
+    if (y_idx < (Ny - 1))
+    {
+        F.ez_y[f_idx] = C.Ca_ez_y[f_idx] * F.ez_y[f_idx] + C.Cb_ez_y[f_idx] * (F.hx[hx_y2_idx] - F.hx[f_idx]);
+    }
+
+    // combine E fields
+    F.ex[f_idx] = F.ex_y[f_idx] + F.ex_z[f_idx];
+    F.ey[f_idx] = F.ey_z[f_idx] + F.ey_x[f_idx];
+    F.ez[f_idx] = F.ez_x[f_idx] + F.ez_y[f_idx];
+
+    // grid.sync();
+}
+
+__global__ void hfield_update_kernel(
+    HFieldCoefficients D, Fields F,
+    int Nx, int Ny, int Nz, int Nt
+)
+{
+    // cg::grid_group grid = cg::this_grid();
+    
+    int z_idx = threadIdx.x + blockIdx.x * blockDim.x;
+    int y_idx = threadIdx.y + blockIdx.y * blockDim.y;
+    int x_idx = threadIdx.z + blockIdx.z * blockDim.z;
+
+    // skip update if thread is after the global grid boundary. 
+    if ((x_idx >= (Nx)) | (y_idx >= (Ny)) | (z_idx >= (Nz)) )
+    {
+        return;
+    }
+
+    // field index, applies to e and h fields
+    int f_idx  = (x_idx * Ny * Nz) + (y_idx * Nz) + z_idx;
 
     // e-field indices on either side of h-fields
     int ez_y1_idx = (x_idx * Ny * Nz) + ((y_idx - 1) * Nz) + z_idx;
@@ -203,154 +223,137 @@ __global__ void field_update_kernel(
     int ex_y1_idx = (x_idx * Ny * Nz) + ((y_idx - 1) * Nz) + z_idx;
     float ex_y1 = 0;
 
-    int p_idx;
 
-    // main time stepping loop
-    for (int n = 0; n < Nt; n++)
+    // update hx_y
+    if (y_idx > 0)
     {
-        // update ex_y
-        if (y_idx < (Ny - 1))
+        ez_y1 = F.ez[ez_y1_idx];
+    }
+    F.hx_y[f_idx] = D.Da_hx_y[f_idx] * F.hx_y[f_idx] + (D.Db_hx_y2[f_idx] * F.ez[f_idx]) - (D.Db_hx_y1[f_idx] * ez_y1);
+
+    // update hx_z
+    if (z_idx > 0)
+    {
+        ey_z1 = F.ey[ey_z1_idx];
+    }
+    F.hx_z[f_idx] = D.Da_hx_z[f_idx] * F.hx_z[f_idx] + (D.Db_hx_z2[f_idx] * F.ey[f_idx]) - (D.Db_hx_z1[f_idx] * ey_z1);
+
+    // update hy_z
+    if (z_idx > 0)
+    {
+        ex_z1 = F.ex[ex_z1_idx];
+    }
+    F.hy_z[f_idx] = D.Da_hy_z[f_idx] * F.hy_z[f_idx] + (D.Db_hy_z2[f_idx] * F.ex[f_idx]) - (D.Db_hy_z1[f_idx] * ex_z1);
+
+    // update hy_x
+    if (x_idx > 0)
+    {
+        ez_x1 = F.ez[ez_x1_idx];
+    }
+    F.hy_x[f_idx] = D.Da_hy_x[f_idx] * F.hy_x[f_idx] + (D.Db_hy_x2[f_idx] * F.ez[f_idx]) - (D.Db_hy_x1[f_idx] * ez_x1);
+
+    // update hz_x
+    if (x_idx > 0){
+        ey_x1 = F.ey[ey_x1_idx];
+    }
+    F.hz_x[f_idx] = D.Da_hz_x[f_idx] * F.hz_x[f_idx] + (D.Db_hz_x2[f_idx] * F.ey[f_idx]) - (D.Db_hz_x1[f_idx] * ey_x1);
+
+    // update hz_y
+    if (y_idx > 0)
+    {
+        ex_y1 = F.ex[ex_y1_idx];
+    }
+    F.hz_y[f_idx] = D.Da_hz_y[f_idx] * F.hz_y[f_idx] + (D.Db_hz_y2[f_idx] * F.ex[f_idx]) - (D.Db_hz_y1[f_idx] * ex_y1);
+
+    // combine h-fields
+    F.hx[f_idx] = F.hx_y[f_idx] + F.hx_z[f_idx];
+    F.hy[f_idx] = F.hy_z[f_idx] + F.hy_x[f_idx];
+    F.hz[f_idx] = F.hz_x[f_idx] + F.hz_y[f_idx];
+}
+
+__global__ void probe_update_kernel(
+    Fields F, int n_probes, int n, int Nt, 
+    int* probe_idx, int* probe_type, int* probe_is_src, float* probe_values
+)
+{
+
+    int p_idx = threadIdx.x + blockIdx.x * blockDim.x;
+
+    // skip update if thread is after the global grid boundary. 
+    if ((p_idx >= (n_probes)))
+    {
+        return;
+    }
+
+    // field index, applies to e and h fields
+    int f_idx  = probe_idx[p_idx];
+
+    // printf("idx = %d, fidx=%d\n", p_idx, f_idx);
+
+    if (probe_type[p_idx] == 0)
+    {
+        if (probe_is_src[p_idx])
         {
-            F.ex_y[f_idx] = C.Ca_ex_y[f_idx] * F.ex_y[f_idx] + C.Cb_ex_y[f_idx] * (F.hz[hz_y2_idx] - F.hz[f_idx]);
+            F.ex_y[f_idx] += probe_values[(p_idx * Nt) + n];
+            F.ex_z[f_idx] += probe_values[(p_idx * Nt) + n];
+            F.ex[f_idx] = F.ex_y[f_idx] + F.ex_z[f_idx];
         }
-        
-        // update ex_z
-        if (z_idx < (Nz - 1))
+        probe_values[(p_idx * Nt) + n] = F.ex[f_idx];
+    }
+    else if (probe_type[p_idx] == 1)
+    {
+        if (probe_is_src[p_idx])
         {
-            F.ex_z[f_idx] = C.Ca_ex_z[f_idx] * F.ex_z[f_idx] + C.Cb_ex_z[f_idx] * (F.hy[hy_z2_idx] - F.hy[f_idx]);
+            F.ey_z[f_idx] += probe_values[(p_idx * Nt) + n];
+            F.ey_x[f_idx] += probe_values[(p_idx * Nt) + n];
+            F.ey[f_idx] = F.ey_z[f_idx] + F.ey_x[f_idx];
         }
-
-        // update ey_z
-        if (z_idx < (Nz - 1))
+        probe_values[(p_idx * Nt) + n] = F.ey[f_idx];
+    }
+    else if (probe_type[p_idx] == 2)
+    {
+        if (probe_is_src[p_idx])
         {
-            F.ey_z[f_idx] = C.Ca_ey_z[f_idx] * F.ey_z[f_idx] + C.Cb_ey_z[f_idx] * (F.hx[hx_z2_idx] - F.hx[f_idx]);
+            F.ez_x[f_idx] += probe_values[(p_idx * Nt) + n];
+            F.ez_y[f_idx] += probe_values[(p_idx * Nt) + n];
+            F.ez[f_idx] = F.ez_x[f_idx] + F.ez_y[f_idx];
         }
-
-        // update ey_x
-        if (x_idx < (Nx - 1))
+        probe_values[(p_idx * Nt) + n] = F.ez[f_idx];
+    }
+    else if (probe_type[p_idx] == 3)
+    {
+        if (probe_is_src[p_idx])
         {
-            F.ey_x[f_idx] = C.Ca_ey_x[f_idx] * F.ey_x[f_idx] + C.Cb_ey_x[f_idx] * (F.hz[hz_x2_idx] - F.hz[f_idx]);
+            F.hx_y[f_idx] += probe_values[(p_idx * Nt) + n];
+            F.hx_z[f_idx] += probe_values[(p_idx * Nt) + n];
+            F.hx[f_idx] = F.hx_y[f_idx] + F.hx_z[f_idx];
         }
-
-        // update ez_x
-        if (x_idx < (Nx - 1))
+        probe_values[(p_idx * Nt) + n] = F.hx[f_idx];
+    }
+    else if (probe_type[p_idx] == 4)
+    {
+        if (probe_is_src[p_idx])
         {
-            F.ez_x[f_idx] = C.Ca_ez_x[f_idx] * F.ez_x[f_idx] + C.Cb_ez_x[f_idx] * (F.hy[hy_x2_idx] - F.hy[f_idx]);
+            F.hy_z[f_idx] += probe_values[(p_idx * Nt) + n];
+            F.hy_x[f_idx] += probe_values[(p_idx * Nt) + n];
+            F.hy[f_idx] = F.hy_z[f_idx] + F.hy_x[f_idx];
         }
-        
-        //update ez_y
-        if (y_idx < (Ny - 1))
+        probe_values[(p_idx * Nt) + n] = F.hy[f_idx];
+    }
+    else if (probe_type[p_idx] == 5)
+    {
+        if (probe_is_src[p_idx])
         {
-            F.ez_y[f_idx] = C.Ca_ez_y[f_idx] * F.ez_y[f_idx] + C.Cb_ez_y[f_idx] * (F.hx[hx_y2_idx] - F.hx[f_idx]);
+            F.hz_x[f_idx] += probe_values[(p_idx * Nt) + n];
+            F.hz_y[f_idx] += probe_values[(p_idx * Nt) + n];
+            F.hz[f_idx] = F.hz_x[f_idx] + F.hz_y[f_idx];
         }
-
-        // combine E fields
-        F.ex[f_idx] = F.ex_y[f_idx] + F.ex_z[f_idx];
-        F.ey[f_idx] = F.ey_z[f_idx] + F.ey_x[f_idx];
-        F.ez[f_idx] = F.ez_x[f_idx] + F.ez_y[f_idx];
-
-        grid.sync();
-
-        // update hx_y
-        if (y_idx > 0)
-        {
-            ez_y1 = (y_idx > 0) ? F.ez[ez_y1_idx] : 0;
-        }
-        F.hx_y[f_idx] = D.Da_hx_y[f_idx] * F.hx_y[f_idx] + (D.Db_hx_y2[f_idx] * F.ez[f_idx]) - (D.Db_hx_y1[f_idx] * ez_y1);
-
-        // update hx_z
-        if (z_idx > 0)
-        {
-            ey_z1 = F.ey[ey_z1_idx];
-        }
-        F.hx_z[f_idx] = D.Da_hx_z[f_idx] * F.hx_z[f_idx] + (D.Db_hx_z2[f_idx] * F.ey[f_idx]) - (D.Db_hx_z1[f_idx] * ey_z1);
-
-        // // update hy_z
-        if (z_idx > 0)
-        {
-            ex_z1 = F.ex[ex_z1_idx];
-        }
-        F.hy_z[f_idx] = D.Da_hy_z[f_idx] * F.hy_z[f_idx] + (D.Db_hy_z2[f_idx] * F.ex[f_idx]) - (D.Db_hy_z1[f_idx] * ex_z1);
-
-        // // update hy_x
-        if (x_idx > 0)
-        {
-            ez_x1 = F.ez[ez_x1_idx];
-        }
-        F.hy_x[f_idx] = D.Da_hy_x[f_idx] * F.hy_x[f_idx] + (D.Db_hy_x2[f_idx] * F.ez[f_idx]) - (D.Db_hy_x1[f_idx] * ez_x1);
-
-        // // update hz_x
-        if (x_idx > 0){
-            ey_x1 = F.ey[ey_x1_idx];
-        }
-        F.hz_x[f_idx] = D.Da_hz_x[f_idx] * F.hz_x[f_idx] + (D.Db_hz_x2[f_idx] * F.ey[f_idx]) - (D.Db_hz_x1[f_idx] * ey_x1);
-
-        // update hz_y
-        if (y_idx > 0)
-        {
-            ex_y1 = F.ex[ex_y1_idx];
-        }
-        F.hz_y[f_idx] = D.Da_hz_y[f_idx] * F.hz_y[f_idx] + (D.Db_hz_y2[f_idx] * F.ex[f_idx]) - (D.Db_hz_y1[f_idx] * ex_y1);
-
-        // combine h-fields
-        F.hx[f_idx] = F.hx_y[f_idx] + F.hx_z[f_idx];
-        F.hy[f_idx] = F.hy_z[f_idx] + F.hy_x[f_idx];
-        F.hz[f_idx] = F.hz_x[f_idx] + F.hz_y[f_idx];
-
-        for (int i = 0; i < n_probe; i++)
-        {   
-            p_idx = i_probe[i];
-
-            if (probe_is_src[p_idx])
-            {
-                if (probe_type[p_idx] == 0)
-                {
-                    F.ex_y[f_idx] += probe_values[(p_idx * Nt) + n];
-                    F.ex_z[f_idx] += probe_values[(p_idx * Nt) + n];
-                    F.ex[f_idx] = F.ex_y[f_idx] + F.ex_z[f_idx];
-                }
-                else if (probe_type[p_idx] == 1)
-                {
-                    F.ey_z[f_idx] += probe_values[(p_idx * Nt) + n];
-                    F.ey_x[f_idx] += probe_values[(p_idx * Nt) + n];
-                    F.ey[f_idx] = F.ey_z[f_idx] + F.ey_x[f_idx];
-                }
-                else if (probe_type[p_idx] == 2)
-                {
-                    F.ez_x[f_idx] += probe_values[(p_idx * Nt) + n];
-                    F.ez_y[f_idx] += probe_values[(p_idx * Nt) + n];
-                    F.ez[f_idx] = F.ez_x[f_idx] + F.ez_y[f_idx];
-                }
-                else if (probe_type[p_idx] == 3)
-                {
-                    F.hx_y[f_idx] += probe_values[(p_idx * Nt) + n];
-                    F.hx_z[f_idx] += probe_values[(p_idx * Nt) + n];
-                    F.hx[f_idx] = F.hx_y[f_idx] + F.hx_z[f_idx];
-                }
-                else if (probe_type[p_idx] == 4)
-                {
-                    F.hy_z[f_idx] += probe_values[(p_idx * Nt) + n];
-                    F.hy_x[f_idx] += probe_values[(p_idx * Nt) + n];
-                    F.hy[f_idx] = F.hy_z[f_idx] + F.hy_x[f_idx];
-                }
-                else if (probe_type[p_idx] == 5)
-                {
-                    F.hz_x[f_idx] += probe_values[(p_idx * Nt) + n];
-                    F.hz_y[f_idx] += probe_values[(p_idx * Nt) + n];
-                    F.hz[f_idx] = F.hz_x[f_idx] + F.hz_y[f_idx];
-                }
-            }
-
-            // update probes
-            // if this is a source, the values array is replaced with the resulting total voltage after it is used for
-            // each time step.
-            probe_values[(p_idx * Nt) + n] = p_probe[i][f_idx];
-        }
-
-        grid.sync();
-
+        probe_values[(p_idx * Nt) + n] = F.hz[f_idx];
     }
 }
+
+
+
 
 
 void SolverFDTD::solver_run_cu(int Nt)
@@ -605,10 +608,16 @@ void SolverFDTD::solver_run_cu(int Nt)
         probe_type[i] = p->field_type;
         probe_is_src[i] = p->is_source;
 
-        printf("probe_idx = %d, %d\n", probe_idx[i], p->field_type);
+        // printf("probe_idx = %d, %d\n", probe_idx[i], p->field_type);
 
         cudaMemcpy(probe_values_dev + (i * Nt), p->values, Nt * sizeof(float), cudaMemcpyDefault);
     }
+
+    // size of thread blocks in each direction
+    int Np_th = 8;
+
+    // number of blocks in the grid for probes
+    int Np_b = (n_probes + Np_th - 1) / Np_th;
 
     cudaMemcpy(probe_idx_dev, probe_idx, n_probes * sizeof(int), cudaMemcpyDefault);
     cudaMemcpy(probe_type_dev, probe_type, n_probes * sizeof(int), cudaMemcpyDefault);
@@ -689,15 +698,15 @@ void SolverFDTD::solver_run_cu(int Nt)
     dim3 block_size(Nx_th, Ny_th, Nz_th);
     dim3 grid_size(Nx_b, Ny_b, Nz_b);
 
-    void* args[] = { 
-        &ecoeff, &hcoeff, &fields,
-        &probe_idx_dev, &probe_type_dev, &probe_is_src_dev, &probe_values_dev, 
-        &Nx, &Ny, &Nz, &Nt, &n_probes
-    };
+    // void* args[] = { 
+    //     &ecoeff, &hcoeff, &fields,
+    //     &probe_idx_dev, &probe_type_dev, &probe_is_src_dev, &probe_values_dev, 
+    //     &Nx, &Ny, &Nz, &Nt, &n_probes
+    // };
 
-    cudaLaunchCooperativeKernel(
-        field_update_kernel, grid_size, block_size, args
-    );
+    // cudaLaunchCooperativeKernel(
+    //     field_update_kernel, grid_size, block_size, args
+    // );
 
     printf("grid_size = %d\n", grid_size);
     printf("block_size = %d\n", block_size);
@@ -705,11 +714,24 @@ void SolverFDTD::solver_run_cu(int Nt)
     // my_kernel<<<grid_size, block_size>>>(Nx, Ny, Nz);
     // cudaDeviceSynchronize(); 
 
-    // field_update_kernel<<<grid_size, block_size>>>(
-    //     ecoeff, hcoeff, fields,
-    //     probe_idx_dev, probe_type_dev, probe_is_src_dev, probe_values_dev, 
-    //     Nx, Ny, Nz, Nt, n_probes
-    // );
+    for (int n = 0; n < Nt; n++)
+    {
+        efield_update_kernel<<<grid_size, block_size>>>(
+            ecoeff, fields,
+            Nx, Ny, Nz, Nt
+        );
+
+        hfield_update_kernel<<<grid_size, block_size>>>(
+            hcoeff, fields,
+            Nx, Ny, Nz, Nt
+        );
+
+        probe_update_kernel<<<Np_b, Np_th>>>(
+            fields, n_probes, n, Nt,
+            probe_idx_dev, probe_type_dev, probe_is_src_dev, probe_values_dev
+        );
+    }
+
 
     cudaDeviceSynchronize(); 
 
