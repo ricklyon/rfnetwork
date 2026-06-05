@@ -686,23 +686,10 @@ void SolverFDTD::solver_run_cu(int Nt)
     fields.hz_y = p_hz_y;
 
     dim3 block_size(Nx_th, Ny_th, Nz_th);
-    dim3 grid_size(Nz_b, Ny_b, Nx_b);
-
-    // void* args[] = { 
-    //     &ecoeff, &hcoeff, &fields,
-    //     &probe_idx_dev, &probe_type_dev, &probe_is_src_dev, &probe_values_dev, 
-    //     &Nx, &Ny, &Nz, &Nt, &n_probes
-    // };
-
-    // cudaLaunchCooperativeKernel(
-    //     field_update_kernel, grid_size, block_size, args
-    // );
+    dim3 grid_size(Nx_b, Ny_b, Nz_b);
 
     printf("grid_size = %d\n", grid_size);
     printf("block_size = %d\n", block_size);
-
-    // my_kernel<<<grid_size, block_size>>>(Nx, Ny, Nz);
-    // cudaDeviceSynchronize(); 
 
     for (int n = 0; n < Nt; n++)
     {
