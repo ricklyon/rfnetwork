@@ -305,7 +305,7 @@ __global__ void probe_update_kernel(
         if (probe_is_src[p_idx])
         {
             F.ez_x[f_idx] += probe_values[(p_idx * Nt) + n];
-            F.ez_y[f_idx] += F.ez_y[f_idx] + probe_values[(p_idx * Nt) + n];
+            F.ez_y[f_idx] += probe_values[(p_idx * Nt) + n];
             F.ez[f_idx] = F.ez_x[f_idx] + F.ez_y[f_idx];
         }
         probe_values[(p_idx * Nt) + n] = F.ez[f_idx];
