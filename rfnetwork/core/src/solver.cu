@@ -100,9 +100,9 @@ __global__ void efield_update_kernel(
 {
     // cg::grid_group grid = cg::this_grid();
 
-    int z_idx = threadIdx.x + blockIdx.x * blockDim.x;
+    int x_idx = threadIdx.x + blockIdx.x * blockDim.x;
     int y_idx = threadIdx.y + blockIdx.y * blockDim.y;
-    int x_idx = threadIdx.z + blockIdx.z * blockDim.z;
+    int z_idx = threadIdx.z + blockIdx.z * blockDim.z;
 
     // skip update if thread is after the global grid boundary. 
     if ((x_idx >= (Nx)) | (y_idx >= (Ny)) | (z_idx >= (Nz)) )
@@ -180,9 +180,9 @@ __global__ void hfield_update_kernel(
 {
     // cg::grid_group grid = cg::this_grid();
     
-    int z_idx = threadIdx.x + blockIdx.x * blockDim.x;
+    int x_idx = threadIdx.x + blockIdx.x * blockDim.x;
     int y_idx = threadIdx.y + blockIdx.y * blockDim.y;
-    int x_idx = threadIdx.z + blockIdx.z * blockDim.z;
+    int z_idx = threadIdx.z + blockIdx.z * blockDim.z;
 
     // skip update if thread is after the global grid boundary. 
     if ((x_idx >= (Nx)) | (y_idx >= (Ny)) | (z_idx >= (Nz)) )
@@ -242,7 +242,8 @@ __global__ void hfield_update_kernel(
     F.hy_x[f_idx] = D.Da_hy_x[f_idx] * F.hy_x[f_idx] + (D.Db_hy_x2[f_idx] * F.ez[f_idx]) - (D.Db_hy_x1[f_idx] * ez_x1);
 
     // update hz_x
-    if (x_idx > 0){
+    if (x_idx > 0)
+    {
         ey_x1 = F.ey[ey_x1_idx];
     }
     F.hz_x[f_idx] = D.Da_hz_x[f_idx] * F.hz_x[f_idx] + (D.Db_hz_x2[f_idx] * F.ey[f_idx]) - (D.Db_hz_x1[f_idx] * ey_x1);
@@ -304,7 +305,7 @@ __global__ void probe_update_kernel(
         if (probe_is_src[p_idx])
         {
             F.ez_x[f_idx] += probe_values[(p_idx * Nt) + n];
-            F.ez_y[f_idx] += probe_values[(p_idx * Nt) + n];
+            F.ez_y[f_idx] += F.ez_y[f_idx] + probe_values[(p_idx * Nt) + n];
             F.ez[f_idx] = F.ez_x[f_idx] + F.ez_y[f_idx];
         }
         probe_values[(p_idx * Nt) + n] = F.ez[f_idx];
@@ -640,7 +641,7 @@ void SolverFDTD::solver_run_cu(int Nt)
 
     hcoeff.Da_hx_z  = Da_hx_z;
     hcoeff.Db_hx_z1 = Db_hx_z1;
-    hcoeff.Db_hx_z2 = Db_hx_y2;
+    hcoeff.Db_hx_z2 = Db_hx_z2;
 
     hcoeff.Da_hy_z  = Da_hy_z;
     hcoeff.Db_hy_z1 = Db_hy_z1;
