@@ -100,9 +100,9 @@ __global__ void efield_update_kernel(
 {
     // cg::grid_group grid = cg::this_grid();
 
-    int x_idx = threadIdx.x + blockIdx.x * blockDim.x;
+    int z_idx = threadIdx.x + blockIdx.x * blockDim.x;
     int y_idx = threadIdx.y + blockIdx.y * blockDim.y;
-    int z_idx = threadIdx.z + blockIdx.z * blockDim.z;
+    int x_idx = threadIdx.z + blockIdx.z * blockDim.z;
 
     // skip update if thread is after the global grid boundary. 
     if ((x_idx >= (Nx)) | (y_idx >= (Ny)) | (z_idx >= (Nz)) )
@@ -180,9 +180,9 @@ __global__ void hfield_update_kernel(
 {
     // cg::grid_group grid = cg::this_grid();
     
-    int x_idx = threadIdx.x + blockIdx.x * blockDim.x;
+    int z_idx = threadIdx.x + blockIdx.x * blockDim.x;
     int y_idx = threadIdx.y + blockIdx.y * blockDim.y;
-    int z_idx = threadIdx.z + blockIdx.z * blockDim.z;
+    int x_idx = threadIdx.z + blockIdx.z * blockDim.z;
 
     // skip update if thread is after the global grid boundary. 
     if ((x_idx >= (Nx)) | (y_idx >= (Ny)) | (z_idx >= (Nz)) )
@@ -705,8 +705,8 @@ void SolverFDTD::solver_run_cu(int Nt)
     fields.hz_x = p_hz_x;
     fields.hz_y = p_hz_y;
 
-    dim3 block_size(Nx_th, Ny_th, Nz_th);
-    dim3 grid_size(Nx_b, Ny_b, Nz_b);
+    dim3 block_size(Nz_th, Ny_th, Nx_th);
+    dim3 grid_size(Nz_b, Ny_b, Nx_b);
 
     printf("grid_size = %d\n", grid_size);
     printf("block_size = %d\n", block_size);
