@@ -261,7 +261,7 @@ __global__ void hfield_update_kernel(
     F.hz[f_idx] = F.hz_x[f_idx] + F.hz_y[f_idx];
 }
 
-__global__ void probe_update_kernel(
+__global__ void e_probe_update_kernel(
     Fields F, int n_probes, int n, int Nt, 
     int* probe_idx, int* probe_type, int* probe_is_src, float* probe_values
 )
@@ -278,7 +278,6 @@ __global__ void probe_update_kernel(
     // field index, applies to e and h fields
     int f_idx  = probe_idx[p_idx];
 
-    // printf("idx = %d, fidx=%d\n", p_idx, f_idx);
 
     if (probe_type[p_idx] == 0)
     {
@@ -310,7 +309,28 @@ __global__ void probe_update_kernel(
         }
         probe_values[(p_idx * Nt) + n] = F.ez[f_idx];
     }
-    else if (probe_type[p_idx] == 3)
+
+}
+
+__global__ void h_probe_update_kernel(
+    Fields F, int n_probes, int n, int Nt, 
+    int* probe_idx, int* probe_type, int* probe_is_src, float* probe_values
+)
+{
+
+    int p_idx = threadIdx.x + blockIdx.x * blockDim.x;
+
+    // skip update if thread is after the global grid boundary. 
+    if ((p_idx >= (n_probes)))
+    {
+        return;
+    }
+
+    // field index, applies to e and h fields
+    int f_idx  = probe_idx[p_idx];
+
+
+    if (probe_type[p_idx] == 3)
     {
         if (probe_is_src[p_idx])
         {
@@ -691,6 +711,8 @@ void SolverFDTD::solver_run_cu(int Nt)
     printf("grid_size = %d\n", grid_size);
     printf("block_size = %d\n", block_size);
 
+    cudaError_t err;
+
     for (int n = 0; n < Nt; n++)
     {
         efield_update_kernel<<<grid_size, block_size>>>(
@@ -698,21 +720,51 @@ void SolverFDTD::solver_run_cu(int Nt)
             Nx, Ny, Nz, Nt
         );
 
+        e_probe_update_kernel<<<Np_b, Np_th>>>(
+            fields, n_probes, n, Nt,
+            probe_idx_dev, probe_type_dev, probe_is_src_dev, probe_values_dev
+        );
+        // err = cudaGetLastError();
+        // printf("e-launch: %s\n", cudaGetErrorString(err));
+
+        // cudaDeviceSynchronize(); 
+
+        // err = cudaGetLastError();
+        // printf("e-runtime: %s\n", cudaGetErrorString(err));
+
         hfield_update_kernel<<<grid_size, block_size>>>(
             hcoeff, fields,
             Nx, Ny, Nz, Nt
         );
 
-        probe_update_kernel<<<Np_b, Np_th>>>(
+
+        // err = cudaGetLastError();
+        // printf("h-launch: %s\n", cudaGetErrorString(err));
+
+        // cudaDeviceSynchronize(); 
+
+        // err = cudaGetLastError();
+        // printf("h-runtime: %s\n", cudaGetErrorString(err));
+
+        h_probe_update_kernel<<<Np_b, Np_th>>>(
             fields, n_probes, n, Nt,
             probe_idx_dev, probe_type_dev, probe_is_src_dev, probe_values_dev
         );
+
+
+        // err = cudaGetLastError();
+        // printf("p-launch: %s\n", cudaGetErrorString(err));
+
+        // cudaDeviceSynchronize(); 
+
+        // err = cudaGetLastError();
+        // printf("p-runtime: %s\n", cudaGetErrorString(err));
     }
 
 
     cudaDeviceSynchronize(); 
 
-    cudaError_t err = cudaGetLastError();
+    err = cudaGetLastError();
     printf("ERROR: %s\n", cudaGetErrorString(err));
 
     printf("n_probes = %d\n", n_probes);
