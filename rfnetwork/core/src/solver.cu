@@ -366,11 +366,6 @@ __global__ void h_probe_update_kernel(
 void SolverFDTD::solver_run_cu(int Nt)
 {
 
-    // number of total cells in each direction
-    int Nx = Ex.Nx;
-    int Ny = Ey.Ny;
-    int Nz = Ez.Nz;
-
     // size of thread blocks in each direction
     int Nx_th = 8;
     int Ny_th = 8;

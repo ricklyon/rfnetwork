@@ -24,57 +24,11 @@ struct mbuffer_t
     uint64_t available_size;
 };
 
-struct Field_Ex {
-    int Nx;
-    int Ny;
-    int Nz;
-    int NyNz;
-};
-
-struct Field_Ey {
-    int Nx;
-    int Ny;
-    int Nz;
-    int NyNz;
-};
-
-struct Field_Ez {
-    int Nx;
-    int Ny;
-    int Nz;
-    int NyNz;
-};
-
-struct Field_Hx {
-    int Nx;
-    int Ny;
-    int Nz;
-    int NyNz;
-};
-
-struct Field_Hy {
-    int Nx;
-    int Ny;
-    int Nz;
-    int NyNz;
-};
-
-struct Field_Hz {
-    int Nx;
-    int Ny;
-    int Nz;
-    int NyNz;
-};
-
 struct Coeff_Ex {
     float * Ca_ex_y;
     float * Ca_ex_z;
     float * Cb_ex_y;
     float * Cb_ex_z;
-    int Nx;
-    int Ny;
-    int Nz;
-    int NyNz;
 };
 
 struct Coeff_Ey {
@@ -82,9 +36,6 @@ struct Coeff_Ey {
     float * Ca_ey_x;
     float * Cb_ey_z;
     float * Cb_ey_x;
-    int Ny;
-    int Nz;
-    int NyNz;
 };
 
 struct Coeff_Ez {
@@ -92,9 +43,6 @@ struct Coeff_Ez {
     float * Ca_ez_y;
     float * Cb_ez_x;
     float * Cb_ez_y;
-    int Ny;
-    int Nz;
-    int NyNz;
 };
 
 struct Coeff_Hx {
@@ -157,8 +105,6 @@ struct Probe {
     int x_cell; // cell index where the probe is located
     int y_cell;
     int z_cell;
-    int yz_offset;
-    int NyNz;
     bool is_source;
 };
 
@@ -173,14 +119,6 @@ class SolverFDTD {
 
 private:
     // coefficient values
-    Field_Ex Ex;
-    Field_Ey Ey;
-    Field_Ez Ez;
-
-    Field_Hx Hx;
-    Field_Hy Hy;
-    Field_Hz Hz;
-
     Coeff_Ex Cx;
     Coeff_Ey Cy;
     Coeff_Ez Cz;
@@ -211,6 +149,11 @@ private:
     bool e_updates_done = false;
     bool h_updates_done = false;
     bool th_init_done = false;
+
+    // number of grid cells
+    int Nx;
+    int Ny;
+    int Nz;
 
     mbuffer_t m_pool{NULL, NULL, 0};
 
