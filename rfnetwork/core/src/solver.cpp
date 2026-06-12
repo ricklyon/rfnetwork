@@ -679,7 +679,7 @@ void SolverFDTD::solver_thread(int x_start, int x_stop, int Nt, int thread_idx)
     int hy_NyNz = (Ny) * (Nz + 1);
     int hz_NyNz = (Ny + 1) * (Nz);
     
-    // include extra component at the lower edge of grid.
+    // include extra component at the lower edge of y and z axis.
     float * p_ex_y = mbuffer_allocate(Nx * (Ny + 1) * (Nz + 1)); // 
     float * p_ex_z = mbuffer_allocate(Nx * (Ny + 1) * (Nz + 1)); // 
     float * p_ex   = mbuffer_allocate(Nx * (Ny + 1) * (Nz + 1)); // 
@@ -692,7 +692,7 @@ void SolverFDTD::solver_thread(int x_start, int x_stop, int Nt, int thread_idx)
     float * p_ez_y = mbuffer_allocate((Nx) * (Ny + 1) * Nz); //  
     float * p_ez   = mbuffer_allocate((Nx) * (Ny + 1) * Nz); // 
 
-    // include extra component past the upper edge of the grid
+    // include extra component past the upper edge of the y and z axis
     float * p_hx_y = mbuffer_allocate(Nx * (Ny + 1) * (Nz + 1)); //  
     float * p_hx_z = mbuffer_allocate(Nx * (Ny + 1) * (Nz + 1)); //  
     float * p_hx   = mbuffer_allocate(Nx * (Ny + 1) * (Nz + 1)); //  
@@ -1023,14 +1023,14 @@ void SolverFDTD::solver_thread(int x_start, int x_stop, int Nt, int thread_idx)
             // hy_zd = Db_hy_z * np.diff(ex, axis=2)
             // hy_z = Da_hy_z * hy_z + hy_zd
             hy_z.block(0, 0, Ny, Nz) = Da_hy_z.cwiseProduct(hy_z.block(0, 0, Ny, Nz)) + (
-                Db_hy_z2.cwiseProduct(ex.rightCols(Nz)) - Db_hy_z1.cwiseProduct(ex.leftCols(Nz))
+                Db_hy_z2.cwiseProduct(ex.block(1, 1, Ny, Nz)) - Db_hy_z1.cwiseProduct(ex.block(1, 0, Ny, Nz))
             );
 
             // update hy_x
             // hy_xd = Db_hy_x * np.diff(ez, axis=0)
             // hy_x = Da_hy_x * hy_x + hy_xd
             hy_x.block(0, 0, Ny, Nz) = Da_hy_x.cwiseProduct(hy_x.block(0, 0, Ny, Nz)) + (
-                Db_hy_x2.cwiseProduct(ez) - Db_hy_x1.cwiseProduct(ez_0)
+                Db_hy_x2.cwiseProduct(ez.block(1, 0, Ny, Nz)) - Db_hy_x1.cwiseProduct(ez_0.block(1, 0, Ny, Nz))
             );
 
             // ----------------- update hz -------------------------- //
@@ -1038,14 +1038,14 @@ void SolverFDTD::solver_thread(int x_start, int x_stop, int Nt, int thread_idx)
             // hz_xd = Db_hz_x * np.diff(ey, axis=0) 
             // hz_x = Da_hz_x * hz_x + hz_xd
             hz_x.block(0, 0, Ny, Nz) = Da_hz_x.cwiseProduct(hz_x.block(0, 0, Ny, Nz)) + (
-                Db_hz_x2.cwiseProduct(ey) - Db_hz_x1.cwiseProduct(ey_0)
+                Db_hz_x2.cwiseProduct(ey.block(0, 1, Ny, Nz)) - Db_hz_x1.cwiseProduct(ey_0.block(0, 1, Ny, Nz))
             );
 
             // update hz_y
             // hz_yd = Db_hz_y * np.diff(ex, axis=1)
             // hz_y = Da_hz_y * hz_y + hz_yd
             hz_y.block(0, 0, Ny, Nz) = Da_hz_y.cwiseProduct(hz_y.block(0, 0, Ny, Nz)) + (
-                Db_hz_y2.cwiseProduct(ex.bottomRows(Ny)) - Db_hz_y1.cwiseProduct(ex.topRows(Ny))
+                Db_hz_y2.cwiseProduct(ex.block(1, 1, Ny, Nz)) - Db_hz_y1.cwiseProduct(ex.block(0, 1, Ny, Nz))
             );
 
             // combine split components
