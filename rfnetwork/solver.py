@@ -1450,6 +1450,7 @@ class FDTD_Solver():
 
         # dx, dy, dz with an extra component for the last component at the edge of the grid that has no neighboring
         # cell.
+        # This also ensures the fields remain at 0 at the end of the grid (PEC boundary)
         dx1_h_inv = np.concatenate([dx_h_inv, [[[0]]]], axis=0)
         dy1_h_inv = np.concatenate([dy_h_inv, [[[0]]]], axis=1)
         dz1_h_inv = np.concatenate([dz_h_inv, [[[0]]]], axis=2)
@@ -1509,7 +1510,6 @@ class FDTD_Solver():
             Db_hz_y2 = np.array(self.Db["hz_y2"][:, :, 1:] * dy_inv, order="C", dtype=dtype_),
         )
 
-        # TODO: drop endpoints of coefficients if running CPU
 
         temp_mem_size = 0
         for s in self.fshape.values():
@@ -1569,10 +1569,24 @@ class FDTD_Solver():
 
             n_m = int(Nt / m["n_step"]) + 1
 
+            field_idx = list(self.fshape.keys()).index(m["field"])
+
+            # allocated array length for each field type in the solver, all e-field components are included,
+            # except at x=0. H-field components have an extra component at the ends of the grid along y and z.
+            f_Ny = [self.Ny+1, self.Ny, self.Ny+1, self.Ny+1, self.Ny, self.Ny+1]
+            f_Nz = [self.Nz+1, self.Nz+1, self.Nz, self.Nz+1, self.Nz+1, self.Nz]
+
+            if m["axis"] == 0:
+                m_shape = (f_Ny[field_idx], f_Nz[field_idx])
+            elif m["axis"] == 1:
+                m_shape = (self.Nx, f_Nz[field_idx])
+            else:
+                m_shape = (self.Nx, f_Ny[field_idx])
+
             mon_config = dict(
                 axis=int(m["axis"]),
                 position=int(m["index"]),
-                field=list(self.fshape.keys()).index(m["field"]),
+                field=field_idx,
                 n_step=int(m["n_step"]),
             )
 
@@ -1592,7 +1606,7 @@ class FDTD_Solver():
                 mon_config["n_frequencies"] = int(len(frequency))
             else:
                 # initialize monitor for time domain captures
-                mon_config["values"] = np.zeros(((n_m,) + m["shape"]), dtype=dtype_, order="C")
+                mon_config["values"] = np.zeros(((n_m,) + m_shape), dtype=dtype_, order="C")
 
             monitors.append(mon_config)
 
@@ -1620,7 +1634,11 @@ class FDTD_Solver():
 
         # move monitor values back to the class variable
         for i, (k, m) in enumerate(self.monitors.items()):
-            self.monitors[k]["values"] = monitors[i]["values"]
+            # leave out grid edges that are not updated
+            m_val = monitors[i]["values"]
+
+            
+            self.monitors[k]["values"] = m_val
 
         # get the voltages at each source components
         src_v = [s["values"] for s in probes]
@@ -1713,7 +1731,7 @@ class FDTD_Solver():
 
             self.monitors[n] = dict(
                 field=f, 
-                axis=axis_i, 
+                axis=axis_i,
                 position=position, 
                 index=index, 
                 n_step=n_step, 

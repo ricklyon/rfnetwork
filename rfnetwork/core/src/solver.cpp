@@ -27,9 +27,16 @@ typedef Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::R
 typedef Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>, 0, Eigen::Stride<Eigen::Dynamic, Eigen::Dynamic>> MatrixFloatStride;
 typedef Eigen::Map<Eigen::Matrix<std::complex<float>, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>> MatrixComplexType;
 
+typedef Eigen::Stride<Eigen::Dynamic, Eigen::Dynamic> StrideType;
+
 #define DATA_NDIM 3
 
-
+#define EX 0
+#define EY 1
+#define EZ 2
+#define HX 3
+#define HY 4
+#define HZ 5
 
 
 long long get_milliseconds()
@@ -347,10 +354,15 @@ int SolverFDTD::solver_init_monitors(PyObject * py_monitors, int Nt)
     // int Ny[6] = {Ex.Ny, Ey.Ny, Ez.Ny, Hx.Ny, Hy.Ny, Hz.Ny};
     // int Nz[6] = {Ex.Nz, Ey.Nz, Ez.Nz, Hx.Nz, Hy.Nz, Hz.Nz};
 
-    PyObject* py_mon;
+    int Nx1 = Nx + 1;
+    int Ny1 = Ny + 1;
+    int Nz1 = Nz + 1;
 
-    int n1;
-    int n2; 
+    // allocated array length for each field type
+    int f_Ny[6] = {Ny1, Ny, Ny1, Ny1, Ny, Ny1};
+    int f_Nz[6] = {Nz1, Nz1, Nz, Nz1, Nz1, Nz};
+
+    PyObject* py_mon;
 
     for (int m = 0; m < n_monitors; m++)
     {   
@@ -367,41 +379,53 @@ int SolverFDTD::solver_init_monitors(PyObject * py_monitors, int Nt)
         monitors[m].position = PyLong_AsLong(PyDict_GetItemString(py_mon, "position"));
         monitors[m].n_step = n_step;
         monitors[m].axis = axis;
-        monitors[m].x_offset = 0;
 
+        // monitor is on yz plane
         if (axis == 0)
         {
-            n1 = Ny;
-            n2 = Nz;
 
-            // the thread grid for Ez, Hx, and Ey is offset by one compared to the global grid because the first thread
-            // grid cell captures these components on the end of the cell along x, instead of the beginning.
-            if ((field == 1) || (field == 2) || (field == 3))
+            // the thread grid for Hx, Ey, and Ez along x is offset by one compared to the global grid because the first cell
+            // includes only the second component.
+            if (field == HX)
             {
                 monitors[m].position -= 1;
             }
+            // each row (along y) skips by NyNz
+            monitors[m].row_stride = f_Nz[field];
+            // each column (along z) skips by 1
+            monitors[m].col_stride = 1;
+            monitors[m].N1 = f_Ny[field];
+            monitors[m].N2 = f_Nz[field];
         }
+        // monitor is on xz plane
         else if (axis == 1)
         {
-            n1 = Nx;
-            n2 = Nz;
-            // the thread grid for Ez, Hx, and Ey is offset by one compared to the global grid because the first thread
-            // grid cell captures these components on the end of the cell along x, instead of the beginning.
-            if ((field == 1) || (field == 2) || (field == 3))
+            if (field == HY)
             {
-                monitors[m].x_offset += 1;
+                monitors[m].position -= 1;
             }
+
+            // each row (along x) skips by NyNz
+            monitors[m].row_stride = f_Ny[field] * f_Nz[field];
+            // each column (along z) skips by 1
+            monitors[m].col_stride = 1;
+            monitors[m].N1 = Nx;
+            monitors[m].N2 = f_Nz[field];
         }
+        // monitor is on xy plane
         else
         {
-            n1 = Nx;
-            n2 = Ny;
-            // the thread grid for Ez, Hx, and Ey is offset by one compared to the global grid because the first thread
-            // grid cell captures these components on the end of the cell along x, instead of the beginning.
-            if ((field == 1) || (field == 2) || (field == 3))
+            if (field == HZ)
             {
-                monitors[m].x_offset += 1;
+                monitors[m].position -= 1;
             }
+
+            // each row (along x) skips by NyNz
+            monitors[m].row_stride = f_Ny[field] * f_Nz[field];
+            // each column (along y) skips by Nz
+            monitors[m].col_stride = f_Nz[field];
+            monitors[m].N1 = Nx;
+            monitors[m].N2 = f_Ny[field];
         }
         
         // monitor is frequency domain phasor if dtft phase is present in the dictionary
@@ -409,25 +433,18 @@ int SolverFDTD::solver_init_monitors(PyObject * py_monitors, int Nt)
         {   
             int n_frequencies = PyLong_AsLong(PyDict_GetItemString(py_mon, "n_frequencies"));
             int shape_dtft[2] = {Nm, n_frequencies};
-            int shape_phasors[3] = {n_frequencies, n1, n2};
+            int shape_phasors[3] = {n_frequencies, monitors[m].N1, monitors[m].N2};
             monitors[m].dtft_phase = get_complex_array(py_mon, "dtft_phase", shape_dtft, 2);
             monitors[m].values = (char *) get_complex_array(py_mon, "values", shape_phasors, 3);
             monitors[m].n_phasors = n_frequencies;
         }
         else
         {
-            monitors[m].values = (char *) get_solver_array(py_mon, "values", Nm, n1, n2);
+            monitors[m].values = (char *) get_solver_array(py_mon, "values", Nm, monitors[m].N1, monitors[m].N2);
             monitors[m].n_phasors = 0;
         }
 
-        monitors[m].N1 = n1;
-        monitors[m].N2 = n2;
-        monitors[m].Nx = Nx;
-        monitors[m].Ny = Ny;
-        monitors[m].Nz = Nz;
-        monitors[m].NyNz = Ny * Nz;
-        monitors[m].N1N2 = n1 * n2;
-
+        monitors[m].N1N2 = monitors[m].N1 * monitors[m].N2;
     }
 
     return 0;
@@ -678,6 +695,10 @@ void SolverFDTD::solver_thread(int x_start, int x_stop, int Nt, int thread_idx)
     int hx_NyNz = (Ny + 1) * (Nz + 1);
     int hy_NyNz = (Ny) * (Nz + 1);
     int hz_NyNz = (Ny + 1) * (Nz);
+
+    // allocated array length for each field type
+    int f_Ny[6] = {Ny1, Ny, Ny1, Ny1, Ny, Ny1};
+    int f_Nz[6] = {Nz1, Nz1, Nz, Nz1, Nz1, Nz};
     
     // include extra component at the lower edge of y and z axis.
     float * p_ex_y = mbuffer_allocate(Nx * (Ny + 1) * (Nz + 1)); // 
@@ -728,7 +749,7 @@ void SolverFDTD::solver_thread(int x_start, int x_stop, int Nt, int thread_idx)
     float * fields_sp2_base[6] = {p_ex_z, p_ey_x, p_ez_y, p_hx_z, p_hy_x, p_hz_y};
 
     int px, py, pz;
-
+    int ftype;
     for (int i = 0; i < n_probes; i++)
     {   
         p = &(probes[i]);
@@ -784,6 +805,7 @@ void SolverFDTD::solver_thread(int x_start, int x_stop, int Nt, int thread_idx)
 
         }
     }
+
 
     // msg.str("");
     // msg.clear();
@@ -1111,7 +1133,7 @@ void SolverFDTD::solver_thread(int x_start, int x_stop, int Nt, int thread_idx)
 
             else
             {
-                // update_monitor(&mon, mon_field, m_n, x_start, x_stop);
+                update_monitor(&mon, mon_field, m_n, x_start, x_stop);
             }
         }
 
@@ -1127,74 +1149,64 @@ int SolverFDTD::update_monitor(Monitor * mon, float * mon_field, int m_n, int x_
 
     if (mon->axis == 0)
     {
-        MatrixFloatType m_field (mon_field + ((mon->position - x_start) * (mon->NyNz)), mon->Ny, mon->Nz);
+        MatrixFloatType m_field (mon_field + ((mon->position - x_start) * (mon->N1N2)), mon->N1, mon->N2);
         m_values = m_field;
     }
 
-    else if (mon->axis == 1)
+    else
     {
-        // The x_offset accounts for the offset between
-        // the global grid and the thread grid which skips x=0.
-        for (int i = x_start; i < x_stop; i++)
-        {
-            MatrixFloatType m_field (mon_field + ((i - x_start) * (mon->NyNz)), mon->Ny, mon->Nz);
-            m_values.row(i + mon->x_offset) = m_field.row(mon->position);
-        }
-    }
-
-    else // (m->axis == 2)
-    {
-        for (int i = x_start; i < x_stop; i++)
-        {
-            MatrixFloatType m_field (mon_field + ((i - x_start) * (mon->NyNz)), mon->Ny, mon->Nz);
-            m_values.row(i + mon->x_offset) = m_field.col(mon->position);
-        }
-    }
-
-    return 0;
-        
-}
-
-
-int SolverFDTD::update_phasor_monitor(Monitor * mon, float * mon_field, int m_n, int x_start, int x_stop)
-{
-
-    for (int f = 0; f < mon->n_phasors; f++)
-    {
-        std::complex<float> * m_values_p = ((std::complex<float> *) (mon->values)) + (f * (mon->N1N2));
-
-        // pointer to matrix that holds the monitor results
-        MatrixComplexType m_values (m_values_p, mon->N1, mon->N2);
-        // get dtft exponential phase term at time step and frequency
-        std::complex<float> * dtft_phase_p = ((std::complex<float> *) (mon->dtft_phase)) + ((m_n * (mon->n_phasors)) + f);
-        std::complex<float> dtft_phase = *dtft_phase_p;
-
-        if (mon->axis == 0)
-        {
-            MatrixFloatType m_field (mon_field + ((mon->position - x_start) * (mon->NyNz)), mon->Ny, mon->Nz);
-            m_values += ((m_field.cast<std::complex<float>>()) * dtft_phase);
-        }
-
-        else if (mon->axis == 1)
-        {
-            // The x_offset accounts for the offset between
-            // the global grid and the thread grid which skips x=0.
-            for (int i = x_start; i < x_stop; i++)
-            {
-                MatrixFloatType m_field (mon_field + ((i - x_start) * (mon->NyNz)), mon->Ny, mon->Nz);
-                m_values.row(i + mon->x_offset) += ((m_field.cast<std::complex<float>>()).row(mon->position) * dtft_phase);
-            }
-        }
-
-        else // (m->axis == 2)
-        {
-            for (int i = x_start; i < x_stop; i++)
-            {
-                MatrixFloatType m_field (mon_field + ((i - x_start) * (mon->NyNz)), mon->Ny, mon->Nz);
-                m_values.row(i + mon->x_offset) += ((m_field.cast<std::complex<float>>()).col(mon->position) * dtft_phase);
-            }
-        }
+        MatrixFloatStride m_field (
+            mon_field, 
+            mon->N1, 
+            mon->N2,
+            StrideType(mon->row_stride, mon->col_stride)
+        );
+        m_values.block(x_start, 0, x_stop - x_start, mon->N2) = m_field;
     }
 
     return 0;
 }
+
+
+// int SolverFDTD::update_phasor_monitor(Monitor * mon, float * mon_field, int m_n, int x_start, int x_stop)
+// {
+
+//     for (int f = 0; f < mon->n_phasors; f++)
+//     {
+//         std::complex<float> * m_values_p = ((std::complex<float> *) (mon->values)) + (f * (mon->N1N2));
+
+//         // pointer to matrix that holds the monitor results
+//         MatrixComplexType m_values (m_values_p, mon->N1, mon->N2);
+//         // get dtft exponential phase term at time step and frequency
+//         std::complex<float> * dtft_phase_p = ((std::complex<float> *) (mon->dtft_phase)) + ((m_n * (mon->n_phasors)) + f);
+//         std::complex<float> dtft_phase = *dtft_phase_p;
+
+//         if (mon->axis == 0)
+//         {
+//             MatrixFloatType m_field (mon_field + ((mon->position - x_start) * (mon->NyNz)), mon->Ny, mon->Nz);
+//             m_values += ((m_field.cast<std::complex<float>>()) * dtft_phase);
+//         }
+
+//         else if (mon->axis == 1)
+//         {
+//             // The x_offset accounts for the offset between
+//             // the global grid and the thread grid which skips x=0.
+//             for (int i = x_start; i < x_stop; i++)
+//             {
+//                 MatrixFloatType m_field (mon_field + ((i - x_start) * (mon->NyNz)), mon->Ny, mon->Nz);
+//                 m_values.row(i + mon->x_offset) += ((m_field.cast<std::complex<float>>()).row(mon->position) * dtft_phase);
+//             }
+//         }
+
+//         else // (m->axis == 2)
+//         {
+//             for (int i = x_start; i < x_stop; i++)
+//             {
+//                 MatrixFloatType m_field (mon_field + ((i - x_start) * (mon->NyNz)), mon->Ny, mon->Nz);
+//                 m_values.row(i + mon->x_offset) += ((m_field.cast<std::complex<float>>()).col(mon->position) * dtft_phase);
+//             }
+//         }
+//     }
+
+//     return 0;
+// }

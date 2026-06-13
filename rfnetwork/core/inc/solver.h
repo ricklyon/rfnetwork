@@ -86,14 +86,11 @@ struct Monitor {
     int axis;
     int position;
     int n_step;
-    int x_offset;
     int N1;
     int N2;
-    int Nx;
-    int Ny;
-    int Nz;
-    int NyNz;
     int N1N2;
+    int row_stride;
+    int col_stride;
 };
 
 struct Probe {
