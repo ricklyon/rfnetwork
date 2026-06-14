@@ -1520,9 +1520,6 @@ class FDTD_Solver():
         for k in coefficients.keys():
             coefficients[k] = np.array(coefficients[k], order="C", dtype=dtype_)
 
-        print(self.Db["hy_z1"].shape)
-        print(dz_inv.shape)
-
         temp_mem_size = 0
         for s in self.fshape.values():
             # three copies of each field, two for the split fields and one combined field
@@ -2694,12 +2691,11 @@ class FDTD_Solver():
         """
         self.check_solution()
 
-        # component field names
-        c_names = [f"{name}_{a}" for a in ("x", "y", "z")]
-        # is there monitor data for all three rectangular components
-        is_total_field = all([n in self.monitors.keys() for n in c_names])
-
-        monitor = self.monitors[c_names[0]] if is_total_field else self.monitors[name]
+        # if there is monitor data for all three rectangular components, return data from the three monitors
+        if all([n in self.monitors.keys() for n in [f"{name}_{a}" for a in ("x", "y", "z")]]):
+            return self.get_total_monitor_data(name)
+        
+        monitor = self.monitors[name]
         # get the two component axis on the monitor plane
         spatial_axis = [0, 1, 2]
         spatial_dims = ["x", "y", "z"]
@@ -2707,7 +2703,6 @@ class FDTD_Solver():
 
         # axis normal to monitor plane
         axis = monitor["axis"]
-        axis_str = ["x", "y", "z"][axis]
 
         # is monitor a phasor at a single frequency
         mon_frequency = monitor["frequency"]
@@ -2715,47 +2710,74 @@ class FDTD_Solver():
         # time vector
         t_len = len(monitor["values"]) * self.dt * monitor["n_step"]
         time_values = np.arange(0, t_len, self.dt * monitor["n_step"], dtype=np.float64)[:len(monitor["values"])]
-    
-        # combine component vectors into a single matrix
-        if is_total_field:
-
-            if mon_frequency is not None:
-                raise NotImplementedError("Phasor monitors not implemented yet for total fields.")
-            
-            e_xyz = [self.monitors[n]["values"] for n in c_names]
-            # order the fields by the components in the surface, followed by the normal component.
-            # a surface on xy will be ordered x, y, z. xz will be ordered x, z, y., yz will be ordered, y, z, x.
-            axis_surf_ordered = spatial_axis + [axis]
-            e1, e2, e3 = [e_xyz[a] for a in axis_surf_ordered]
-
-            # average components on the xy plane to get the fields at the cell corners.
-            # fields at the grid edge are dropped
-            e1 = (e1[:, 1:, 1:-1] + e1[:, :-1, 1:-1]) / 2
-            e2 = (e2[:, 1:-1, 1:] + e2[:, 1:-1, :-1]) / 2
-            e3 = (e3[:, 1:-1, 1:-1])
-
-            # order back to x, y, z. Look up where each cartesian axis falls in the surface order
-            e_xyz = [(e1, e2, e3)[axis_surf_ordered.index(a)] for a in range(3)]
-
-            # Assign the spatial coordinates of the grid corners.
-            # Use the coordinates from the component normal to the monitor surface since it lies on the corners.
-            spatial_coords = {spatial_dims[i]: self.floc[f"e{axis_str}"][i][1:-1] for i in spatial_axis}
-
-            return ldarray(
-                e_xyz, 
-                coords=dict(component=("x", "y", "z"), time=time_values, **spatial_coords)
-            )
 
         # compile a single component field
-        else:
-            field = monitor["field"]
-            # build coordinates in inches for the two spatial dimensions of the slice
-            spatial_coords = {spatial_dims[i]: self.floc[field][i] for i in spatial_axis}
+        field = monitor["field"]
+        # build coordinates in inches for the two spatial dimensions of the slice
+        spatial_coords = {spatial_dims[i]: self.floc[field][i] for i in spatial_axis}
 
-            if mon_frequency is not None:
-                return ldarray(monitor["values"], coords=dict(frequency=mon_frequency, **spatial_coords))
-            else:
-                return ldarray(monitor["values"], coords=dict(time=time_values, **spatial_coords))
+        # drop the coords for first component of Hx, Ey, Ez along x if monitor plane is yz or xy
+        if axis in [1, 2] and field in ["hx", "ey", "ez"]:
+            spatial_coords["x"] = spatial_coords["x"][1:]
+
+        if mon_frequency is not None:
+            return ldarray(monitor["values"], coords=dict(frequency=mon_frequency, **spatial_coords))
+        else:
+            return ldarray(monitor["values"], coords=dict(time=time_values, **spatial_coords))
+            
+    def get_total_monitor_data(self, name: str):
+        """
+        Compile field monitor data that contains all three e-field components.
+
+        Parameters
+        ----------
+        name : str
+            name of monitor
+
+        Returns
+        -------
+        ldarray
+            labeled numpy array with time dimension and two spatial dimensions along monitor plane.
+            The first dimension is the three rectangular components.
+        """
+        # component field names
+        c_names = [f"{name}_{a}" for a in ("x", "y", "z")]
+        # is there monitor data for all three rectangular components
+        if not all([n in self.monitors.keys() for n in c_names]):
+            raise ValueError(f"Monitor {name} does not contain data for all three field components.")
+
+        monitor0 = self.monitors[c_names[0]]
+
+        if monitor0["frequency"] is not None:
+            raise NotImplementedError("Phasor monitors not implemented yet for total fields.")
+
+        # axis normal to monitor plane
+        axis = monitor0["axis"]
+        axis_str = ["x", "y", "z"][axis]
+
+        e_xyz = [self.get_monitor_data(n) for n in c_names]
+        # order the fields by the components in the surface, followed by the normal component.
+        # a surface on xy will be ordered x, y, z. xz will be ordered x, z, y., yz will be ordered, y, z, x.
+        # get the two component axis on the monitor plane
+        spatial_axis = [0, 1, 2]
+        spatial_dims = ["x", "y", "z"]
+        spatial_axis.pop(monitor0["axis"])
+        axis_surf_ordered = spatial_axis + [axis]
+        e1, e2, e3 = [e_xyz[a] for a in axis_surf_ordered]
+
+        # average components on the xy plane to get the fields at the cell corners.
+        # fields at the grid edge are dropped
+        e1 = (e1[:, 1:, 1:-1] + e1[:, :-1, 1:-1]) / 2
+        e2 = (e2[:, 1:-1, 1:] + e2[:, 1:-1, :-1]) / 2
+        e3 = (e3[:, 1:-1, 1:-1])
+
+        # order back to x, y, z. Look up where each cartesian axis falls in the surface order
+        e_xyz = [(e1, e2, e3)[axis_surf_ordered.index(a)] for a in range(3)]
+
+        # concatenate the data from the three monitors together
+        return ldarray(
+            np.array(e_xyz), coords=dict(component=("x", "y", "z"), **e_xyz[0].coords)
+        )
 
     def get_farfield_gain(self, theta: np.ndarray, phi: np.ndarray, polarization: np.ndarray = None) -> ldarray:
         """
