@@ -1607,7 +1607,7 @@ class FDTD_Solver():
                 fn = frequency / fs
                 omega = 2 * np.pi * fn
                 # phase terms of the DTFT at a single frequency for each time step
-                mon_config["values"] = np.zeros(((len(frequency),) + m["shape"]), dtype=np.complex64, order="C")
+                mon_config["values"] = np.zeros(((len(frequency),) + m_shape), dtype=np.complex64, order="C")
                 # dtft phase is ordered (n_m, frequency)
                 mon_config["dtft_phase"] = np.exp(
                     -1j * omega[None] * np.arange(n_m)[:, None], dtype=np.complex64, order="C" 

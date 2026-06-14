@@ -181,7 +181,8 @@ std::complex<float> * get_complex_array(PyObject * dict, const char * name, int 
     for (int i = 0; i < ndim; ++i) {
         if (shape[i] != (int) npy_shape[i])
         {
-            throw std::runtime_error("Invalid data source array shape");
+            oss << "Invalid data array " << name << ". Expected shape on axis " << i << " of " << npy_shape[i];
+            throw std::runtime_error(oss.str());
         }
     }
 
@@ -243,11 +244,11 @@ int SolverFDTD::solver_init_fields(PyObject * py_mem, PyObject * coefficients, i
 
     int NyNz = Ny * Nz;
 
-    int Nxm1 = (gpu) ? Nx : Nx-1;
+    // int Nxm1 = (gpu) ? Nx : Nx-1;
     int Nym1 = (gpu) ? Ny : Ny-1;
     int Nzm1 = (gpu) ? Nz : Nz-1;
 
-    int Nxp1 = (gpu) ? Nx : Nx+1;
+    // int Nxp1 = (gpu) ? Nx : Nx+1;
     int Nyp1 = (gpu) ? Ny : Ny+1;
     int Nzp1 = (gpu) ? Nz : Nz+1;
 
@@ -669,7 +670,7 @@ void SolverFDTD::solver_thread(int x_start, int x_stop, int Nt, int thread_idx)
     int x_offset;
     // number of updated field components
     int Nx = x_stop - x_start;
-    int NyNz = Ny * Nz;
+    // int NyNz = Ny * Nz;
 
     // allocate memory for this thread's grid.
     // only Nx components are created for all fields, the Ey, Ez, and Hx components that have one extra 
@@ -679,11 +680,11 @@ void SolverFDTD::solver_thread(int x_start, int x_stop, int Nt, int thread_idx)
     // allow only one thread at a time
     // std::unique_lock<std::mutex> lock(mutex);
 
-    int Nxp1 = Nx + 1;
+    // int Nxp1 = Nx + 1;
     int Nyp1 = Ny + 1;
     int Nzp1 = Nz + 1;
 
-    int Nxm1 = Nx - 1;
+    // int Nxm1 = Nx - 1;
     int Nym1 = Ny - 1;
     int Nzm1 = Nz - 1;
 
@@ -753,7 +754,7 @@ void SolverFDTD::solver_thread(int x_start, int x_stop, int Nt, int thread_idx)
     float * fields_sp2_base[6] = {p_ex_z, p_ey_x, p_ez_y, p_hx_z, p_hy_x, p_hz_y};
 
     int px, py, pz;
-    int ftype;
+    // int ftype;
     for (int i = 0; i < n_probes; i++)
     {   
         p = &(probes[i]);
