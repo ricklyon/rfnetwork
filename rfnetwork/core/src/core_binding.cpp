@@ -384,7 +384,7 @@ static PyObject* solver_run(PyObject* self, PyObject* args) {
     }
 
     SolverFDTD s;
-    s.solver_init_fields(mem, coefficients, Nx, Ny, Nz);
+    s.solver_init_fields(mem, coefficients, Nx, Ny, Nz, 0);
     s.solver_init_monitors(monitors, Nt);
     s.solver_init_probes(probes, Nt);
 
@@ -430,7 +430,7 @@ static PyObject* solver_run_cu(PyObject* self, PyObject* args) {
     }
 
     SolverFDTD s;
-    s.solver_init_fields(mem, coefficients, Nx, Ny, Nz);
+    s.solver_init_fields(mem, coefficients, Nx, Ny, Nz, 1);
     s.solver_init_monitors(monitors, Nt);
     s.solver_init_probes(probes, Nt);
 

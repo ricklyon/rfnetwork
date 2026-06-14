@@ -1455,6 +1455,14 @@ class FDTD_Solver():
         dy1_h_inv = np.concatenate([dy_h_inv, [[[0]]]], axis=1)
         dz1_h_inv = np.concatenate([dz_h_inv, [[[0]]]], axis=2)
 
+        # cpu solver drops the coefficients at the edges of the grid, gpu does not so that all fields and 
+        # coefficents are the same shape. Equally sized arrays don't work as well for the CPU because an extra
+        # h-field component is needed past the end of the grid to avoid a special case for the edge components
+        end = None if gpu else -1
+
+        hs = 1 if gpu else 0
+
+
         # to avoid inefficiently indexing the coefficients at every update, the ends of the coefficients are indexed
         # out so they can be directly multiplied with the difference operations in the update equations. 
         # The grid in the C++ solver is parallelized along x, each x cell is defined as the Ex, Hz, Hy components, and
@@ -1462,54 +1470,58 @@ class FDTD_Solver():
         # the grid are not included in any cell and are not updated (PEC boundary.) 
         coefficients = dict(
             # ex coefficients, edges along y and z do not get updated
-            Ca_ex_y = np.array(self.Ca["ex_y"][:, 1:, 1:], order="C", dtype=dtype_),
-            Ca_ex_z = np.array(self.Ca["ex_z"][:, 1:, 1:], order="C", dtype=dtype_),
-            
-            Cb_ex_y = np.array(self.Cb["ex_y"][:, 1:, 1:] * dy1_h_inv, order="C", dtype=dtype_),
-            Cb_ex_z = np.array(-self.Cb["ex_z"][:, 1:, 1:] * dz1_h_inv, order="C", dtype=dtype_),
+            Ca_ex_y = self.Ca["ex_y"][:, 1:end, 1:end],
+            Ca_ex_z = self.Ca["ex_z"][:, 1:end, 1:end],
+            Cb_ex_y = self.Cb["ex_y"][:, 1:end, 1:end] * dy1_h_inv[:, :end],
+            Cb_ex_z = -self.Cb["ex_z"][:, 1:end, 1:end] * dz1_h_inv[..., :end],
 
             # ey coefficients, edges along x and z do not get updated
-            Ca_ey_z = np.array(self.Ca["ey_z"][1:, :, 1:], order="C", dtype=dtype_),
-            Ca_ey_x = np.array(self.Ca["ey_x"][1:, :, 1:], order="C", dtype=dtype_),
-            
-            Cb_ey_z = np.array(self.Cb["ey_z"][1:, :, 1:] * dz1_h_inv, order="C", dtype=dtype_),
-            Cb_ey_x = np.array(-self.Cb["ey_x"][1:, :, 1:] * dx1_h_inv, order="C", dtype=dtype_),
+            Ca_ey_z = self.Ca["ey_z"][1:, :, 1:end],
+            Ca_ey_x = self.Ca["ey_x"][1:, :, 1:end],
+            Cb_ey_z = self.Cb["ey_z"][1:, :, 1:end] * dz1_h_inv[..., :end],
+            Cb_ey_x = -self.Cb["ey_x"][1:, :, 1:end] * dx1_h_inv,
 
             # ez coefficients, edges along x and y do not get updated
-            Ca_ez_x = np.array(self.Ca["ez_x"][1:, 1:, :], order="C", dtype=dtype_),
-            Ca_ez_y = np.array(self.Ca["ez_y"][1:, 1:, :], order="C", dtype=dtype_),
-            
-            Cb_ez_x = np.array(self.Cb["ez_x"][1:, 1:, :] * dx1_h_inv, order="C", dtype=dtype_),
-            Cb_ez_y = np.array(-self.Cb["ez_y"][1:, 1:, :] * dy1_h_inv, order="C", dtype=dtype_),
+            Ca_ez_x = self.Ca["ez_x"][1:, 1:end, :],
+            Ca_ez_y = self.Ca["ez_y"][1:, 1:end, :],
+            Cb_ez_x = self.Cb["ez_x"][1:, 1:end, :] * dx1_h_inv,
+            Cb_ez_y = -self.Cb["ez_y"][1:, 1:end, :] * dy1_h_inv[:, :end],
 
             # hx coefficients
-            Da_hx_y = np.array(self.Da["hx_y"][1:], order="C", dtype=dtype_),
-            Da_hx_z = np.array(self.Da["hx_z"][1:], order="C", dtype=dtype_),
+            Da_hx_y = self.Da["hx_y"][1:],
+            Da_hx_z = self.Da["hx_z"][1:],
             
-            Db_hx_y1 = np.array(-self.Db["hx_y1"][1:] * dy_inv, order="C", dtype=dtype_),
-            Db_hx_y2 = np.array(-self.Db["hx_y2"][1:] * dy_inv, order="C", dtype=dtype_),
-            Db_hx_z1 = np.array(self.Db["hx_z1"][1:] * dz_inv, order="C", dtype=dtype_),
-            Db_hx_z2 = np.array(self.Db["hx_z2"][1:] * dz_inv, order="C", dtype=dtype_),
+            Db_hx_y1 = -self.Db["hx_y1"][1:] * dy_inv,
+            Db_hx_y2 = -self.Db["hx_y2"][1:] * dy_inv,
+            Db_hx_z1 = self.Db["hx_z1"][1:] * dz_inv, 
+            Db_hx_z2 = self.Db["hx_z2"][1:] * dz_inv,
 
             # hy coefficients
-            Da_hy_z = np.array(self.Da["hy_z"][:, 1:], order="C", dtype=dtype_),
-            Da_hy_x = np.array(self.Da["hy_x"][:, 1:], order="C", dtype=dtype_),
+            Da_hy_z = self.Da["hy_z"][:, hs:],
+            Da_hy_x = self.Da["hy_x"][:, hs:],
             
-            Db_hy_z1 = np.array(-self.Db["hy_z1"][:, 1:] * dz_inv, order="C", dtype=dtype_),
-            Db_hy_z2 = np.array(-self.Db["hy_z2"][:, 1:] * dz_inv, order="C", dtype=dtype_),
-            Db_hy_x1 = np.array(self.Db["hy_x1"][:, 1:] * dx_inv, order="C", dtype=dtype_),
-            Db_hy_x2 = np.array(self.Db["hy_x2"][:, 1:] * dx_inv, order="C", dtype=dtype_),
+            Db_hy_z1 = -self.Db["hy_z1"][:, hs:] * dz_inv,
+            Db_hy_z2 = -self.Db["hy_z2"][:, hs:] * dz_inv,
+            Db_hy_x1 = self.Db["hy_x1"][:, hs:] * dx_inv,
+            Db_hy_x2 = self.Db["hy_x2"][:, hs:] * dx_inv,
 
             # hz coefficients
-            Da_hz_x = np.array(self.Da["hz_x"][:, :, 1:], order="C", dtype=dtype_),
-            Da_hz_y = np.array(self.Da["hz_y"][:, :, 1:], order="C", dtype=dtype_),
+            Da_hz_x = self.Da["hz_x"][:, :, hs:],
+            Da_hz_y = self.Da["hz_y"][:, :, hs:],
             
-            Db_hz_x1 = np.array(-self.Db["hz_x1"][:, :, 1:] * dx_inv, order="C", dtype=dtype_),
-            Db_hz_x2 = np.array(-self.Db["hz_x2"][:, :, 1:] * dx_inv, order="C", dtype=dtype_),
-            Db_hz_y1 = np.array(self.Db["hz_y1"][:, :, 1:] * dy_inv, order="C", dtype=dtype_),
-            Db_hz_y2 = np.array(self.Db["hz_y2"][:, :, 1:] * dy_inv, order="C", dtype=dtype_),
+            Db_hz_x1 = -self.Db["hz_x1"][:, :, hs:] * dx_inv,
+            Db_hz_x2 = -self.Db["hz_x2"][:, :, hs:] * dx_inv,
+            Db_hz_y1 = self.Db["hz_y1"][:, :, hs:] * dy_inv,
+            Db_hz_y2 = self.Db["hz_y2"][:, :, hs:] * dy_inv,
         )
 
+
+        # copy arrays to row-ordered arrays in the solver dtype
+        for k in coefficients.keys():
+            coefficients[k] = np.array(coefficients[k], order="C", dtype=dtype_)
+
+        print(self.Db["hy_z1"].shape)
+        print(dz_inv.shape)
 
         temp_mem_size = 0
         for s in self.fshape.values():
@@ -1573,8 +1585,8 @@ class FDTD_Solver():
 
             # allocated array length for each field type in the solver, all e-field components are included,
             # except at x=0. H-field components have an extra component at the ends of the grid along y and z.
-            f_Ny = [self.Ny+1, self.Ny, self.Ny+1, self.Ny+1, self.Ny, self.Ny+1]
-            f_Nz = [self.Nz+1, self.Nz+1, self.Nz, self.Nz+1, self.Nz+1, self.Nz]
+            f_Ny = [self.Ny+1, self.Ny, self.Ny+1, self.Ny, self.Ny+1, self.Ny]
+            f_Nz = [self.Nz+1, self.Nz+1, self.Nz, self.Nz, self.Nz, self.Nz+1]
 
             if m["axis"] == 0:
                 m_shape = (f_Ny[field_idx], f_Nz[field_idx])
