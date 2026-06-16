@@ -1643,10 +1643,13 @@ class FDTD_Solver():
 
         # move monitor values back to the class variable
         for i, (k, m) in enumerate(self.monitors.items()):
-            # leave out grid edges that are not updated
             m_val = monitors[i]["values"]
 
-            
+            # add an extra row along x for the components that start at the edge of the grid and weren't included in
+            # the sover gird.
+            if m["axis"] in [1, 2] and m["field"] in ["hx", "ey", "ez"]:
+                m_val = np.pad(m_val, ((0, 0), (1, 0), (0, 0)))
+
             self.monitors[k]["values"] = m_val
 
         # get the voltages at each source components
@@ -2715,10 +2718,6 @@ class FDTD_Solver():
         field = monitor["field"]
         # build coordinates in inches for the two spatial dimensions of the slice
         spatial_coords = {spatial_dims[i]: self.floc[field][i] for i in spatial_axis}
-
-        # drop the coords for first component of Hx, Ey, Ez along x if monitor plane is yz or xy
-        if axis in [1, 2] and field in ["hx", "ey", "ez"]:
-            spatial_coords["x"] = spatial_coords["x"][1:]
 
         if mon_frequency is not None:
             return ldarray(monitor["values"], coords=dict(frequency=mon_frequency, **spatial_coords))

@@ -400,6 +400,7 @@ int SolverFDTD::solver_init_monitors(PyObject * py_monitors, int Nt)
             monitors[m].row_stride = f_Nz[field];
             // each column (along z) skips by 1
             monitors[m].col_stride = 1;
+            monitors[m].yz_offset = 0;
             monitors[m].N1 = f_Ny[field];
             monitors[m].N2 = f_Nz[field];
         }
@@ -410,6 +411,7 @@ int SolverFDTD::solver_init_monitors(PyObject * py_monitors, int Nt)
             monitors[m].row_stride = f_Ny[field] * f_Nz[field];
             // each column (along z) skips by 1
             monitors[m].col_stride = 1;
+            monitors[m].yz_offset = (monitors[m].position) * f_Nz[field];
             monitors[m].N1 = Nx;
             monitors[m].N2 = f_Nz[field];
         }
@@ -420,6 +422,7 @@ int SolverFDTD::solver_init_monitors(PyObject * py_monitors, int Nt)
             monitors[m].row_stride = f_Ny[field] * f_Nz[field];
             // each column (along y) skips by Nz
             monitors[m].col_stride = f_Nz[field];
+            monitors[m].yz_offset = (monitors[m].position);
             monitors[m].N1 = Nx;
             monitors[m].N2 = f_Ny[field];
         }
@@ -1135,7 +1138,7 @@ void SolverFDTD::solver_thread(int x_start, int x_stop, int Nt, int thread_idx)
 
             if (mon.n_phasors)
             {
-                // update_phasor_monitor(&mon, mon_field, m_n, x_start, x_stop);
+                update_phasor_monitor(&mon, mon_field, m_n, x_start, x_stop);
             }
 
             else
@@ -1163,8 +1166,8 @@ int SolverFDTD::update_monitor(Monitor * mon, float * mon_field, int m_n, int x_
     else
     {
         MatrixFloatStride m_field (
-            mon_field, 
-            mon->N1, 
+            mon_field + mon->yz_offset, 
+            (x_stop - x_start),
             mon->N2,
             StrideType(mon->row_stride, mon->col_stride)
         );
@@ -1175,45 +1178,35 @@ int SolverFDTD::update_monitor(Monitor * mon, float * mon_field, int m_n, int x_
 }
 
 
-// int SolverFDTD::update_phasor_monitor(Monitor * mon, float * mon_field, int m_n, int x_start, int x_stop)
-// {
+int SolverFDTD::update_phasor_monitor(Monitor * mon, float * mon_field, int m_n, int x_start, int x_stop)
+{
 
-//     for (int f = 0; f < mon->n_phasors; f++)
-//     {
-//         std::complex<float> * m_values_p = ((std::complex<float> *) (mon->values)) + (f * (mon->N1N2));
+    for (int f = 0; f < mon->n_phasors; f++)
+    {
+        std::complex<float> * m_values_p = ((std::complex<float> *) (mon->values)) + (f * (mon->N1N2));
 
-//         // pointer to matrix that holds the monitor results
-//         MatrixComplexType m_values (m_values_p, mon->N1, mon->N2);
-//         // get dtft exponential phase term at time step and frequency
-//         std::complex<float> * dtft_phase_p = ((std::complex<float> *) (mon->dtft_phase)) + ((m_n * (mon->n_phasors)) + f);
-//         std::complex<float> dtft_phase = *dtft_phase_p;
+        // pointer to matrix that holds the monitor results
+        MatrixComplexType m_values (m_values_p, mon->N1, mon->N2);
+        // get dtft exponential phase term at time step and frequency
+        std::complex<float> * dtft_phase_p = ((std::complex<float> *) (mon->dtft_phase)) + ((m_n * (mon->n_phasors)) + f);
+        std::complex<float> dtft_phase = *dtft_phase_p;
 
-//         if (mon->axis == 0)
-//         {
-//             MatrixFloatType m_field (mon_field + ((mon->position - x_start) * (mon->NyNz)), mon->Ny, mon->Nz);
-//             m_values += ((m_field.cast<std::complex<float>>()) * dtft_phase);
-//         }
+        if (mon->axis == 0)
+        {
+            MatrixFloatType m_field (mon_field + ((mon->position - x_start) * (mon->N1N2)), mon->N1, mon->N2);
+            m_values += ((m_field.cast<std::complex<float>>()) * dtft_phase);
+        }
+        else
+        {
+            MatrixFloatStride m_field (
+                mon_field + mon->yz_offset, 
+                (x_stop - x_start),
+                mon->N2,
+                StrideType(mon->row_stride, mon->col_stride)
+            );
+            m_values.block(x_start, 0, x_stop - x_start, mon->N2) += ((m_field.cast<std::complex<float>>()) * dtft_phase);
+        }
+    }
 
-//         else if (mon->axis == 1)
-//         {
-//             // The x_offset accounts for the offset between
-//             // the global grid and the thread grid which skips x=0.
-//             for (int i = x_start; i < x_stop; i++)
-//             {
-//                 MatrixFloatType m_field (mon_field + ((i - x_start) * (mon->NyNz)), mon->Ny, mon->Nz);
-//                 m_values.row(i + mon->x_offset) += ((m_field.cast<std::complex<float>>()).row(mon->position) * dtft_phase);
-//             }
-//         }
-
-//         else // (m->axis == 2)
-//         {
-//             for (int i = x_start; i < x_stop; i++)
-//             {
-//                 MatrixFloatType m_field (mon_field + ((i - x_start) * (mon->NyNz)), mon->Ny, mon->Nz);
-//                 m_values.row(i + mon->x_offset) += ((m_field.cast<std::complex<float>>()).col(mon->position) * dtft_phase);
-//             }
-//         }
-//     }
-
-//     return 0;
-// }
+    return 0;
+}

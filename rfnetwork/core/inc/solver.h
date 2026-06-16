@@ -89,6 +89,7 @@ struct Monitor {
     int N1;
     int N2;
     int N1N2;
+    int yz_offset;
     int row_stride;
     int col_stride;
 };
