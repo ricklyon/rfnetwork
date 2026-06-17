@@ -64,7 +64,7 @@ struct HFieldCoefficients
     float* Db_hz_y2;
 };
 
-struct Fields
+struct FieldsDevice
 {
     float* ex;
     float* ex_y;
@@ -92,13 +92,24 @@ struct Fields
 
 };
 
+struct MonitorsDevice
+{
+    float ** values;
+    int * positions;
+    int * axis;
+    int * fields;
+    int * n_step;
+    int n_monitors;
+};
+
 EFieldCoefficients ecoeff;
 HFieldCoefficients hcoeff;
-Fields fields;
+FieldsDevice fields;
+MonitorsDevice monitors_dev;
 
 
 __global__ void efield_update_kernel(
-    EFieldCoefficients C, Fields F,
+    EFieldCoefficients C, FieldsDevice F, MonitorsDevice M, int n,
     int Nx, int Ny, int Nz, int Nt
 )
 {
@@ -174,10 +185,61 @@ __global__ void efield_update_kernel(
     (F.ez)[f_idx] = (F.ez_x)[f_idx] + (F.ez_y)[f_idx];
 
     // grid.sync();
+
+    // printf("n_monitors %d", );
+    
+    // update monitors
+    int m_idx;  // index into 2D monitor array
+    int m_n;
+    for (int m = 0; m < M.n_monitors; m++)
+    {   
+        if (M.fields[m] > 2)
+        {
+            continue;
+        }
+        if ((n > 0) && ((n % (M.n_step[m])) != 0))
+        {
+            continue;
+        }
+
+        int m_n = n / M.n_step[m];
+
+        // yz plane
+        if ((M.axis[m] == 0) && (M.positions[m] == x_idx))
+        {
+            m_idx = m_n * (Ny * Nz) + (y_idx * Nz) + z_idx;
+        }
+        // xz plane
+        else if ((M.axis[m] == 1) && (M.positions[m] == y_idx))
+        {
+            m_idx = m_n * (Nx * Nz) + (x_idx * Nz) + z_idx;
+        }
+        // xy plane
+        else if ((M.axis[m] == 2) && (M.positions[m] == z_idx))
+        {
+            
+            m_idx = m_n * (Nx * Ny) + x_idx * Ny + y_idx;
+        }
+        
+        // set values
+        if (M.fields[m] == 0)
+        {
+            M.values[m][m_idx] = F.ex[f_idx];
+        }
+        else if (M.fields[m] == 1)
+        {
+            M.values[m][m_idx] = F.ey[f_idx];
+        }
+        else
+        {
+            M.values[m][m_idx] = F.ez[f_idx];
+        }
+
+    }
 }
 
 __global__ void hfield_update_kernel(
-    HFieldCoefficients D, Fields F,
+    HFieldCoefficients D, FieldsDevice F,
     int Nx, int Ny, int Nz, int Nt
 )
 {
@@ -257,7 +319,7 @@ __global__ void hfield_update_kernel(
 }
 
 __global__ void e_probe_update_kernel(
-    Fields F, int n_probes, int n, int Nt, 
+    FieldsDevice F, int n_probes, int n, int Nt, 
     int* probe_idx, int* probe_type, int* probe_is_src, float* probe_values
 )
 {
@@ -310,7 +372,7 @@ __global__ void e_probe_update_kernel(
 }
 
 __global__ void h_probe_update_kernel(
-    Fields F, int n_probes, int n, int Nt, 
+    FieldsDevice F, int n_probes, int n, int Nt, 
     int* probe_idx, int* probe_type, int* probe_is_src, float* probe_values
 )
 {
@@ -625,6 +687,43 @@ void SolverFDTD::solver_run_cu(int Nt)
     cudaMemcpy(probe_type_dev, probe_type, n_probes * sizeof(int), cudaMemcpyDefault);
     cudaMemcpy(probe_is_src_dev, probe_is_src, n_probes * sizeof(int), cudaMemcpyDefault);
 
+    // initialize monitors
+    int mon_positions[MAX_MONITORS];
+    int mon_axis[MAX_MONITORS];
+    int mon_fields[MAX_MONITORS];
+    int mon_n_step[MAX_MONITORS];
+    float * mon_values[MAX_MONITORS];
+
+    cudaMalloc(&(monitors_dev.positions), n_monitors * sizeof(int));
+    cudaMalloc(&(monitors_dev.axis), n_monitors * sizeof(int));
+    cudaMalloc(&(monitors_dev.fields), n_monitors * sizeof(int));
+    cudaMalloc(&(monitors_dev.n_step), n_monitors * sizeof(int));
+    cudaMalloc(&(monitors_dev.values), n_monitors * sizeof(float *));
+    monitors_dev.n_monitors = n_monitors;
+    int Nm;
+    for (int m = 0; m < n_monitors; m++)
+    {
+        Monitor mon = monitors[m];
+
+        mon_positions[m] = mon.position;
+        mon_axis[m] = mon.axis;
+        mon_fields[m] = mon.field_type;
+        mon_n_step[m] = mon.n_step;
+
+        Nm = (Nt / (mon.n_step)) + 1;
+        
+        // allocate values array
+        // float * values_dev = nullptr;
+        cudaMalloc(&(mon_values[m]), Nm * mon.N1 * mon.N2 * sizeof(float));
+        // cudaMemcpy(mon_values[m], mon.values, mon.N1 * mon.N2 * sizeof(int), cudaMemcpyDefault);
+    }
+
+    cudaMemcpy(monitors_dev.positions, mon_positions, n_monitors * sizeof(int), cudaMemcpyDefault);
+    cudaMemcpy(monitors_dev.axis, mon_axis, n_monitors * sizeof(int), cudaMemcpyDefault);
+    cudaMemcpy(monitors_dev.fields, mon_fields, n_monitors * sizeof(int), cudaMemcpyDefault);
+    cudaMemcpy(monitors_dev.n_step, mon_n_step, n_monitors * sizeof(int), cudaMemcpyDefault);
+    cudaMemcpy(monitors_dev.values, mon_values, n_monitors * sizeof(float *), cudaMemcpyDefault);
+
     // Fields* d_fields;
     // cudaMalloc(&d_fields, sizeof(Fields));
 
@@ -715,7 +814,7 @@ void SolverFDTD::solver_run_cu(int Nt)
     for (int n = 0; n < Nt; n++)
     {
         efield_update_kernel<<<grid_size, block_size>>>(
-            ecoeff, fields,
+            ecoeff, fields, monitors_dev, n,
             Nx, Ny, Nz, Nt
         );
 
@@ -774,6 +873,15 @@ void SolverFDTD::solver_run_cu(int Nt)
 
         cudaMemcpy(p->values, probe_values_dev + (i * Nt), Nt * sizeof(float), cudaMemcpyDefault);
     }
+
+    // copy monitor values from device to CPU
+    for (int m = 0; m < n_monitors; m++)
+    {
+        Monitor * mon = &(monitors[m]);
+        Nm = (Nt / (mon->n_step)) + 1;
+        cudaMemcpy((float * ) (mon->values), mon_values[m], Nm * (mon->N1) * (mon->N2) * sizeof(float), cudaMemcpyDefault);
+    }
+    
     
     // Clean up field arrays
     cudaFree(p_ex_y);
@@ -852,5 +960,17 @@ void SolverFDTD::solver_run_cu(int Nt)
     // cudaFree(d_fields);
     // cudaFree(d_ecoeff);
     // cudaFree(d_hcoeff);
+
+    // clean up monitors
+    for (int m = 0; m < n_monitors; m++)
+    {
+        cudaFree(mon_values[m]);
+    }
+
+    cudaFree(monitors_dev.positions);
+    cudaFree(monitors_dev.axis);
+    cudaFree(monitors_dev.fields);
+    cudaFree(monitors_dev.n_step);
+    cudaFree(monitors_dev.values);
 
 }

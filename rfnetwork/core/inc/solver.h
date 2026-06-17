@@ -166,7 +166,7 @@ private:
 public:
     SolverFDTD();          // constructor
     int solver_init_fields(PyObject * py_mem, PyObject * coefficients, int Nx, int Ny, int Nz, int gpu);
-    int solver_init_monitors(PyObject * py_monitors, int Nt);
+    int solver_init_monitors(PyObject * py_monitors, int Nt, int gpu);
     int solver_init_probes(PyObject * py_probes, int Nt);
 
     int solver_run(int Nt, int n_threads, int update_interval);

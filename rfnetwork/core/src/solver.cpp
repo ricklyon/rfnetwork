@@ -348,7 +348,7 @@ int SolverFDTD::solver_init_fields(PyObject * py_mem, PyObject * coefficients, i
     return 0;
 }
 
-int SolverFDTD::solver_init_monitors(PyObject * py_monitors, int Nt)
+int SolverFDTD::solver_init_monitors(PyObject * py_monitors, int Nt, int gpu)
 {
     // initialize field monitors
     n_monitors = (int) PyList_Size(py_monitors);
@@ -366,8 +366,11 @@ int SolverFDTD::solver_init_monitors(PyObject * py_monitors, int Nt)
     // int Nz[6] = {Ex.Nz, Ey.Nz, Ez.Nz, Hx.Nz, Hy.Nz, Hz.Nz};
 
     // allocated array length for each field type
-    int f_Ny[6] = {Ny+1, Ny, Ny+1, Ny, Ny+1, Ny};
-    int f_Nz[6] = {Nz+1, Nz+1, Nz, Nz, Nz, Nz+1};
+    int Ny1 = (gpu) ? Ny : Ny+1;
+    int Nz1 = (gpu) ? Nz : Nz+1;
+
+    int f_Ny[6] = {Ny1, Ny, Ny1, Ny, Ny1, Ny};
+    int f_Nz[6] = {Nz1, Nz1, Nz, Nz, Nz, Nz1};
 
     PyObject* py_mon;
 
@@ -407,6 +410,11 @@ int SolverFDTD::solver_init_monitors(PyObject * py_monitors, int Nt)
         // monitor is on xz plane
         else if (axis == 1)
         {
+            // the gpu grid for Hy, Ex, and Ez along y is offset by one compared to the global grid
+            if (gpu && ((field == HY) || (field == EX) || (field == EZ)))
+            {
+                monitors[m].position -= 1;
+            }
             // each row (along x) skips by NyNz
             monitors[m].row_stride = f_Ny[field] * f_Nz[field];
             // each column (along z) skips by 1
@@ -418,6 +426,11 @@ int SolverFDTD::solver_init_monitors(PyObject * py_monitors, int Nt)
         // monitor is on xy plane
         else
         {
+            // the gpu grid for Hz, Ex, and Ey along z is offset by one compared to the global grid
+            if (gpu && ((field == HZ) || (field == EX) || (field == EY)))
+            {
+                monitors[m].position -= 1;
+            }
             // each row (along x) skips by NyNz
             monitors[m].row_stride = f_Ny[field] * f_Nz[field];
             // each column (along y) skips by Nz

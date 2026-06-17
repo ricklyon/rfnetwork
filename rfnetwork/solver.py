@@ -1586,11 +1586,11 @@ class FDTD_Solver():
             f_Nz = [self.Nz+1, self.Nz+1, self.Nz, self.Nz, self.Nz, self.Nz+1]
 
             if m["axis"] == 0:
-                m_shape = (f_Ny[field_idx], f_Nz[field_idx])
+                m_shape = (Ny, Nz) if gpu else (f_Ny[field_idx], f_Nz[field_idx])
             elif m["axis"] == 1:
-                m_shape = (self.Nx, f_Nz[field_idx])
+                m_shape = (Nx, Nz) if gpu else (self.Nx, f_Nz[field_idx])
             else:
-                m_shape = (self.Nx, f_Ny[field_idx])
+                m_shape = (Nx, Ny) if gpu else (self.Nx, f_Ny[field_idx])
 
             mon_config = dict(
                 axis=int(m["axis"]),
@@ -1649,6 +1649,27 @@ class FDTD_Solver():
             # the sover gird.
             if m["axis"] in [1, 2] and m["field"] in ["hx", "ey", "ez"]:
                 m_val = np.pad(m_val, ((0, 0), (1, 0), (0, 0)))
+
+            if gpu:
+                # gpu grid is Nx, Ny, Nz for all components. Add extra row columns for components that start at
+                # the edge of the grid
+
+                # extra component along y axis
+                if m["field"] in ["hy", "ex", "ez"]:
+                    # monitor on x-axis (yz plane)
+                    if m["axis"] == 0:
+                        m_val = np.pad(m_val, ((0, 0), (1, 0), (0, 0)))
+                    # monitor on z-axis (xy plane)
+                    if m["axis"] == 2:
+                        m_val = np.pad(m_val, ((0, 0), (0, 0), (1, 0)))
+                # extra component along z axis
+                elif m["field"] in ["hz", "ex", "ey"]:
+                    # monitor on x-axis (yz plane)
+                    if m["axis"] == 0:
+                        m_val = np.pad(m_val, ((0, 0), (0, 0), (1, 0)))
+                    # monitor on y-axis (xz plane)
+                    if m["axis"] == 1:
+                        m_val = np.pad(m_val, ((0, 0), (0, 0), (1, 0)))
 
             self.monitors[k]["values"] = m_val
 
