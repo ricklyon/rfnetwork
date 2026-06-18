@@ -1654,7 +1654,7 @@ class FDTD_Solver():
                 # gpu grid is Nx, Ny, Nz for all components. Add extra row columns for components that start at
                 # the edge of the grid
 
-                # extra component along y axis
+                # add extra component along y axis
                 if m["field"] in ["hy", "ex", "ez"]:
                     # monitor on x-axis (yz plane)
                     if m["axis"] == 0:
@@ -1663,7 +1663,7 @@ class FDTD_Solver():
                     if m["axis"] == 2:
                         m_val = np.pad(m_val, ((0, 0), (0, 0), (1, 0)))
                 # extra component along z axis
-                elif m["field"] in ["hz", "ex", "ey"]:
+                if m["field"] in ["hz", "ex", "ey"]:
                     # monitor on x-axis (yz plane)
                     if m["axis"] == 0:
                         m_val = np.pad(m_val, ((0, 0), (0, 0), (1, 0)))

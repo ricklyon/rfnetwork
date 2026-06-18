@@ -13,6 +13,7 @@
 
 #include <stdio.h>
 #include <cooperative_groups.h>
+#include <cuda/std/complex>
 
 namespace cg = cooperative_groups;
 
@@ -94,12 +95,16 @@ struct FieldsDevice
 
 struct MonitorsDevice
 {
-    float ** values;
+    char ** values;
+    cuda::std::complex<float> * dtft_phase;
     int * positions;
     int * axis;
     int * fields;
     int * n_step;
+    int * is_phasor;
+    
     int n_monitors;
+    int n_phasors;
 };
 
 EFieldCoefficients ecoeff;
@@ -189,8 +194,14 @@ __global__ void efield_update_kernel(
     // printf("n_monitors %d", );
     
     // update monitors
-    int m_idx;  // index into 2D monitor array
-    int m_n;
+    // int m_idx;  // index into 2D monitor array
+    int m_n; // time step of monitor
+    cuda::std::complex<float> m_dtft_phs;
+    float m_field;
+
+    int inner_idx;
+    int outer_idx;
+
     for (int m = 0; m < M.n_monitors; m++)
     {   
         if (M.fields[m] > 2)
@@ -202,44 +213,70 @@ __global__ void efield_update_kernel(
             continue;
         }
 
-        int m_n = n / M.n_step[m];
+        m_n = n / M.n_step[m];
 
         // yz plane
         if ((M.axis[m] == 0) && (M.positions[m] == x_idx))
         {
-            m_idx = m_n * (Ny * Nz) + (y_idx * Nz) + z_idx;
+            outer_idx = (Ny * Nz);
+            inner_idx = (y_idx * Nz) + z_idx;
+        
+            // m_idx = m_n * (Ny * Nz) + (y_idx * Nz) + z_idx;
         }
         // xz plane
         else if ((M.axis[m] == 1) && (M.positions[m] == y_idx))
         {
-            m_idx = m_n * (Nx * Nz) + (x_idx * Nz) + z_idx;
+            outer_idx = (Nx * Nz);
+            inner_idx = (x_idx * Nz) + z_idx;
+
+            // m_idx = m_n * (Nx * Nz) + (x_idx * Nz) + z_idx;
         }
         // xy plane
         else if ((M.axis[m] == 2) && (M.positions[m] == z_idx))
         {
-            
-            m_idx = m_n * (Nx * Ny) + x_idx * Ny + y_idx;
-        }
-        
-        // set values
-        if (M.fields[m] == 0)
-        {
-            M.values[m][m_idx] = F.ex[f_idx];
-        }
-        else if (M.fields[m] == 1)
-        {
-            M.values[m][m_idx] = F.ey[f_idx];
+            outer_idx = (Nx * Ny);
+            inner_idx = x_idx * Ny + y_idx;
+
+            // m_idx = m_n * (Nx * Ny) + x_idx * Ny + y_idx;
         }
         else
         {
-            M.values[m][m_idx] = F.ez[f_idx];
+            continue;
+        }
+        
+        // get field value
+        if (M.fields[m] == 0)
+        {
+            m_field = F.ex[f_idx];
+        }
+        else if (M.fields[m] == 1)
+        {
+            m_field = F.ey[f_idx];
+        }
+        else
+        {
+            m_field = F.ez[f_idx];
+        }
+
+        if (M.is_phasor[m])
+        {
+            for (int f = 0; f < M.n_phasors; f++)
+            {
+                m_dtft_phs = (M.dtft_phase[(m_n * M.n_phasors) + f]);
+
+                ((cuda::std::complex<float> *) M.values[m])[f * outer_idx + inner_idx] +=  m_dtft_phs * ((cuda::std::complex<float>) m_field);
+            }
+        }
+        else 
+        {
+            ((float *) M.values[m])[m_n * outer_idx + inner_idx] = m_field;
         }
 
     }
 }
 
 __global__ void hfield_update_kernel(
-    HFieldCoefficients D, FieldsDevice F,
+    HFieldCoefficients D, FieldsDevice F, MonitorsDevice M, int n,
     int Nx, int Ny, int Nz, int Nt
 )
 {
@@ -316,6 +353,87 @@ __global__ void hfield_update_kernel(
     (F.hx)[f_idx] = (F.hx_y)[f_idx] + (F.hx_z)[f_idx];
     (F.hy)[f_idx] = (F.hy_z)[f_idx] + (F.hy_x)[f_idx];
     (F.hz)[f_idx] = (F.hz_x)[f_idx] + (F.hz_y)[f_idx];
+
+    // update monitors
+    // int m_idx;  // index into 2D monitor array
+    int m_n; // time step of monitor
+    cuda::std::complex<float> m_dtft_phs;
+    float m_field;
+
+    int inner_idx;
+    int outer_idx;
+
+    for (int m = 0; m < M.n_monitors; m++)
+    {   
+        if (M.fields[m] < 3)
+        {
+            continue;
+        }
+        if ((n > 0) && ((n % (M.n_step[m])) != 0))
+        {
+            continue;
+        }
+
+        m_n = n / M.n_step[m];
+
+        // yz plane
+        if ((M.axis[m] == 0) && (M.positions[m] == x_idx))
+        {
+            outer_idx = (Ny * Nz);
+            inner_idx = (y_idx * Nz) + z_idx;
+        
+            // m_idx = m_n * (Ny * Nz) + (y_idx * Nz) + z_idx;
+        }
+        // xz plane
+        else if ((M.axis[m] == 1) && (M.positions[m] == y_idx))
+        {
+            outer_idx = (Nx * Nz);
+            inner_idx = (x_idx * Nz) + z_idx;
+
+            // m_idx = m_n * (Nx * Nz) + (x_idx * Nz) + z_idx;
+        }
+        // xy plane
+        else if ((M.axis[m] == 2) && (M.positions[m] == z_idx))
+        {
+            outer_idx = (Nx * Ny);
+            inner_idx = x_idx * Ny + y_idx;
+
+            // m_idx = m_n * (Nx * Ny) + x_idx * Ny + y_idx;
+        }
+        else
+        {
+            continue;
+        }
+        
+        // get field value
+        if (M.fields[m] == 3)
+        {
+            m_field = F.hx[f_idx];
+        }
+        else if (M.fields[m] == 4)
+        {
+            m_field = F.hy[f_idx];
+        }
+        else
+        {
+            m_field = F.hz[f_idx];
+        }
+
+        if (M.is_phasor[m])
+        {
+            for (int f = 0; f < M.n_phasors; f++)
+            {
+                m_dtft_phs = (M.dtft_phase[(m_n * M.n_phasors) + f]);
+
+                ((cuda::std::complex<float> *) M.values[m])[f * outer_idx + inner_idx] +=  m_dtft_phs * ((cuda::std::complex<float>) m_field);
+            }
+        }
+        else 
+        {
+            ((float *) M.values[m])[m_n * outer_idx + inner_idx] = m_field;
+        }
+
+    }
 }
 
 __global__ void e_probe_update_kernel(
@@ -692,15 +810,23 @@ void SolverFDTD::solver_run_cu(int Nt)
     int mon_axis[MAX_MONITORS];
     int mon_fields[MAX_MONITORS];
     int mon_n_step[MAX_MONITORS];
-    float * mon_values[MAX_MONITORS];
+    int mon_is_phasor[MAX_MONITORS];
+    char * mon_values[MAX_MONITORS];
+    // use same dtft phase for all monitors (same frequencies assumed for all monitors)
+    // float * mon_dtft_phase;
 
     cudaMalloc(&(monitors_dev.positions), n_monitors * sizeof(int));
     cudaMalloc(&(monitors_dev.axis), n_monitors * sizeof(int));
     cudaMalloc(&(monitors_dev.fields), n_monitors * sizeof(int));
     cudaMalloc(&(monitors_dev.n_step), n_monitors * sizeof(int));
-    cudaMalloc(&(monitors_dev.values), n_monitors * sizeof(float *));
+    cudaMalloc(&(monitors_dev.is_phasor), n_monitors * sizeof(int));
+    cudaMalloc(&(monitors_dev.values), n_monitors * sizeof(char *));
+    cudaMalloc(&(monitors_dev.dtft_phase), n_monitors * sizeof(float *));
+
     monitors_dev.n_monitors = n_monitors;
+    monitors_dev.n_phasors = 0;
     int Nm;
+    int mon_phasor_idx;
     for (int m = 0; m < n_monitors; m++)
     {
         Monitor mon = monitors[m];
@@ -709,20 +835,47 @@ void SolverFDTD::solver_run_cu(int Nt)
         mon_axis[m] = mon.axis;
         mon_fields[m] = mon.field_type;
         mon_n_step[m] = mon.n_step;
+        mon_is_phasor[m] = (mon.n_phasors > 0) ? 1 : 0;
 
         Nm = (Nt / (mon.n_step)) + 1;
         
-        // allocate values array
-        // float * values_dev = nullptr;
-        cudaMalloc(&(mon_values[m]), Nm * mon.N1 * mon.N2 * sizeof(float));
-        // cudaMemcpy(mon_values[m], mon.values, mon.N1 * mon.N2 * sizeof(int), cudaMemcpyDefault);
+        // TODO: assert that all phasor monitors have the same number of frequencies
+        // and have equal time steps (Nt)
+        if ((mon.n_phasors > 0))
+        {
+            mon_is_phasor[m] = 1;
+            monitors_dev.n_phasors = mon.n_phasors;
+            // save last monitor index that has a phasor
+            mon_phasor_idx = m;
+            cudaMalloc(&(mon_values[m]), mon.n_phasors * mon.N1 * mon.N2 * sizeof(cuda::std::complex<float>));
+        }
+        else
+        {
+            // allocate values array
+            // float * values_dev = nullptr;
+            cudaMalloc(&(mon_values[m]), Nm * mon.N1 * mon.N2 * sizeof(float));
+            // cudaMemcpy(mon_values[m], mon.values, mon.N1 * mon.N2 * sizeof(int), cudaMemcpyDefault);
+        }
+
     }
 
     cudaMemcpy(monitors_dev.positions, mon_positions, n_monitors * sizeof(int), cudaMemcpyDefault);
     cudaMemcpy(monitors_dev.axis, mon_axis, n_monitors * sizeof(int), cudaMemcpyDefault);
     cudaMemcpy(monitors_dev.fields, mon_fields, n_monitors * sizeof(int), cudaMemcpyDefault);
     cudaMemcpy(monitors_dev.n_step, mon_n_step, n_monitors * sizeof(int), cudaMemcpyDefault);
-    cudaMemcpy(monitors_dev.values, mon_values, n_monitors * sizeof(float *), cudaMemcpyDefault);
+    cudaMemcpy(monitors_dev.is_phasor, mon_is_phasor, n_monitors * sizeof(int), cudaMemcpyDefault);
+    cudaMemcpy(monitors_dev.values, mon_values, n_monitors * sizeof(char *), cudaMemcpyDefault);
+
+    if (monitors_dev.n_phasors)
+    {
+        cudaMalloc(&(monitors_dev.dtft_phase), Nt * monitors_dev.n_phasors * sizeof(cuda::std::complex<float>));
+        cudaMemcpy(
+            monitors_dev.dtft_phase, 
+            (monitors[mon_phasor_idx].dtft_phase),
+            Nt * monitors_dev.n_phasors * sizeof(cuda::std::complex<float>), 
+            cudaMemcpyDefault
+        );
+    }
 
     // Fields* d_fields;
     // cudaMalloc(&d_fields, sizeof(Fields));
@@ -831,7 +984,7 @@ void SolverFDTD::solver_run_cu(int Nt)
         // printf("e-runtime: %s\n", cudaGetErrorString(err));
 
         hfield_update_kernel<<<grid_size, block_size>>>(
-            hcoeff, fields,
+            hcoeff, fields, monitors_dev, n,
             Nx, Ny, Nz, Nt
         );
 
@@ -879,7 +1032,16 @@ void SolverFDTD::solver_run_cu(int Nt)
     {
         Monitor * mon = &(monitors[m]);
         Nm = (Nt / (mon->n_step)) + 1;
-        cudaMemcpy((float * ) (mon->values), mon_values[m], Nm * (mon->N1) * (mon->N2) * sizeof(float), cudaMemcpyDefault);
+
+        if ((mon->n_phasors > 0))
+        {
+            cudaMemcpy((float * ) (mon->values), mon_values[m], (mon->n_phasors) * (mon->N1) * (mon->N2) * sizeof(cuda::std::complex<float>), cudaMemcpyDefault);
+        }
+        else
+        {
+            cudaMemcpy((float * ) (mon->values), mon_values[m], Nm * (mon->N1) * (mon->N2) * sizeof(float), cudaMemcpyDefault);
+        }
+        
     }
     
     
@@ -972,5 +1134,10 @@ void SolverFDTD::solver_run_cu(int Nt)
     cudaFree(monitors_dev.fields);
     cudaFree(monitors_dev.n_step);
     cudaFree(monitors_dev.values);
-
+    cudaFree(monitors_dev.is_phasor);
+    
+    if (monitors_dev.n_phasors)
+    {
+        cudaFree(monitors_dev.dtft_phase);
+    }
 }
