@@ -9,6 +9,11 @@ from scipy.interpolate import CubicSpline
 from . units import const, conv
 from . import core_func
 
+try:
+    from . import cuda_func
+except ImportError:
+    pass
+
 
 def junction_sdata(frequency: np.ndarray, N: int) -> np.ndarray:
     sdata = np.full((N, N), 2 / N, dtype="complex128")

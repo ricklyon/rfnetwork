@@ -81,7 +81,7 @@ static struct PyModuleDef module = {
     moduleMethods
 };
 
-PyMODINIT_FUNC PyInit_core_func(void)
+PyMODINIT_FUNC PyInit_cuda_func(void)
 {
     import_array();  
     Py_Initialize();
