@@ -74,29 +74,44 @@ class build_cuda(setuptools.Command):
     def run(self):
         pass
 
-if cuda_path is not None:
-    ext_cuda_kwargs = dict(
-        extra_objects=["rfnetwork/core/solver_cu.o"], # add cuda objects to the linker
-        libraries=["cudart"],  # include cuda runtime in linker
-        library_dirs=[str(cuda_path / "lib64")],
-        runtime_library_dirs=[str(cuda_path / "lib64")],
-        define_macros=[
-            ("CUDA_AVAILABLE", None),      # equivalent to -DCUDA_AVAILABLE
-        ]
-    )
-else:
-    ext_cuda_kwargs = dict()
+core_cpp = [
+    "rfnetwork/core/src/postprocess.cpp",
+    "rfnetwork/core/src/core_binding.cpp",
+    "rfnetwork/core/src/connect.cpp",
+    "rfnetwork/core/src/solver.cpp"
+]
+
+cuda_cpp = [
+    "rfnetwork/core/src/cuda_binding.cpp",
+    "rfnetwork/core/src/solver.cpp"
+ ]
+
+core_ext = Extension(
+    name="rfnetwork.core.core_func",
+    sources=core_cpp,
+    include_dirs=["rfnetwork/core/inc", "rfnetwork/core/lib/eigen", np.get_include()],
+    optional=False,
+)
+
+cuda_ext = Extension(
+    name="rfnetwork.core.cuda_func",
+    sources=cuda_cpp,
+    include_dirs=["rfnetwork/core/inc", "rfnetwork/core/lib/eigen", np.get_include()],
+    optional=False,
+    extra_objects=["rfnetwork/core/solver_cu.o"], # add cuda objects to the linker
+    libraries=["cudart"],  # include cuda runtime in linker
+    library_dirs=[str(cuda_path / "lib64")],
+    runtime_library_dirs=[str(cuda_path / "lib64")],
+    define_macros=[
+        ("CUDA_AVAILABLE", None),      # equivalent to -DCUDA_AVAILABLE
+    ]
+)
+
+# only compile CUDA solver code if nvcc is available
+ext_modules = [core_ext] if cuda_path is None else [cuda_ext, core_ext]
         
 setup(
-    ext_modules=[
-        Extension(
-            name="rfnetwork.core.core_func",
-            sources=glob.glob("rfnetwork/core/src/*.cpp"),
-            include_dirs=["rfnetwork/core/inc", "rfnetwork/core/lib/eigen", np.get_include()],
-            optional=False,
-            **ext_cuda_kwargs
-        )
-    ],
+    ext_modules=ext_modules,
     # https://stackoverflow.com/questions/20194565/running-custom-setuptools-build-during-install
     cmdclass={
         'build': build,
