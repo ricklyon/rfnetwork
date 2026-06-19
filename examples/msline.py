@@ -115,7 +115,7 @@ s.add_voltage_probe("v1", voltage_line)
 # -----
 vsrc = 1e-2 * s.gaussian_source(width=80e-12, t0=60e-12, t_len=500e-12)
 s.assign_excitation(vsrc, 1)
-s.solve(gpu=True)
+s.solve()
 
 # %%
 # Plot Probe Values
