@@ -6,7 +6,7 @@ Linear circuit solver for networks of RF components.
 Installation
 ============
 
-``rfnetwork`` requires Python >= 3.9. Wheels are currently only available on linux, but can be built from
+``rfnetwork`` requires Python >= 3.9. Wheels are currently only available on linux, and can be built from
 source on Windows.
 
 ```bash
@@ -20,7 +20,8 @@ Features
 * Compute noise figure of multi-port networks.
 * Interactive tuning of variable components (i.e. switches, phase shifters, capacitors). 
 * Supports internal voltage probes inside a network. 
-* Full wave FDTD solver for analyzing coupled lines and simple PCB geometry.
+* GPU accelerated FDTD solver.
+
 
 Documentation
 =============

@@ -9,17 +9,19 @@ import subprocess
 import os
 from pathlib import Path
 import setuptools
+import warnings
 
 
-def find_cuda() -> dict:
+def find_cuda() -> Path:
     """
     Return the path to the CUDA installation. 
-    Raises RuntimeError if CUDA cannot be located.
+    Returns None if a CUDA installation cannot be found. Ensure the CUDA_HOME environment variable is 
+    set to your CUDA install directory.
     """
-    # 1. Honour explicit env override
+    # explicit env override
     cuda_home = os.environ.get("CUDA_HOME") or os.environ.get("CUDA_PATH")
 
-    # 2. Ask nvcc where it lives
+    # ask nvcc where it lives
     if cuda_home is None:
         try:
             nvcc_path = subprocess.check_output(
@@ -28,16 +30,13 @@ def find_cuda() -> dict:
             # nvcc lives at <cuda_home>/bin/nvcc
             cuda_home = str(Path(nvcc_path).parent.parent)
         except subprocess.CalledProcessError:
-            raise RuntimeError(
-                "CUDA toolkit not found. "
-                "Set the CUDA_HOME environment variable to your CUDA install directory, "
-            )
-
+            return None
+        
     cuda_home = Path(cuda_home)
     nvcc      = cuda_home / "bin" / "nvcc"
 
     if not nvcc.exists():
-        raise RuntimeError(f"nvcc not found at {nvcc}")
+        return None
     
     return cuda_home
 
@@ -52,6 +51,11 @@ class build_cuda(setuptools.Command):
     
     # build .cu files before compiling .cpp files
     def initialize_options(self):
+
+        # skip if CUDA is not installed
+        if cuda_path is None:
+            warnings.warn("CUDA installation not found. Unable to build GPU solver from source.")
+            return
         
         result = subprocess.run(
             "nvcc -Xcompiler -fPIC -I rfnetwork/core/inc "
@@ -69,6 +73,19 @@ class build_cuda(setuptools.Command):
     
     def run(self):
         pass
+
+if cuda_path is not None:
+    ext_cuda_kwargs = dict(
+        extra_objects=["rfnetwork/core/solver_cu.o"], # add cuda objects to the linker
+        libraries=["cudart"],  # include cuda runtime in linker
+        library_dirs=[str(cuda_path / "lib64")],
+        runtime_library_dirs=[str(cuda_path / "lib64")],
+        define_macros=[
+            ("CUDA_AVAILABLE", None),      # equivalent to -DCUDA_AVAILABLE
+        ]
+    )
+else:
+    ext_cuda_kwargs = dict()
         
 setup(
     ext_modules=[
@@ -77,10 +94,7 @@ setup(
             sources=glob.glob("rfnetwork/core/src/*.cpp"),
             include_dirs=["rfnetwork/core/inc", "rfnetwork/core/lib/eigen", np.get_include()],
             optional=False,
-            extra_objects=["rfnetwork/core/solver_cu.o"], # add cuda objects to the linker
-            libraries=["cudart"],  # include cuda runtime in linker
-            library_dirs=[str(cuda_path / "lib64")],
-            runtime_library_dirs=[str(cuda_path / "lib64")],
+            **ext_cuda_kwargs
         )
     ],
     # https://stackoverflow.com/questions/20194565/running-custom-setuptools-build-during-install

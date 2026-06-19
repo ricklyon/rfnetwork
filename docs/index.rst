@@ -30,11 +30,11 @@ Installation
 Features
 ========
 
-* Simulate networks of RF components with hierarchical building blocks.
+* Simulate networks of linear components with hierarchical building blocks.
 * Compute noise figure of multi-port networks.
 * Interactive tuning of variable components (i.e. switches, phase shifters, capacitors). 
 * Supports internal voltage probes inside a network. 
-* Full wave FDTD solver for analyzing coupled lines and simple PCB geometry.
+* GPU accelerated FDTD solver.
 
 
 .. include:: auto_examples/index.rst

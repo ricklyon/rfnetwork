@@ -393,6 +393,7 @@ static PyObject* solver_run(PyObject* self, PyObject* args) {
     return PyLong_FromLong(0);
 }
 
+
 static PyObject* solver_run_cu(PyObject* self, PyObject* args) {
 
     PyObject *coefficients;
@@ -434,10 +435,15 @@ static PyObject* solver_run_cu(PyObject* self, PyObject* args) {
     s.solver_init_monitors(monitors, Nt, 1);
     s.solver_init_probes(probes, Nt);
 
-    s.solver_run_cu(Nt);
+    #ifdef CUDA_AVAILABLE
+        s.solver_run_cu(Nt);
+    #else
+        throw std::runtime_error("GPU Solver is not available in the current installation.");
+    #endif
 
     return PyLong_FromLong(0);
 }
+
 
 static PyObject* nf2ff(PyObject* self, PyObject* args) {
 
