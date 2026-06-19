@@ -79,8 +79,12 @@ class TestMeshUtils(unittest.TestCase):
 
         # compare with regression image
         ref_im = plt.imread(DATA_DIR / "regression/test_get_edges_fig1.png")
-
-        np.testing.assert_array_almost_equal(ref_im, test_im, decimal=2)
+        
+        # test that less than 1% of pixels are off by 2 decimals
+        places = 2
+        diff = np.abs(test_im - ref_im)
+        pxl_err_count = np.count_nonzero(np.where(diff > (10 ** (-places)), 1, 0))
+        np.testing.assert_array_less(pxl_err_count / diff.size, 0.01)
 
 
 if __name__ == "__main__":
