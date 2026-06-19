@@ -1407,8 +1407,7 @@ class FDTD_Solver():
             if p is not None:
                 p["src"] = None
 
-
-    def solve(self, n_threads: int = 4, show_progress: bool = True):
+    def solve(self, n_threads: int = 4, show_progress: bool = True, gpu: bool = False):
         """
         Run FDTD algorithm. At least one port must have an excitation defined before running. Results will be written
         to the probes and monitors attached to the model.
@@ -1449,9 +1448,20 @@ class FDTD_Solver():
         dy_h_inv = 1 / dy_h[None, :, None]
         dz_h_inv = 1 / dz_h[None, None, :]
 
-        # dx with an extra component for the last component at the x edge of the grid that has no neighboring
+        # dx, dy, dz with an extra component for the last component at the edge of the grid that has no neighboring
         # cell.
-        dx1_h_inv = np.vstack([dx_h_inv, [[[0]]]])
+        # This also ensures the fields remain at 0 at the end of the grid (PEC boundary)
+        dx1_h_inv = np.concatenate([dx_h_inv, [[[0]]]], axis=0)
+        dy1_h_inv = np.concatenate([dy_h_inv, [[[0]]]], axis=1)
+        dz1_h_inv = np.concatenate([dz_h_inv, [[[0]]]], axis=2)
+
+        # cpu solver drops the coefficients at the edges of the grid, gpu does not so that all fields and 
+        # coefficents are the same shape. Equally sized arrays don't work as well for the CPU because an extra
+        # h-field component is needed past the end of the grid to avoid a special case for the edge components
+        end = None if gpu else -1
+
+        hs = 1 if gpu else 0
+
 
         # to avoid inefficiently indexing the coefficients at every update, the ends of the coefficients are indexed
         # out so they can be directly multiplied with the difference operations in the update equations. 
@@ -1460,25 +1470,22 @@ class FDTD_Solver():
         # the grid are not included in any cell and are not updated (PEC boundary.) 
         coefficients = dict(
             # ex coefficients, edges along y and z do not get updated
-            Ca_ex_y = np.array(self.Ca["ex_y"][:, 1:-1, 1:-1], order="C", dtype=dtype_),
-            Ca_ex_z = np.array(self.Ca["ex_z"][:, 1:-1, 1:-1], order="C", dtype=dtype_),
-            
-            Cb_ex_y = np.array(self.Cb["ex_y"][:, 1:-1, 1:-1] * dy_h_inv, order="C", dtype=dtype_),
-            Cb_ex_z = np.array(-self.Cb["ex_z"][:, 1:-1, 1:-1] * dz_h_inv, order="C", dtype=dtype_),
+            Ca_ex_y = self.Ca["ex_y"][:, 1:end, 1:end],
+            Ca_ex_z = self.Ca["ex_z"][:, 1:end, 1:end],
+            Cb_ex_y = self.Cb["ex_y"][:, 1:end, 1:end] * dy1_h_inv[:, :end],
+            Cb_ex_z = -self.Cb["ex_z"][:, 1:end, 1:end] * dz1_h_inv[..., :end],
 
             # ey coefficients, edges along x and z do not get updated
-            Ca_ey_z = np.array(self.Ca["ey_z"][1:, :, 1:-1], order="C", dtype=dtype_),
-            Ca_ey_x = np.array(self.Ca["ey_x"][1:, :, 1:-1], order="C", dtype=dtype_),
-            
-            Cb_ey_z = np.array(self.Cb["ey_z"][1:, :, 1:-1] * dz_h_inv, order="C", dtype=dtype_),
-            Cb_ey_x = np.array(-self.Cb["ey_x"][1:, :, 1:-1] * dx1_h_inv, order="C", dtype=dtype_),
+            Ca_ey_z = self.Ca["ey_z"][1:, :, 1:end],
+            Ca_ey_x = self.Ca["ey_x"][1:, :, 1:end],
+            Cb_ey_z = self.Cb["ey_z"][1:, :, 1:end] * dz1_h_inv[..., :end],
+            Cb_ey_x = -self.Cb["ey_x"][1:, :, 1:end] * dx1_h_inv,
 
             # ez coefficients, edges along x and y do not get updated
-            Ca_ez_x = np.array(self.Ca["ez_x"][1:, 1:-1, :], order="C", dtype=dtype_),
-            Ca_ez_y = np.array(self.Ca["ez_y"][1:, 1:-1, :], order="C", dtype=dtype_),
-            
-            Cb_ez_x = np.array(self.Cb["ez_x"][1:, 1:-1, :] * dx1_h_inv, order="C", dtype=dtype_),
-            Cb_ez_y = np.array(-self.Cb["ez_y"][1:, 1:-1, :] * dy_h_inv, order="C", dtype=dtype_),
+            Ca_ez_x = self.Ca["ez_x"][1:, 1:end, :],
+            Ca_ez_y = self.Ca["ez_y"][1:, 1:end, :],
+            Cb_ez_x = self.Cb["ez_x"][1:, 1:end, :] * dx1_h_inv,
+            Cb_ez_y = -self.Cb["ez_y"][1:, 1:end, :] * dy1_h_inv[:, :end],
 
             # hx coefficients
             Da_hx_y = self.Da["hx_y"][1:],
@@ -1486,27 +1493,32 @@ class FDTD_Solver():
             
             Db_hx_y1 = -self.Db["hx_y1"][1:] * dy_inv,
             Db_hx_y2 = -self.Db["hx_y2"][1:] * dy_inv,
-            Db_hx_z1 = self.Db["hx_z1"][1:] * dz_inv,
+            Db_hx_z1 = self.Db["hx_z1"][1:] * dz_inv, 
             Db_hx_z2 = self.Db["hx_z2"][1:] * dz_inv,
 
             # hy coefficients
-            Da_hy_z = self.Da["hy_z"],
-            Da_hy_x = self.Da["hy_x"],
+            Da_hy_z = self.Da["hy_z"][:, hs:],
+            Da_hy_x = self.Da["hy_x"][:, hs:],
             
-            Db_hy_z1 = -self.Db["hy_z1"] * dz_inv,
-            Db_hy_z2 = -self.Db["hy_z2"] * dz_inv,
-            Db_hy_x1 = self.Db["hy_x1"] * dx_inv,
-            Db_hy_x2 = self.Db["hy_x2"] * dx_inv,
+            Db_hy_z1 = -self.Db["hy_z1"][:, hs:] * dz_inv,
+            Db_hy_z2 = -self.Db["hy_z2"][:, hs:] * dz_inv,
+            Db_hy_x1 = self.Db["hy_x1"][:, hs:] * dx_inv,
+            Db_hy_x2 = self.Db["hy_x2"][:, hs:] * dx_inv,
 
             # hz coefficients
-            Da_hz_x = self.Da["hz_x"],
-            Da_hz_y = self.Da["hz_y"],
+            Da_hz_x = self.Da["hz_x"][:, :, hs:],
+            Da_hz_y = self.Da["hz_y"][:, :, hs:],
             
-            Db_hz_x1 = -self.Db["hz_x1"] * dx_inv,
-            Db_hz_x2 = -self.Db["hz_x2"] * dx_inv,
-            Db_hz_y1 = self.Db["hz_y1"] * dy_inv,
-            Db_hz_y2 = self.Db["hz_y2"] * dy_inv,
+            Db_hz_x1 = -self.Db["hz_x1"][:, :, hs:] * dx_inv,
+            Db_hz_x2 = -self.Db["hz_x2"][:, :, hs:] * dx_inv,
+            Db_hz_y1 = self.Db["hz_y1"][:, :, hs:] * dy_inv,
+            Db_hz_y2 = self.Db["hz_y2"][:, :, hs:] * dy_inv,
         )
+
+
+        # copy arrays to row-ordered arrays in the solver dtype
+        for k in coefficients.keys():
+            coefficients[k] = np.array(coefficients[k], order="C", dtype=dtype_)
 
         temp_mem_size = 0
         for s in self.fshape.values():
@@ -1566,10 +1578,24 @@ class FDTD_Solver():
 
             n_m = int(Nt / m["n_step"]) + 1
 
+            field_idx = list(self.fshape.keys()).index(m["field"])
+
+            # allocated array length for each field type in the solver, all e-field components are included,
+            # except at x=0. H-field components have an extra component at the ends of the grid along y and z.
+            f_Ny = [self.Ny+1, self.Ny, self.Ny+1, self.Ny, self.Ny+1, self.Ny]
+            f_Nz = [self.Nz+1, self.Nz+1, self.Nz, self.Nz, self.Nz, self.Nz+1]
+
+            if m["axis"] == 0:
+                m_shape = (Ny, Nz) if gpu else (f_Ny[field_idx], f_Nz[field_idx])
+            elif m["axis"] == 1:
+                m_shape = (Nx, Nz) if gpu else (self.Nx, f_Nz[field_idx])
+            else:
+                m_shape = (Nx, Ny) if gpu else (self.Nx, f_Ny[field_idx])
+
             mon_config = dict(
                 axis=int(m["axis"]),
                 position=int(m["index"]),
-                field=list(self.fshape.keys()).index(m["field"]),
+                field=field_idx,
                 n_step=int(m["n_step"]),
             )
 
@@ -1581,7 +1607,7 @@ class FDTD_Solver():
                 fn = frequency / fs
                 omega = 2 * np.pi * fn
                 # phase terms of the DTFT at a single frequency for each time step
-                mon_config["values"] = np.zeros(((len(frequency),) + m["shape"]), dtype=np.complex64, order="C")
+                mon_config["values"] = np.zeros(((len(frequency),) + m_shape), dtype=np.complex64, order="C")
                 # dtft phase is ordered (n_m, frequency)
                 mon_config["dtft_phase"] = np.exp(
                     -1j * omega[None] * np.arange(n_m)[:, None], dtype=np.complex64, order="C" 
@@ -1589,7 +1615,7 @@ class FDTD_Solver():
                 mon_config["n_frequencies"] = int(len(frequency))
             else:
                 # initialize monitor for time domain captures
-                mon_config["values"] = np.zeros(((n_m,) + m["shape"]), dtype=dtype_, order="C")
+                mon_config["values"] = np.zeros(((n_m,) + m_shape), dtype=dtype_, order="C")
 
             monitors.append(mon_config)
 
@@ -1605,14 +1631,47 @@ class FDTD_Solver():
         else:
             update_interval = 0
 
-        core.core_func.solver_run(coefficients, probes, monitors, mem, Nx, Ny, Nz, Nt, n_threads, update_interval)
+        if gpu:
+            solver_func = core.core_func.solver_run_cu
+        else:
+            solver_func = core.core_func.solver_run
+
+        solver_func(coefficients, probes, monitors, mem, Nx, Ny, Nz, Nt, n_threads, update_interval)
 
         if show_progress:
             sys.stdout.write(f"\rDone in {time.time() - stime:.3f}s" + (" " * 20) + "\n")
 
         # move monitor values back to the class variable
         for i, (k, m) in enumerate(self.monitors.items()):
-            self.monitors[k]["values"] = monitors[i]["values"]
+            m_val = monitors[i]["values"]
+
+            # add an extra row along x for the components that start at the edge of the grid and weren't included in
+            # the sover gird.
+            if m["axis"] in [1, 2] and m["field"] in ["hx", "ey", "ez"]:
+                m_val = np.pad(m_val, ((0, 0), (1, 0), (0, 0)))
+
+            if gpu:
+                # gpu grid is Nx, Ny, Nz for all components. Add extra row columns for components that start at
+                # the edge of the grid
+
+                # add extra component along y axis
+                if m["field"] in ["hy", "ex", "ez"]:
+                    # monitor on x-axis (yz plane)
+                    if m["axis"] == 0:
+                        m_val = np.pad(m_val, ((0, 0), (1, 0), (0, 0)))
+                    # monitor on z-axis (xy plane)
+                    if m["axis"] == 2:
+                        m_val = np.pad(m_val, ((0, 0), (0, 0), (1, 0)))
+                # extra component along z axis
+                if m["field"] in ["hz", "ex", "ey"]:
+                    # monitor on x-axis (yz plane)
+                    if m["axis"] == 0:
+                        m_val = np.pad(m_val, ((0, 0), (0, 0), (1, 0)))
+                    # monitor on y-axis (xz plane)
+                    if m["axis"] == 1:
+                        m_val = np.pad(m_val, ((0, 0), (0, 0), (1, 0)))
+
+            self.monitors[k]["values"] = m_val
 
         # get the voltages at each source components
         src_v = [s["values"] for s in probes]
@@ -1705,7 +1764,7 @@ class FDTD_Solver():
 
             self.monitors[n] = dict(
                 field=f, 
-                axis=axis_i, 
+                axis=axis_i,
                 position=position, 
                 index=index, 
                 n_step=n_step, 
@@ -2656,12 +2715,11 @@ class FDTD_Solver():
         """
         self.check_solution()
 
-        # component field names
-        c_names = [f"{name}_{a}" for a in ("x", "y", "z")]
-        # is there monitor data for all three rectangular components
-        is_total_field = all([n in self.monitors.keys() for n in c_names])
-
-        monitor = self.monitors[c_names[0]] if is_total_field else self.monitors[name]
+        # if there is monitor data for all three rectangular components, return data from the three monitors
+        if all([n in self.monitors.keys() for n in [f"{name}_{a}" for a in ("x", "y", "z")]]):
+            return self.get_total_monitor_data(name)
+        
+        monitor = self.monitors[name]
         # get the two component axis on the monitor plane
         spatial_axis = [0, 1, 2]
         spatial_dims = ["x", "y", "z"]
@@ -2669,7 +2727,6 @@ class FDTD_Solver():
 
         # axis normal to monitor plane
         axis = monitor["axis"]
-        axis_str = ["x", "y", "z"][axis]
 
         # is monitor a phasor at a single frequency
         mon_frequency = monitor["frequency"]
@@ -2677,47 +2734,70 @@ class FDTD_Solver():
         # time vector
         t_len = len(monitor["values"]) * self.dt * monitor["n_step"]
         time_values = np.arange(0, t_len, self.dt * monitor["n_step"], dtype=np.float64)[:len(monitor["values"])]
-    
-        # combine component vectors into a single matrix
-        if is_total_field:
-
-            if mon_frequency is not None:
-                raise NotImplementedError("Phasor monitors not implemented yet for total fields.")
-            
-            e_xyz = [self.monitors[n]["values"] for n in c_names]
-            # order the fields by the components in the surface, followed by the normal component.
-            # a surface on xy will be ordered x, y, z. xz will be ordered x, z, y., yz will be ordered, y, z, x.
-            axis_surf_ordered = spatial_axis + [axis]
-            e1, e2, e3 = [e_xyz[a] for a in axis_surf_ordered]
-
-            # average components on the xy plane to get the fields at the cell corners.
-            # fields at the grid edge are dropped
-            e1 = (e1[:, 1:, 1:-1] + e1[:, :-1, 1:-1]) / 2
-            e2 = (e2[:, 1:-1, 1:] + e2[:, 1:-1, :-1]) / 2
-            e3 = (e3[:, 1:-1, 1:-1])
-
-            # order back to x, y, z. Look up where each cartesian axis falls in the surface order
-            e_xyz = [(e1, e2, e3)[axis_surf_ordered.index(a)] for a in range(3)]
-
-            # Assign the spatial coordinates of the grid corners.
-            # Use the coordinates from the component normal to the monitor surface since it lies on the corners.
-            spatial_coords = {spatial_dims[i]: self.floc[f"e{axis_str}"][i][1:-1] for i in spatial_axis}
-
-            return ldarray(
-                e_xyz, 
-                coords=dict(component=("x", "y", "z"), time=time_values, **spatial_coords)
-            )
 
         # compile a single component field
-        else:
-            field = monitor["field"]
-            # build coordinates in inches for the two spatial dimensions of the slice
-            spatial_coords = {spatial_dims[i]: self.floc[field][i] for i in spatial_axis}
+        field = monitor["field"]
+        # build coordinates in inches for the two spatial dimensions of the slice
+        spatial_coords = {spatial_dims[i]: self.floc[field][i] for i in spatial_axis}
 
-            if mon_frequency is not None:
-                return ldarray(monitor["values"], coords=dict(frequency=mon_frequency, **spatial_coords))
-            else:
-                return ldarray(monitor["values"], coords=dict(time=time_values, **spatial_coords))
+        if mon_frequency is not None:
+            return ldarray(monitor["values"], coords=dict(frequency=mon_frequency, **spatial_coords))
+        else:
+            return ldarray(monitor["values"], coords=dict(time=time_values, **spatial_coords))
+            
+    def get_total_monitor_data(self, name: str):
+        """
+        Compile field monitor data that contains all three e-field components.
+
+        Parameters
+        ----------
+        name : str
+            name of monitor
+
+        Returns
+        -------
+        ldarray
+            labeled numpy array with time dimension and two spatial dimensions along monitor plane.
+            The first dimension is the three rectangular components.
+        """
+        # component field names
+        c_names = [f"{name}_{a}" for a in ("x", "y", "z")]
+        # is there monitor data for all three rectangular components
+        if not all([n in self.monitors.keys() for n in c_names]):
+            raise ValueError(f"Monitor {name} does not contain data for all three field components.")
+
+        monitor0 = self.monitors[c_names[0]]
+
+        if monitor0["frequency"] is not None:
+            raise NotImplementedError("Phasor monitors not implemented yet for total fields.")
+
+        # axis normal to monitor plane
+        axis = monitor0["axis"]
+        axis_str = ["x", "y", "z"][axis]
+
+        e_xyz = [self.get_monitor_data(n) for n in c_names]
+        # order the fields by the components in the surface, followed by the normal component.
+        # a surface on xy will be ordered x, y, z. xz will be ordered x, z, y., yz will be ordered, y, z, x.
+        # get the two component axis on the monitor plane
+        spatial_axis = [0, 1, 2]
+        spatial_dims = ["x", "y", "z"]
+        spatial_axis.pop(monitor0["axis"])
+        axis_surf_ordered = spatial_axis + [axis]
+        e1, e2, e3 = [e_xyz[a] for a in axis_surf_ordered]
+
+        # average components on the xy plane to get the fields at the cell corners.
+        # fields at the grid edge are dropped
+        e1 = (e1[:, 1:, 1:-1] + e1[:, :-1, 1:-1]) / 2
+        e2 = (e2[:, 1:-1, 1:] + e2[:, 1:-1, :-1]) / 2
+        e3 = (e3[:, 1:-1, 1:-1])
+
+        # order back to x, y, z. Look up where each cartesian axis falls in the surface order
+        e_xyz = [(e1, e2, e3)[axis_surf_ordered.index(a)] for a in range(3)]
+
+        # concatenate the data from the three monitors together
+        return ldarray(
+            np.array(e_xyz), coords=dict(component=("x", "y", "z"), **e_xyz[0].coords)
+        )
 
     def get_farfield_gain(self, theta: np.ndarray, phi: np.ndarray, polarization: np.ndarray = None) -> ldarray:
         """

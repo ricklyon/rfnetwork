@@ -27,15 +27,19 @@ Installation
    pip install rfnetwork
 
 
+If building from source, a C++ compiler must be available on the system. On Windows systems the recommended compiler
+is the [MS C++ Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/).   
+In addition,`nvcc` must be present if compiling the GPU accelerated solver. The CPU solver will still compile if `nvcc`
+is not found, but the GPU solver will not be available.
+
 Features
 ========
 
-* Connect RF/microwave components into larger networks. 
-* Manage complex RF systems with hierarchical building blocks.
-* Compute noise figure of multi-port networks using noise-wave analysis.
+* Simulate networks of linear components with hierarchical building blocks.
+* Compute noise figure of multi-port networks.
 * Interactive tuning of variable components (i.e. switches, phase shifters, capacitors). 
-* Probe internal voltage waves inside a network. 
-* Full wave FDTD solver for analyzing coupled lines and simple PCB geometry.
+* Supports internal voltage probes inside a network. 
+* GPU accelerated FDTD solver.
 
 
 .. include:: auto_examples/index.rst

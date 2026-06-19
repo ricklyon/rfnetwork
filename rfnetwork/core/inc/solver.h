@@ -1,13 +1,21 @@
 #ifndef SOLVER_H
 #define SOLVER_H
 
-#include <string>
-#include <vector>
+#include <condition_variable>
+#include <atomic>
 #include <thread>
 #include <complex>
 
+struct _object;
+typedef _object PyObject;
+
 #define N_FIELDS 18
 #define N_COEFF 24
+
+#define MAX_MONITORS 50
+#define MAX_PROBES 5000
+#define MAX_THREADS 20
+
 
 struct mbuffer_t
 {
@@ -16,57 +24,11 @@ struct mbuffer_t
     uint64_t available_size;
 };
 
-struct Field_Ex {
-    int Nx;
-    int Ny;
-    int Nz;
-    int NyNz;
-};
-
-struct Field_Ey {
-    int Nx;
-    int Ny;
-    int Nz;
-    int NyNz;
-};
-
-struct Field_Ez {
-    int Nx;
-    int Ny;
-    int Nz;
-    int NyNz;
-};
-
-struct Field_Hx {
-    int Nx;
-    int Ny;
-    int Nz;
-    int NyNz;
-};
-
-struct Field_Hy {
-    int Nx;
-    int Ny;
-    int Nz;
-    int NyNz;
-};
-
-struct Field_Hz {
-    int Nx;
-    int Ny;
-    int Nz;
-    int NyNz;
-};
-
 struct Coeff_Ex {
     float * Ca_ex_y;
     float * Ca_ex_z;
     float * Cb_ex_y;
     float * Cb_ex_z;
-    int Nx;
-    int Ny;
-    int Nz;
-    int NyNz;
 };
 
 struct Coeff_Ey {
@@ -74,9 +36,6 @@ struct Coeff_Ey {
     float * Ca_ey_x;
     float * Cb_ey_z;
     float * Cb_ey_x;
-    int Ny;
-    int Nz;
-    int NyNz;
 };
 
 struct Coeff_Ez {
@@ -84,9 +43,6 @@ struct Coeff_Ez {
     float * Ca_ez_y;
     float * Cb_ez_x;
     float * Cb_ez_y;
-    int Ny;
-    int Nz;
-    int NyNz;
 };
 
 struct Coeff_Hx {
@@ -130,14 +86,12 @@ struct Monitor {
     int axis;
     int position;
     int n_step;
-    int x_offset;
     int N1;
     int N2;
-    int Nx;
-    int Ny;
-    int Nz;
-    int NyNz;
     int N1N2;
+    int yz_offset;
+    int row_stride;
+    int col_stride;
 };
 
 struct Probe {
@@ -147,8 +101,8 @@ struct Probe {
     float * field_s2_p; // pointer to second split field in grid
     int field_type;
     int x_cell; // cell index where the probe is located
-    int yz_offset;
-    int NyNz;
+    int y_cell;
+    int z_cell;
     bool is_source;
 };
 
@@ -159,20 +113,67 @@ struct ThreadData {
     float * ez;
 };
 
-int solver_init_fields(PyObject * py_mem, PyObject * coefficients, int Nx, int Ny, int Nz);
+class SolverFDTD {
 
-int solver_init_monitors(PyObject * py_monitors, int Nt);
+private:
+    // coefficient values
+    Coeff_Ex Cx;
+    Coeff_Ey Cy;
+    Coeff_Ez Cz;
 
-int solver_init_sources(PyObject * py_sources, int Nt);
+    Coeff_Hx Dx;
+    Coeff_Hy Dy;
+    Coeff_Hz Dz;
 
-int solver_init_probes(PyObject * py_probes, int Nt);
+    Monitor monitors[MAX_MONITORS];
+    int n_monitors;
 
-int solver_run(int Nt, int n_threads, int update_interval);
+    Probe probes[MAX_PROBES];
+    int n_probes;
 
-void solver_thread(int x_start, int x_stop, int Nt, int thread_idx);
-void solver_controller(int Nt, int n_threads, int update_interval);
+    std::thread threads[MAX_THREADS];
+    ThreadData thread_data[MAX_THREADS + 2];
+    int n_threads;
 
-int update_monitor(Monitor * mon, float * mon_field, int m_n, int x_start, int x_stop);
-int update_phasor_monitor(Monitor * mon, float * mon_field, int m_n, int x_start, int x_stop);
+    // conditional variables used by the thread controller and update threads for synchronization
+    std::condition_variable cv;
+    std::condition_variable cv_th;
+
+    // shared variables protected by mutex
+    std::mutex mutex;
+    std::atomic<int> th_init{0};
+    std::atomic<int> e_updates{0};
+    std::atomic<int> h_updates{0};
+    bool e_updates_done = false;
+    bool h_updates_done = false;
+    bool th_init_done = false;
+
+    // number of grid cells
+    int Nx;
+    int Ny;
+    int Nz;
+
+    mbuffer_t m_pool{NULL, NULL, 0};
+
+    float * mbuffer_allocate(uint64_t size);
+
+    void mbuffer_init(float * base_addr, uint64_t size);
+    void solver_thread(int x_start, int x_stop, int Nt, int thread_idx);
+
+    int update_monitor(Monitor * mon, float * mon_field, int m_n, int x_start, int x_stop);
+    int update_phasor_monitor(Monitor * mon, float * mon_field, int m_n, int x_start, int x_stop);
+
+public:
+    SolverFDTD();          // constructor
+    int solver_init_fields(PyObject * py_mem, PyObject * coefficients, int Nx, int Ny, int Nz, int gpu);
+    int solver_init_monitors(PyObject * py_monitors, int Nt, int gpu);
+    int solver_init_probes(PyObject * py_probes, int Nt);
+
+    int solver_run(int Nt, int n_threads, int update_interval);
+    void solver_controller(int Nt, int n_threads, int update_interval);
+
+    void solver_run_cu(int Nt);
+};
+
 
 #endif /* SOLVER_H */

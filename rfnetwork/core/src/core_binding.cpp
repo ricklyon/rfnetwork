@@ -383,14 +383,67 @@ static PyObject* solver_run(PyObject* self, PyObject* args) {
         return PyLong_FromLong(1);
     }
 
-    solver_init_fields(mem, coefficients, Nx, Ny, Nz);
-    solver_init_monitors(monitors, Nt);
-    solver_init_probes(probes, Nt);
+    SolverFDTD s;
+    s.solver_init_fields(mem, coefficients, Nx, Ny, Nz, 0);
+    s.solver_init_monitors(monitors, Nt, 0);
+    s.solver_init_probes(probes, Nt);
 
-    solver_run(Nt, n_threads, update_interval);
+    s.solver_run(Nt, n_threads, update_interval);
 
     return PyLong_FromLong(0);
 }
+
+
+static PyObject* solver_run_cu(PyObject* self, PyObject* args) {
+
+    PyObject *coefficients;
+    PyObject *probes;
+    PyObject *monitors;
+    PyObject *mem;
+    
+    int Nx;
+    int Ny;
+    int Nz;
+    int Nt;
+    int n_threads;
+    int update_interval;
+
+    // Parse arguments: expecting a single Python object
+    if (!PyArg_ParseTuple(
+        args, "OOOOIIIIII", &coefficients, &probes, &monitors, &mem, &Nx, &Ny, &Nz, &Nt, &n_threads, &update_interval
+    )) {
+        return PyLong_FromLong(1);
+    }
+
+    if (!PyDict_Check(coefficients)) {
+        PyErr_SetString(PyExc_TypeError, "Expected a coefficients dictionary");
+        return PyLong_FromLong(1);
+    }
+
+    if (!PyList_Check(monitors)) {
+        PyErr_SetString(PyExc_TypeError, "Expected a monitors list");
+        return PyLong_FromLong(1);
+    }
+
+    if (!PyList_Check(probes)) {
+        PyErr_SetString(PyExc_TypeError, "Expected a probes list");
+        return PyLong_FromLong(1);
+    }
+
+    SolverFDTD s;
+    s.solver_init_fields(mem, coefficients, Nx, Ny, Nz, 1);
+    s.solver_init_monitors(monitors, Nt, 1);
+    s.solver_init_probes(probes, Nt);
+
+    #ifdef CUDA_AVAILABLE
+        s.solver_run_cu(Nt);
+    #else
+        throw std::runtime_error("GPU Solver is not available in the current installation.");
+    #endif
+
+    return PyLong_FromLong(0);
+}
+
 
 static PyObject* nf2ff(PyObject* self, PyObject* args) {
 
@@ -451,6 +504,7 @@ static PyMethodDef moduleMethods[] = {
     {"cascade_self_ndata",  cascade_self_ndata_bind, METH_VARARGS, ""},
     {"nf2ff",  nf2ff, METH_VARARGS, ""},
     {"solver_run",  solver_run, METH_VARARGS, ""},
+    {"solver_run_cu",  solver_run_cu, METH_VARARGS, ""},
     {NULL, NULL, 0, NULL}        /* Sentinel */
 };
 

@@ -8,7 +8,6 @@ API Reference
    rfnetwork.component
    rfnetwork.elements
    rfnetwork.network.Network
-   rfnetwork.network.DynamicNetwork
    rfnetwork.solver.FDTD_Solver
    rfnetwork.plots.plot
    rfnetwork.utils
