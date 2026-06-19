@@ -1420,6 +1420,8 @@ class FDTD_Solver():
             performance is bottle-necked by shared memory caches between cores.
         show_progress : bool, default: True
             print solver progress to stdout.
+        gpu : bool, default: False
+            runs the solver on a NVIDIA GPU, if available. 
         """
         self.check_mesh()
 
