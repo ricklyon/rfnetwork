@@ -1634,7 +1634,7 @@ class FDTD_Solver():
             update_interval = 0
 
         if gpu:
-            solver_func = core.core_func.solver_run_cu
+            solver_func = core.cuda_func.solver_run_cu
         else:
             solver_func = core.core_func.solver_run
 
