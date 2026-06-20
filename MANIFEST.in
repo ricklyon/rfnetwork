@@ -1,4 +1,4 @@
-recursive-include rfnetwork/core *.cpp *.h *.c *.py
+recursive-include rfnetwork/core *.cpp *.h *.c *.py *.cu
 recursive-include rfnetwork/core/lib/eigen/Eigen *
 recursive-include rfnetwork/styles *.mplstyle *.py
 recursive-exclude * *.so
