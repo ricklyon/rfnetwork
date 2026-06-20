@@ -39,15 +39,15 @@ typedef Eigen::Stride<Eigen::Dynamic, Eigen::Dynamic> StrideType;
 #define HZ 5
 
 
-long long get_milliseconds()
-{
+// long long get_milliseconds()
+// {
 
-    long long ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                    std::chrono::system_clock::now().time_since_epoch()
-                ).count();
+//     long long ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+//                     std::chrono::system_clock::now().time_since_epoch()
+//                 ).count();
 
-    return ms;
-}
+//     return ms;
+// }
 
 // ensures stdout is flushed so it works in jupyter notebooks
 void print_stdout(std::stringstream& msg) {
