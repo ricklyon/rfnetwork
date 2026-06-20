@@ -12,7 +12,7 @@ import setuptools
 import warnings
 
 
-def find_cuda() -> Path:
+def find_cuda_lib() -> Path:
     """
     Return the path to the CUDA installation. 
     Returns None if a CUDA installation cannot be found. Ensure the CUDA_HOME environment variable is 
@@ -38,9 +38,9 @@ def find_cuda() -> Path:
     if not nvcc.exists():
         return None
     
-    return cuda_home
+    return cuda_home / "lib64"
 
-cuda_path = find_cuda()
+cuda_path = find_cuda_lib()
 
 
 class build(_build):
@@ -100,8 +100,8 @@ cuda_ext = Extension(
     optional=False,
     extra_objects=["rfnetwork/core/solver_cu.o"], # add cuda objects to the linker
     libraries=["cudart"],  # include cuda runtime in linker
-    library_dirs=[str(cuda_path / "lib64")],
-    runtime_library_dirs=[str(cuda_path / "lib64")],
+    library_dirs=[str(cuda_path)],
+    runtime_library_dirs=[str(cuda_path)],
     define_macros=[
         ("CUDA_AVAILABLE", None),      # equivalent to -DCUDA_AVAILABLE
     ]
