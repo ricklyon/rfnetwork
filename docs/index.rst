@@ -27,10 +27,11 @@ Installation
    pip install rfnetwork
 
 
-If building from source, a C++ compiler must be available on the system. On Windows systems the recommended compiler
-is the [MS C++ Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/).   
-In addition,`nvcc` must be present if compiling the GPU accelerated solver. The CPU solver will still compile if `nvcc`
-is not found, but the GPU solver will not be available.
+If building from source, a C++ compiler must be available on the system. On Windows systems the 
+recommended compiler is the `MS C++ Build Tools <https://visualstudio.microsoft.com/visual-cpp-build-tools/>`_ .   
+
+``nvcc`` must be present if compiling the GPU accelerated solver. The CPU solver will still 
+compile if ``nvcc`` is not found, but the GPU solver will not be available.
 
 Features
 ========
