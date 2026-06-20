@@ -10,7 +10,7 @@ import os
 from pathlib import Path
 import setuptools
 import warnings
-
+import sys
 
 def find_cuda_lib() -> Path:
     """
@@ -33,12 +33,19 @@ def find_cuda_lib() -> Path:
             return None
         
     cuda_home = Path(cuda_home)
-    nvcc      = cuda_home / "bin" / "nvcc"
+
+    if sys.platform == "win32":
+        nvcc = cuda_home / "bin" / "nvcc.exe"
+    else:
+        nvcc = cuda_home / "bin" / "nvcc"
 
     if not nvcc.exists():
         return None
     
-    return cuda_home / "lib64"
+    elif sys.platform == "win32":
+        return cuda_home / "lib/x64"
+    else:
+        return cuda_home / "lib64"
 
 cuda_path = find_cuda_lib()
 
@@ -66,7 +73,7 @@ class build_cuda(setuptools.Command):
         )
 
         if result.returncode != 0:
-            raise RuntimeError(result.stderr)
+            raise RuntimeError(result.stdout)
 
     def finalize_options(self):
         pass
