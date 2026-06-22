@@ -18,4 +18,5 @@ docs/sg_execution_times.rst
 *.ipynb_checkpoints
 **/debug/
 *.gif
+*.log
 

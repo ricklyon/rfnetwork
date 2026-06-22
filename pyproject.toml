@@ -37,7 +37,8 @@ dev = [
     "ipykernel", 
     "trame",
     "trame-vtk",
-    "trame-vuetify"
+    "trame-vuetify",
+    "texenv"
 ]
 
 docs = [
