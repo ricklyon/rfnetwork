@@ -29,7 +29,7 @@ dependencies = [
     "scikit-image",
 ]
 
-[project.optional-dependencies]
+[dependency-groups]
 dev = [
     "flake8", 
     "pytest", 

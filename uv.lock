@@ -4308,7 +4308,7 @@ dependencies = [
     { name = "scipy", version = "1.18.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
 ]
 
-[package.optional-dependencies]
+[package.dev-dependencies]
 dev = [
     { name = "bumpversion" },
     { name = "flake8" },
@@ -4335,32 +4335,35 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "bumpversion", marker = "extra == 'dev'" },
-    { name = "flake8", marker = "extra == 'dev'" },
     { name = "imageio" },
-    { name = "imageio", marker = "extra == 'dev'", specifier = "==2.37.0" },
-    { name = "ipykernel", marker = "extra == 'dev'" },
     { name = "matplotlib" },
     { name = "mpl-markers" },
     { name = "np-struct", specifier = ">=0.0.7" },
     { name = "numpy", specifier = ">=2.0.0" },
-    { name = "parameterized", marker = "extra == 'dev'" },
     { name = "pygerber" },
     { name = "pyside6" },
-    { name = "pytest", marker = "extra == 'dev'" },
     { name = "pyvista" },
     { name = "scikit-image" },
     { name = "scipy" },
-    { name = "sphinx", marker = "extra == 'dev'" },
-    { name = "sphinx-autodoc-typehints", marker = "extra == 'dev'" },
-    { name = "sphinx-gallery", marker = "extra == 'dev'", specifier = "==0.19.0" },
-    { name = "sphinx-rtd-theme", marker = "extra == 'dev'", specifier = "==3.0.2" },
-    { name = "texenv", marker = "extra == 'dev'" },
-    { name = "trame", marker = "extra == 'dev'" },
-    { name = "trame-vtk", marker = "extra == 'dev'" },
-    { name = "trame-vuetify", marker = "extra == 'dev'" },
 ]
-provides-extras = ["dev"]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "bumpversion" },
+    { name = "flake8" },
+    { name = "imageio", specifier = "==2.37.0" },
+    { name = "ipykernel" },
+    { name = "parameterized" },
+    { name = "pytest" },
+    { name = "sphinx" },
+    { name = "sphinx-autodoc-typehints" },
+    { name = "sphinx-gallery", specifier = "==0.19.0" },
+    { name = "sphinx-rtd-theme", specifier = "==3.0.2" },
+    { name = "texenv" },
+    { name = "trame" },
+    { name = "trame-vtk" },
+    { name = "trame-vuetify" },
+]
 
 [[package]]
 name = "rich"
