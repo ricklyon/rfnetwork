@@ -3,6 +3,7 @@ requires      = ["setuptools >= 77.0.3", "wheel", "numpy >= 2.0.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
+requires-python = ">=3.9"
 name = "rfnetwork"
 version = "0.4.2"
 description = "rf/microwave network simulation tool"
@@ -24,10 +25,9 @@ dependencies = [
     "pyside6", 
     "pyvista",
     "imageio",
-    "pygerber==2.4.3",
-    "scikit-image"
+    "pygerber",
+    "scikit-image",
 ]
-requires-python = ">=3.9"
 
 [project.optional-dependencies]
 dev = [
@@ -38,15 +38,13 @@ dev = [
     "trame",
     "trame-vtk",
     "trame-vuetify",
-    "texenv"
-]
-
-docs = [
+    "texenv",
+    "bumpversion",
     "sphinx",
     "sphinx-rtd-theme==3.0.2",
     "sphinx-autodoc-typehints",
     "sphinx-gallery==0.19.0",
-    "imageio==2.37.0"
+    "imageio==2.37.0",
 ]
 
 [tool.setuptools.packages.find]

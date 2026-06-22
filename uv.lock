@@ -410,6 +410,27 @@ wheels = [
 ]
 
 [[package]]
+name = "bump2version"
+version = "1.0.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/29/2a/688aca6eeebfe8941235be53f4da780c6edee05dbbea5d7abaa3aab6fad2/bump2version-1.0.1.tar.gz", hash = "sha256:762cb2bfad61f4ec8e2bdf452c7c267416f8c70dd9ecb1653fd0bbb01fa936e6", size = 36236, upload-time = "2020-10-07T18:38:40.119Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/1d/e3/fa60c47d7c344533142eb3af0b73234ef8ea3fb2da742ab976b947e717df/bump2version-1.0.1-py2.py3-none-any.whl", hash = "sha256:37f927ea17cde7ae2d7baf832f8e80ce3777624554a653006c9144f8017fe410", size = 22030, upload-time = "2020-10-07T18:38:38.148Z" },
+]
+
+[[package]]
+name = "bumpversion"
+version = "0.6.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "bump2version" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/34/f5/e95fcd8de146884cf5ecf30f227e13c3615584ccef8c8cca18140a27b664/bumpversion-0.6.0.tar.gz", hash = "sha256:4ba55e4080d373f80177b4dabef146c07ce73c7d1377aabf9d3c3ae1f94584a6", size = 11897, upload-time = "2020-05-14T02:19:39.534Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/4e/ff/93f0db7b3ca337e9f2a289980083e858775dfb3672b38052c6911b36ea66/bumpversion-0.6.0-py2.py3-none-any.whl", hash = "sha256:4eb3267a38194d09f048a2179980bb4803701969bff2c85fa8f6d1ce050be15e", size = 8449, upload-time = "2020-05-14T02:19:37.745Z" },
+]
+
+[[package]]
 name = "certifi"
 version = "2026.6.17"
 source = { registry = "https://pypi.org/simple" }
@@ -4289,20 +4310,14 @@ dependencies = [
 
 [package.optional-dependencies]
 dev = [
+    { name = "bumpversion" },
     { name = "flake8" },
+    { name = "imageio" },
     { name = "ipykernel", version = "6.31.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
     { name = "ipykernel", version = "7.3.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
     { name = "parameterized" },
     { name = "pytest", version = "8.4.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
     { name = "pytest", version = "9.1.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
-    { name = "texenv" },
-    { name = "trame", version = "3.12.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
-    { name = "trame", version = "3.13.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
-    { name = "trame-vtk" },
-    { name = "trame-vuetify" },
-]
-docs = [
-    { name = "imageio" },
     { name = "sphinx", version = "7.4.7", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
     { name = "sphinx", version = "8.1.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.10.*'" },
     { name = "sphinx", version = "8.2.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
@@ -4311,35 +4326,41 @@ docs = [
     { name = "sphinx-autodoc-typehints", version = "3.5.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "sphinx-gallery" },
     { name = "sphinx-rtd-theme" },
+    { name = "texenv" },
+    { name = "trame", version = "3.12.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
+    { name = "trame", version = "3.13.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
+    { name = "trame-vtk" },
+    { name = "trame-vuetify" },
 ]
 
 [package.metadata]
 requires-dist = [
+    { name = "bumpversion", marker = "extra == 'dev'" },
     { name = "flake8", marker = "extra == 'dev'" },
     { name = "imageio" },
-    { name = "imageio", marker = "extra == 'docs'", specifier = "==2.37.0" },
+    { name = "imageio", marker = "extra == 'dev'", specifier = "==2.37.0" },
     { name = "ipykernel", marker = "extra == 'dev'" },
     { name = "matplotlib" },
     { name = "mpl-markers" },
     { name = "np-struct", specifier = ">=0.0.7" },
     { name = "numpy", specifier = ">=2.0.0" },
     { name = "parameterized", marker = "extra == 'dev'" },
-    { name = "pygerber", specifier = "==2.4.3" },
+    { name = "pygerber" },
     { name = "pyside6" },
     { name = "pytest", marker = "extra == 'dev'" },
     { name = "pyvista" },
     { name = "scikit-image" },
     { name = "scipy" },
-    { name = "sphinx", marker = "extra == 'docs'" },
-    { name = "sphinx-autodoc-typehints", marker = "extra == 'docs'" },
-    { name = "sphinx-gallery", marker = "extra == 'docs'", specifier = "==0.19.0" },
-    { name = "sphinx-rtd-theme", marker = "extra == 'docs'", specifier = "==3.0.2" },
+    { name = "sphinx", marker = "extra == 'dev'" },
+    { name = "sphinx-autodoc-typehints", marker = "extra == 'dev'" },
+    { name = "sphinx-gallery", marker = "extra == 'dev'", specifier = "==0.19.0" },
+    { name = "sphinx-rtd-theme", marker = "extra == 'dev'", specifier = "==3.0.2" },
     { name = "texenv", marker = "extra == 'dev'" },
     { name = "trame", marker = "extra == 'dev'" },
     { name = "trame-vtk", marker = "extra == 'dev'" },
     { name = "trame-vuetify", marker = "extra == 'dev'" },
 ]
-provides-extras = ["dev", "docs"]
+provides-extras = ["dev"]
 
 [[package]]
 name = "rich"
