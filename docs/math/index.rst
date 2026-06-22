@@ -5,8 +5,6 @@ Math References
    :caption: Contents:
 
 
-:download:`Noise Wave Analysis <noise_wave/noise_wave.pdf>`
-:download:`FDTD Edge Correction <edge_singularity/edge_singularity.pdf>`
-
-
+* `Noise Wave Analysis  <../_static/output/noise_wave.pdf>`_
+* `PEC Edge Correction  <../_static/output/edge_singularity.pdf>`_
 

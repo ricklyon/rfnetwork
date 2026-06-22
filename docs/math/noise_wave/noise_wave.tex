@@ -24,7 +24,7 @@
 \begin{document}
 
 \title{Noise Wave Analysis Techniques for Multi-port Networks}
-\author{ECE 6323 Final Project,  Rick Lyon}
+\author{ECE 6323,  Rick Lyon}
 \maketitle
 \begin{abstract}
 This paper is based on a publication in IEEE Transactions On Microwave Theory and Techniques that outlines an analytical method for calculating the noise performance of multi-port RF networks.\cite{b3} The technique is implemented in C++ and compared to the commercially available circuit solver ADS.
@@ -331,12 +331,6 @@ Since \(N_1 = kT_0\) this reduces to,
 ADS appears to ignore \(N_2\) by using the temperature method, which usually leads to accurate results for amplifiers because \(N_1\) is usually much larger than the reflected noise wave from port 2 (\(N_2\)). However, this breaks down if \(S_{21}\) is comparable to \(S_{22}\). For most amplifiers, the temperature method will give accurate results. However, the contribution of the reflected noise wave from port 2 (\(N_2\)) should be included for noisy components with low gain.
 
 
-
-% \section{Conclusion}
-% Noise waves are a very useful way to simulate the noise performance of amplifiers. Simple amplifier networks were studied in this project, but the principles apply equally well to networks of arbitrary complexity. The Python implementation does reasonable well when compared to ADS, both in end results and computation time, and could be useful as a standalone tool if developed further. The advantage of a Python based tool is that, unlike ADS, it would be free to use, and large networks of devices could be built up programmatically instead of manually built from ADS schematics. If there is interest in looking at the code I developed, please let me know and I can release it on Github, given a bit of time to clean it up.
-
-\vfill
-
 \pagebreak
 
 \vfill
@@ -360,7 +354,3 @@ ADS appears to ignore \(N_2\) by using the temperature method, which usually lea
 
 
 
-
-
-
-\end{document}
