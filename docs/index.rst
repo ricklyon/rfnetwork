@@ -5,6 +5,7 @@
 
    api/index
    auto_examples/index
+   math/index
    
 =========
 rfnetwork
