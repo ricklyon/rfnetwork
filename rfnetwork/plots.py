@@ -52,12 +52,20 @@ fmt_prefix = {
 }
 
 
-def smithchart_marker(ax: plt.Axes, frequency: np.ndarray, fc: float):
-    """ place a smith chart marker by frequency rather than x/y position """
+def smithchart_marker(frequency: np.ndarray, fc: float, freq_unit: str = "GHz", axes: plt.Axes = None):
+    """ place a smith chart marker at the given frequency. """
     
+    if axes is None:
+        axes = plt.gca()
+
+    f_multiplier = dict(hz=1, khz=1e3, mhz=1e6, ghz=1e9)[freq_unit.lower()]
+
     f_idx = np.argmin(np.abs(frequency - fc))
+
+    yformatter = lambda x, y, idx: f"{frequency[idx]/f_multiplier:.1f}{freq_unit}"
+
     return mplm.line_marker(
-        idx=f_idx, axes=ax, xline=False, yformatter=lambda x, y, idx: f"{frequency[idx]/1e6:.0f}MHz"
+        idx=f_idx, axes=axes, xline=False, yformatter=yformatter
     )
 
 def smith_circles(values: list, line_type: str, n_points = 5001, gamma_clip: float = 1) -> np.ndarray:
