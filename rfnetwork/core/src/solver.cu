@@ -848,13 +848,14 @@ void SolverFDTD::solver_run_cu(int Nt)
             // save last monitor index that has a phasor
             mon_phasor_idx = m;
             cudaMalloc(&(mon_values[m]), mon.n_phasors * mon.N1 * mon.N2 * sizeof(cuda::std::complex<float>));
+            cudaMemcpy(mon_values[m], mon.values, mon.n_phasors * mon.N1 * mon.N2 * sizeof(cuda::std::complex<float>), cudaMemcpyDefault);
         }
         else
         {
             // allocate values array
             // float * values_dev = nullptr;
             cudaMalloc(&(mon_values[m]), Nm * mon.N1 * mon.N2 * sizeof(float));
-            // cudaMemcpy(mon_values[m], mon.values, mon.N1 * mon.N2 * sizeof(int), cudaMemcpyDefault);
+            cudaMemcpy(mon_values[m], mon.values, mon.N1 * mon.N2 * sizeof(int), cudaMemcpyDefault);
         }
 
     }
@@ -1008,10 +1009,8 @@ void SolverFDTD::solver_run_cu(int Nt)
 
         // cudaDeviceSynchronize(); 
 
-        // err = cudaGetLastError();
-        // printf("p-runtime: %s\n", cudaGetErrorString(err));
-    }
 
+    }
 
     cudaDeviceSynchronize(); 
 
