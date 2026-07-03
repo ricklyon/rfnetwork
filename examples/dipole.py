@@ -189,9 +189,8 @@ sdata_raw = s.get_sparameters(frequency, downsample=False)
 # cast as component to use plot functions
 sdata = rfn.Component_Data(sdata_raw)
 
-frequency_smith = np.arange(1e6, 10e9, 10e6)
-sdata.plot(11, frequency=frequency_smith, fmt="smith")
-rfn.plots.smithchart_marker(frequency_smith, 10e9)
+sdata.plot(11, fmt="smith")
+rfn.plots.smithchart_marker(frequency, 10e9)
 sdata.plot(11, fmt="db")
 
 # %%
