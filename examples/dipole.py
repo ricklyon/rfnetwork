@@ -184,16 +184,15 @@ fig.tight_layout()
 # %%
 # Plot S11
 # ------------------------
-frequency: np.ndarray = np.arange(5e9, 40e9, 10e6)
-sdata = s.get_sparameters(frequency, downsample=False)
-S11 = sdata[:, 0]
+frequency: np.ndarray = np.arange(0, 40.01e9, 10e6)
+sdata_raw = s.get_sparameters(frequency, downsample=False)
+# cast as component to use plot functions
+sdata = rfn.Component_Data(sdata_raw)
 
-fig, ax = plt.subplots()
-ax.plot(frequency / 1e9, conv.db20_lin(S11))
-ax.set_ylim([-20, 0])
-ax.set_xlabel("Frequency [GHz]")
-ax.set_ylabel("[dB]")
-ax.legend(["S11"])
+frequency_smith = np.arange(1e6, 10e9, 10e6)
+sdata.plot(11, frequency=frequency_smith, fmt="smith")
+rfn.plots.smithchart_marker(frequency_smith, 10e9)
+sdata.plot(11, fmt="db")
 
 # %%
 # Plot Input Impedance
@@ -201,12 +200,13 @@ ax.legend(["S11"])
 
 fig, ax = plt.subplots()
 ax2 = ax.twinx()
-ln1 = ax.plot(frequency / 1e9, conv.z_gamma(S11).real, label=r"Re($Z_{in}$)")
-ln2 = ax2.plot(frequency / 1e9, conv.z_gamma(S11).imag, color="C1", label=r"Im($Z_{in}$)")
-mplm.line_marker(x = 10, axes=ax)
-ax.grid()
 
-ax.set_xlabel("Frequency [GHz]")
+ln1 = sdata.plot(11, fmt="realz", axes=ax, label="Re($Z_{in}$)", label_mode="override")
+ln2 = sdata.plot(11, fmt="imagz", axes=ax2, color="C1", label="Im($Z_{in}$)", label_mode="override")
+
+ax2.grid(False)
+mplm.line_marker(x = 10, axes=ax)
+
 ax.set_ylabel(r"Re($Z_{in}$) [$\Omega$]")
 ax2.set_ylabel(r"Im($Z_{in}$) [$\Omega$]")
 ax.set_ylim([0, 400])
