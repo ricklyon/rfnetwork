@@ -2801,7 +2801,9 @@ class FDTD_Solver():
             np.array(e_xyz), coords=dict(component=("x", "y", "z"), **e_xyz[0].coords)
         )
 
-    def get_farfield_gain(self, theta: np.ndarray, phi: np.ndarray, polarization: np.ndarray = None) -> ldarray:
+    def get_farfield_gain(
+        self, theta: np.ndarray, phi: np.ndarray, polarization: np.ndarray = None, n_threads: int = 4
+    ) -> ldarray:
         """
         Compile farfield realized gain from the farfield monitor attached to the solver.
 
@@ -2822,7 +2824,7 @@ class FDTD_Solver():
             labeled numpy array with dimensions (polarization, frequency, theta, phi)
         """
 
-        rE = self.get_farfield_rE(theta, phi)
+        rE = self.get_farfield_rE(theta, phi, n_threads=n_threads)
 
         if polarization is None:
             polarization = ["thetapol", "phipol"]
@@ -2867,7 +2869,7 @@ class FDTD_Solver():
             gain, coords=dict(polarization=polarization, frequency=frequency, theta=theta, phi=phi)
         )
 
-    def get_farfield_rE(self, theta: np.ndarray, phi: np.ndarray) -> ldarray:
+    def get_farfield_rE(self, theta: np.ndarray, phi: np.ndarray, n_threads: int = 4) -> ldarray:
         """
         Compile E-field monitor data from the farfield monitor attached to the solver.
 
@@ -3007,11 +3009,11 @@ class FDTD_Solver():
             theta = np.array(np.deg2rad(theta), dtype=np.float32, order="C"),
             phi = np.array(np.deg2rad(phi), dtype=np.float32, order="C"),
             data = np.zeros((2, n_frequencies, len(theta), len(phi)), dtype=np.complex64, order="C"),
-            working_grid_cmplx = np.zeros((max_grid_length, max_grid_length), dtype=np.complex64, order="C"),
-            working_grid_float = np.zeros((max_grid_length, max_grid_length), dtype=np.float32, order="C")
+            working_grid_cmplx = np.zeros((n_threads, max_grid_length, max_grid_length), dtype=np.complex64, order="C"),
+            working_grid_float = np.zeros((n_threads, max_grid_length, max_grid_length), dtype=np.float32, order="C")
         )
 
-        core.core_func.nf2ff(J_xyz, M_xyz, r_grid, ds_grid, surf_pos, ff_data)
+        core.core_func.nf2ff(J_xyz, M_xyz, r_grid, ds_grid, surf_pos, ff_data, n_threads)
 
         # cast as labeled array
         return ldarray(

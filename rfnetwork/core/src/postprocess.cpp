@@ -38,6 +38,8 @@ typedef Eigen::Map<Eigen::Matrix<std::complex<float>, Eigen::Dynamic, Eigen::Dyn
 
 #define ETA0 376.730313
 
+#define MAX_THREADS 20
+
 std::complex<float> * get_complex_array(PyObject* py_obj, int * shape, int ndim) 
 {   
     PyArrayObject* array = (PyArrayObject*) py_obj;
@@ -125,6 +127,7 @@ int get_pointer_index_4(int * shape, const std::array<int, 4>& index)
     return idx;
 }
 
+
 // Integrate J and M equivalent surface currents on a rectangular box to produce the far-field electric field values.
 // See Section 6.8.2 in Balanis Advanced Engineering Electromagnetics 2nd Edition
 int postprocess_nf2ff(
@@ -133,7 +136,8 @@ int postprocess_nf2ff(
     PyObject * r_grid_py, 
     PyObject * ds_grid_py, 
     PyObject * surf_pos_py, 
-    PyObject * ff_data_py
+    PyObject * ff_data_py,
+    int n_threads
 )
 {
     npy_intp * npy_shape;
@@ -165,6 +169,49 @@ int postprocess_nf2ff(
         throw std::runtime_error("Invalid far-field data array. Expected four dimensions.");
     }
 
+    // get temporary working complex array
+    PyObject* working_grid_py = PyDict_GetItemString(ff_data_py, "working_grid_cmplx");
+    PyArrayObject* working_grid_array = (PyArrayObject*) working_grid_py;
+    npy_shape = PyArray_SHAPE(working_grid_array);  
+    std::complex<float> * working_grid_cmplx_p = (std::complex<float> *) PyArray_DATA(working_grid_array);
+
+    if (PyArray_TYPE(working_grid_array) != NPY_CFLOAT)
+    {
+        throw std::runtime_error("Invalid data array. Must be complex float type.");
+    }
+
+    if (npy_shape[0] != n_threads)
+    {
+        throw std::runtime_error("Invalid working array shape.");
+    }
+
+    // get temporary working float array
+    working_grid_py = PyDict_GetItemString(ff_data_py, "working_grid_float");
+    working_grid_array = (PyArrayObject*) working_grid_py;
+    npy_shape = PyArray_SHAPE(working_grid_array); 
+    float * working_grid_float_p = (float *) PyArray_DATA(working_grid_array);
+
+    if (PyArray_TYPE(working_grid_array) != NPY_FLOAT)
+    {
+        throw std::runtime_error("Invalid data array. Must be float type.");
+    }
+
+    if (npy_shape[0] != n_threads)
+    {
+        throw std::runtime_error("Invalid working array shape.");
+    }
+
+    // msg.str("");
+    // msg.clear();
+    // msg << "theta " << theta << "phi " << phi << " " << grid_shape[axis][0] << " " << grid_shape[axis][1] << "\n";
+    
+    std::cout << npy_shape[1] << " " << npy_shape[2] << "\n";
+
+
+    // get shape of working grid array. The shape of the last two dimensions is the max size of any of the grids
+    // along xy, yz or xz planes
+    int max_grid_length = npy_shape[2];
+
     // dimensions are polarization, frequency, theta, phi
     int data_shape[FFDATA_NDIM];
     npy_shape = PyArray_SHAPE(py_data_arr); 
@@ -174,7 +221,7 @@ int postprocess_nf2ff(
     }
 
     // result data array
-    std::complex<float> * data_array = get_complex_array(py_data, data_shape, FFDATA_NDIM);
+    std::complex<float> * data_arr = get_complex_array(py_data, data_shape, FFDATA_NDIM);
 
     // beta (frequency) array
     int beta_shape[1] = {data_shape[FF_FREQUENCY]};
@@ -209,29 +256,7 @@ int postprocess_nf2ff(
     std::complex<float> * ds_grid_p[3];
     // surface positions, 2 values per axis
     float surf_pos[3][2];
-
-    // get temporary working complex array
-    PyObject* working_grid_py = PyDict_GetItemString(ff_data_py, "working_grid_cmplx");
-    PyArrayObject* working_grid_array = (PyArrayObject*) working_grid_py;
-    std::complex<float> * working_grid_cmplx_p = (std::complex<float> *) PyArray_DATA(working_grid_array);
-
-    if (PyArray_TYPE(working_grid_array) != NPY_CFLOAT)
-    {
-        throw std::runtime_error("Invalid data array. Must be complex float type.");
-    }
-
-    // get temporary working float array
-    working_grid_py = PyDict_GetItemString(ff_data_py, "working_grid_float");
-    working_grid_array = (PyArrayObject*) working_grid_py;
-    float * working_grid_float_p = (float *) PyArray_DATA(working_grid_array);
-
-    if (PyArray_TYPE(working_grid_array) != NPY_FLOAT)
-    {
-        throw std::runtime_error("Invalid data array. Must be float type.");
-    }
-
-    // TODO: check shape of working grid array
-
+    
     // get array pointers for each current source, cell positions, and widths.
     for (int axis = 0; axis < 3; axis++)
     {
@@ -285,6 +310,90 @@ int postprocess_nf2ff(
         surf_pos[axis][1] = (float) PyFloat_AsDouble(PyList_GetItem(surf_pos_axis, 1));
 
     }
+
+    std::thread threads[MAX_THREADS];
+
+    // number of theta points in each batch
+    int n_batch = data_shape[FF_THETA] / n_threads;
+    // remainder of batch size
+    int r_batch = data_shape[FF_THETA] % n_threads;
+
+    // index of start/stop theta point for a given thread
+    int theta_start = 0;
+    int theta_stop = 0;
+
+    // size of working array for each thread
+    int wrk_array_size_float = max_grid_length * max_grid_length * sizeof(float);
+    int wrk_array_size_cmplx = max_grid_length * max_grid_length * sizeof(std::complex<float>);
+
+    for (int t = 0; t < n_threads; t++)
+    {
+        theta_start = theta_stop;
+        
+        // add 1 to the batch size until the remainder is removed
+        if (r_batch > 0)
+        {
+            theta_stop =  theta_start + n_batch + 1;
+            r_batch -= 1;
+        }
+        else
+        {
+            theta_stop =  theta_start + n_batch;
+        }
+
+        // assign thread a unique section of the theta vector
+        threads[t] = std::thread(
+            postprocess_nf2ff_thread, 
+            data_arr,
+            beta_arr,
+            theta_arr,
+            phi_arr,
+            surf_pos,
+            r_grid_p,
+            JM_shape,
+            grid_shape,
+            data_shape,
+            ds_grid_p,
+            M_xyz_p,
+            J_xyz_p,
+            // assign thread a unique working array
+            working_grid_cmplx_p + (wrk_array_size_cmplx * t),
+            working_grid_float_p + (wrk_array_size_float * t),
+            theta_start,
+            theta_stop
+        );
+    }
+
+    // wait for all threads to complete
+    for (int t = 0; t < n_threads; t++)
+    {
+        threads[t].join();
+    }
+
+    return 0;
+}
+
+int postprocess_nf2ff_thread(
+    std::complex<float> * data_array,
+    float * beta_arr,
+    float * theta_arr,
+    float * phi_arr,
+    float surf_pos[3][2],
+    float * r_grid_p[3][2],
+    int JM_shape[3][4],
+    int grid_shape[3][2],
+    int * data_shape,
+    std::complex<float> * ds_grid_p[3],
+    std::complex<float> * M_xyz_p[3][2],
+    std::complex<float> * J_xyz_p[3][2],
+    std::complex<float> * working_grid_cmplx_p,
+    float * working_grid_float_p,
+    int theta_start,
+    int theta_stop
+)
+{
+
+    // theta_stop is non-inclusive
     
     // variables for N and L auxilary fields
     std::complex<float> N_theta, N_phi, L_theta, L_phi;
@@ -307,8 +416,6 @@ int postprocess_nf2ff(
 
     // variables for current uv values in the loop
     float u, v, w;
-    // number of spatial grid points in a face
-    int grid_size;
 
     // constant -1j, 1j and 0 as complex numbers
     std::complex<float> n1J = std::complex<float>(0, -1);
@@ -347,8 +454,10 @@ int postprocess_nf2ff(
             }
         }
 
+        std::stringstream msg;
+
         // loop over theta
-        for (int th = 0; th < data_shape[FF_THETA]; th++)
+        for (int th = theta_start; th < theta_stop; th++)
         {
             theta = theta_arr[th];
             // loop over phi
@@ -379,8 +488,6 @@ int postprocess_nf2ff(
 
                 for (int axis = 0; axis < 3; axis++)
                 {
-
-                    grid_size = grid_shape[axis][0] * grid_shape[axis][1];
 
                     // each of the two faces on axis
                     for (int s = 0; s < 2; s++)
@@ -413,6 +520,13 @@ int postprocess_nf2ff(
                         // phase term for integrand
                         MatrixFloatType r_dot (working_grid_float_p, grid_shape[axis][0], grid_shape[axis][1]);
                         
+
+                        // msg.str("");
+                        // msg.clear();
+                        // msg << "theta " << theta << "phi " << phi << " " << grid_shape[axis][0] << " " << grid_shape[axis][1] << "\n";
+                        
+                        // std::cout << msg.str();
+
                         // (r_pos[0] * u + r_pos[1] * v + r_pos[2] * w))
                         if (axis == 0)
                         {

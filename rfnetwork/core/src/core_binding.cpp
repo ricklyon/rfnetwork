@@ -403,9 +403,11 @@ static PyObject* nf2ff(PyObject* self, PyObject* args) {
     PyObject *surf_pos;
     PyObject *ff_data;
 
+    int n_threads;
+
     // Parse arguments: expecting a single Python object
     if (!PyArg_ParseTuple(
-        args, "OOOOOO", &J_xyz, &M_xyz, &r_grid, &ds_grid, &surf_pos, &ff_data
+        args, "OOOOOOI", &J_xyz, &M_xyz, &r_grid, &ds_grid, &surf_pos, &ff_data, &n_threads
     )) {
         return PyLong_FromLong(1);
     }
@@ -440,7 +442,7 @@ static PyObject* nf2ff(PyObject* self, PyObject* args) {
         return PyLong_FromLong(1);
     }
 
-    postprocess_nf2ff(J_xyz, M_xyz, r_grid, ds_grid, surf_pos, ff_data);
+    postprocess_nf2ff(J_xyz, M_xyz, r_grid, ds_grid, surf_pos, ff_data, n_threads);
 
     return PyLong_FromLong(0);
 }

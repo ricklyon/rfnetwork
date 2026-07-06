@@ -817,6 +817,10 @@ void SolverFDTD::solver_thread(int x_start, int x_stop, int Nt, int thread_idx)
                 x_offset = ((px - x_start) * hz_NyNz) + ((py) * Nzp1) + (pz + 1);
                 h_probes.push_back(p);
             }
+            else
+            {
+                throw std::runtime_error("Invalid probe field");
+            }
             // compute the pointer for the probe in the grid. x_index needs to account for the starting position of 
             // the grid.
             
