@@ -29,7 +29,7 @@ def find_cuda_lib() -> Path:
             ).decode().strip()
             # nvcc lives at <cuda_home>/bin/nvcc
             cuda_home = str(Path(nvcc_path).parent.parent)
-        except subprocess.CalledProcessError:
+        except Exception:
             return None
         
     cuda_home = Path(cuda_home)
