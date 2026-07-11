@@ -201,16 +201,10 @@ int postprocess_nf2ff(
         throw std::runtime_error("Invalid working array shape.");
     }
 
-    // msg.str("");
-    // msg.clear();
-    // msg << "theta " << theta << "phi " << phi << " " << grid_shape[axis][0] << " " << grid_shape[axis][1] << "\n";
-    
-    std::cout << npy_shape[1] << " " << npy_shape[2] << "\n";
 
-
-    // get shape of working grid array. The shape of the last two dimensions is the max size of any of the grids
+    // get shape of working grid array. The shape of the last dimension is the max size of any of the grids
     // along xy, yz or xz planes
-    int max_grid_length = npy_shape[2];
+    int wrk_grid_len = npy_shape[1];
 
     // dimensions are polarization, frequency, theta, phi
     int data_shape[FFDATA_NDIM];
@@ -322,10 +316,6 @@ int postprocess_nf2ff(
     int theta_start = 0;
     int theta_stop = 0;
 
-    // size of working array for each thread
-    int wrk_array_size_float = max_grid_length * max_grid_length * sizeof(float);
-    int wrk_array_size_cmplx = max_grid_length * max_grid_length * sizeof(std::complex<float>);
-
     for (int t = 0; t < n_threads; t++)
     {
         theta_start = theta_stop;
@@ -357,8 +347,8 @@ int postprocess_nf2ff(
             M_xyz_p,
             J_xyz_p,
             // assign thread a unique working array
-            working_grid_cmplx_p + (wrk_array_size_cmplx * t),
-            working_grid_float_p + (wrk_array_size_float * t),
+            working_grid_cmplx_p + (wrk_grid_len * t),
+            working_grid_float_p + (wrk_grid_len * t),
             theta_start,
             theta_stop
         );

@@ -3009,8 +3009,8 @@ class FDTD_Solver():
             theta = np.array(np.deg2rad(theta), dtype=np.float32, order="C"),
             phi = np.array(np.deg2rad(phi), dtype=np.float32, order="C"),
             data = np.zeros((2, n_frequencies, len(theta), len(phi)), dtype=np.complex64, order="C"),
-            working_grid_cmplx = np.zeros((n_threads, max_grid_length, max_grid_length), dtype=np.complex64, order="C"),
-            working_grid_float = np.zeros((n_threads, max_grid_length, max_grid_length), dtype=np.float32, order="C")
+            working_grid_cmplx = np.zeros((n_threads, max_grid_length**2), dtype=np.complex64, order="C"),
+            working_grid_float = np.zeros((n_threads, max_grid_length**2), dtype=np.float32, order="C")
         )
 
         core.core_func.nf2ff(J_xyz, M_xyz, r_grid, ds_grid, surf_pos, ff_data, n_threads)
