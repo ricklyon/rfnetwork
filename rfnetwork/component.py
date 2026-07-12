@@ -500,6 +500,26 @@ class Component(object):
         """
         return self.evaluate(frequency)["s"]
 
+    def apply_excitation_s(self, exc: np.ndarray, frequency: np.ndarray = None) -> ldarray:
+        """
+        Apply a complex valued excitation to the component ports. 
+
+        Parameters
+        ----------
+        frequency : np.ndarray, optional
+            Frequency vector to compute data over.
+        """
+
+        sdata = self.evaluate_s(frequency)
+
+        return ldarray(
+            np.einsum("fba,a->fb", sdata, exc),
+            coords=dict(
+                frequency=sdata.coords["frequency"],
+                b=sdata.coords["b"]
+            )
+        )
+
 
 class Component_SnP(Component):
     """

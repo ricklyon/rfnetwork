@@ -26,6 +26,7 @@ __all__ = (
     "Open",
     "Load",
     "Attenuator",
+    "IdealPhaseShifter",
     "PiAttenuator",
     "LumpedElementFilter"
 )
@@ -225,7 +226,24 @@ class Attenuator(Component):
         return np.broadcast_to(sdata, (len(frequency), 2, 2)).copy()
 
 
+class IdealPhaseShifter(Component):
+    """
+    Ideal phase shifter with infinite bandwidth.
+    """
+    def __init__(self, phase_deg: float):
+        """
+        Parameters:
+        ----------
+        phase_deg (float):
+            phase delay in degrees
+        """
+        super().__init__(passive=True, state=dict(value=phase_deg))
 
+    def evaluate_sdata(self, frequency: np.ndarray):
+
+        phase_rad = np.abs((np.pi / 180) * self.state["value"])
+        sp_f = np.array([[1e-6, np.exp(-1j * phase_rad)], [np.exp(-1j * phase_rad), 1e-6]], dtype="complex128")
+        return np.broadcast_to(sp_f, (len(frequency), 2, 2))
 
 class PiAttenuator(Network):
     """
@@ -253,6 +271,21 @@ class PiAttenuator(Network):
         super().__init__(passive=True, state=state)
 
 
+class GainBlock(Component):
+    def __init__(self, gain_db: float):
+        """
+        Parameters:
+        ----------
+        gain_db (float):
+            gain in dB
+        """
+        super().__init__(passive=False, state=dict(value=gain_db))
+
+    def evaluate_sdata(self, frequency: np.ndarray):
+        s21 = conv.lin_db20(self.state["value"])
+        sp_f = np.array([[1e-6, s21 / 100], [s21, 1e-6]], dtype="complex128")
+        return np.broadcast_to(sp_f, (len(frequency), 2, 2))
+    
 
 class LC_Series(Network):
     """
