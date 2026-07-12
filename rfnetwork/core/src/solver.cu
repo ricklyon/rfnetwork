@@ -546,6 +546,8 @@ __global__ void h_probe_update_kernel(
 void SolverFDTD::solver_run_cu(int Nt)
 {
 
+    cudaError_t err;
+
     // size of thread blocks in each direction
     int Nx_th = 8;
     int Ny_th = 8;
@@ -790,8 +792,6 @@ void SolverFDTD::solver_run_cu(int Nt)
         probe_type[i] = p->field_type;
         probe_is_src[i] = p->is_source;
 
-        // printf("probe_idx = %d, %d\n", probe_idx[i], p->field_type);
-
         cudaMemcpy(probe_values_dev + (i * Nt), p->values, Nt * sizeof(float), cudaMemcpyDefault);
     }
 
@@ -821,7 +821,6 @@ void SolverFDTD::solver_run_cu(int Nt)
     cudaMalloc(&(monitors_dev.n_step), n_monitors * sizeof(int));
     cudaMalloc(&(monitors_dev.is_phasor), n_monitors * sizeof(int));
     cudaMalloc(&(monitors_dev.values), n_monitors * sizeof(char *));
-    cudaMalloc(&(monitors_dev.dtft_phase), n_monitors * sizeof(float *));
 
     monitors_dev.n_monitors = n_monitors;
     monitors_dev.n_phasors = 0;
@@ -877,15 +876,10 @@ void SolverFDTD::solver_run_cu(int Nt)
             cudaMemcpyDefault
         );
     }
-
-    // Fields* d_fields;
-    // cudaMalloc(&d_fields, sizeof(Fields));
-
-    // EFieldCoefficients* d_ecoeff;
-    // cudaMalloc(&d_ecoeff, sizeof(EFieldCoefficients));
-
-    // HFieldCoefficients* d_hcoeff;
-    // cudaMalloc(&d_hcoeff, sizeof(HFieldCoefficients));
+    else
+    {
+        cudaMalloc(&(monitors_dev.dtft_phase), n_monitors * sizeof(float *));
+    }
 
     ecoeff.Ca_ex_y = Ca_ex_y;
     ecoeff.Cb_ex_y = Cb_ex_y;
@@ -953,17 +947,8 @@ void SolverFDTD::solver_run_cu(int Nt)
     fields.hz_x = p_hz_x;
     fields.hz_y = p_hz_y;
 
-    // cudaMemcpy(d_fields, &fields, sizeof(Fields), cudaMemcpyHostToDevice);
-    // cudaMemcpy(d_ecoeff, &ecoeff, sizeof(EFieldCoefficients), cudaMemcpyHostToDevice);
-    // cudaMemcpy(d_hcoeff, &hcoeff, sizeof(HFieldCoefficients), cudaMemcpyHostToDevice);
-
     dim3 block_size(Nz_th, Ny_th, Nx_th);
     dim3 grid_size(Nz_b, Ny_b, Nx_b);
-
-    printf("grid_size = %d\n", grid_size);
-    printf("block_size = %d\n", block_size);
-
-    cudaError_t err;
 
     for (int n = 0; n < Nt; n++)
     {
@@ -976,48 +961,22 @@ void SolverFDTD::solver_run_cu(int Nt)
             fields, n_probes, n, Nt,
             probe_idx_dev, probe_type_dev, probe_is_src_dev, probe_values_dev
         );
-        // err = cudaGetLastError();
-        // printf("e-launch: %s\n", cudaGetErrorString(err));
-
-        // cudaDeviceSynchronize(); 
-
-        // err = cudaGetLastError();
-        // printf("e-runtime: %s\n", cudaGetErrorString(err));
 
         hfield_update_kernel<<<grid_size, block_size>>>(
             hcoeff, fields, monitors_dev, n,
             Nx, Ny, Nz, Nt
         );
 
-
-        // err = cudaGetLastError();
-        // printf("h-launch: %s\n", cudaGetErrorString(err));
-
-        // cudaDeviceSynchronize(); 
-
-        // err = cudaGetLastError();
-        // printf("h-runtime: %s\n", cudaGetErrorString(err));
-
         h_probe_update_kernel<<<Np_b, Np_th>>>(
             fields, n_probes, n, Nt,
             probe_idx_dev, probe_type_dev, probe_is_src_dev, probe_values_dev
         );
 
-
-        // err = cudaGetLastError();
-        // printf("p-launch: %s\n", cudaGetErrorString(err));
-
-        // cudaDeviceSynchronize(); 
-
-
     }
 
     cudaDeviceSynchronize(); 
 
-    err = cudaGetLastError();
-    printf("ERROR: %s\n", cudaGetErrorString(err));
 
-    printf("n_probes = %d\n", n_probes);
     // copy probe values from device to CPU
     for (int i = 0; i < n_probes; i++)
     {   
@@ -1042,7 +1001,6 @@ void SolverFDTD::solver_run_cu(int Nt)
         }
         
     }
-    
     
     // Clean up field arrays
     cudaFree(p_ex_y);
@@ -1078,7 +1036,7 @@ void SolverFDTD::solver_run_cu(int Nt)
     cudaFree(Ca_ey_z);
     cudaFree(Ca_ey_x);
     cudaFree(Cb_ey_z);
-    cudaFree(Cb_ey_z);
+    cudaFree(Cb_ey_x);
 
     cudaFree(Ca_ez_x);
     cudaFree(Ca_ez_y);
@@ -1118,9 +1076,6 @@ void SolverFDTD::solver_run_cu(int Nt)
     cudaFree(probe_values_dev);
     cudaFree(probe_is_src_dev);
 
-    // cudaFree(d_fields);
-    // cudaFree(d_ecoeff);
-    // cudaFree(d_hcoeff);
 
     // clean up monitors
     for (int m = 0; m < n_monitors; m++)
@@ -1134,9 +1089,13 @@ void SolverFDTD::solver_run_cu(int Nt)
     cudaFree(monitors_dev.n_step);
     cudaFree(monitors_dev.values);
     cudaFree(monitors_dev.is_phasor);
+    cudaFree(monitors_dev.dtft_phase);
     
-    if (monitors_dev.n_phasors)
+    err = cudaGetLastError();
+
+    if (err != cudaSuccess)
     {
-        cudaFree(monitors_dev.dtft_phase);
+        throw std::runtime_error(std::string("ERROR: ") + cudaGetErrorString(err));
     }
+
 }
