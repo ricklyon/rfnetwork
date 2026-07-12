@@ -821,7 +821,6 @@ void SolverFDTD::solver_run_cu(int Nt)
     cudaMalloc(&(monitors_dev.n_step), n_monitors * sizeof(int));
     cudaMalloc(&(monitors_dev.is_phasor), n_monitors * sizeof(int));
     cudaMalloc(&(monitors_dev.values), n_monitors * sizeof(char *));
-    cudaMalloc(&(monitors_dev.dtft_phase), n_monitors * sizeof(float *));
 
     monitors_dev.n_monitors = n_monitors;
     monitors_dev.n_phasors = 0;
@@ -876,6 +875,10 @@ void SolverFDTD::solver_run_cu(int Nt)
             Nt * monitors_dev.n_phasors * sizeof(cuda::std::complex<float>), 
             cudaMemcpyDefault
         );
+    }
+    else
+    {
+        cudaMalloc(&(monitors_dev.dtft_phase), n_monitors * sizeof(float *));
     }
 
     // Fields* d_fields;
@@ -960,8 +963,8 @@ void SolverFDTD::solver_run_cu(int Nt)
     dim3 block_size(Nz_th, Ny_th, Nx_th);
     dim3 grid_size(Nz_b, Ny_b, Nx_b);
 
-    printf("grid_size = %d\n", grid_size);
-    printf("block_size = %d\n", block_size);
+    // printf("grid_size = %d\n", grid_size);
+    // printf("block_size = %d\n", block_size);
 
     cudaError_t err;
 
@@ -1017,7 +1020,6 @@ void SolverFDTD::solver_run_cu(int Nt)
     err = cudaGetLastError();
     printf("ERROR: %s\n", cudaGetErrorString(err));
 
-    printf("n_probes = %d\n", n_probes);
     // copy probe values from device to CPU
     for (int i = 0; i < n_probes; i++)
     {   
@@ -1134,9 +1136,7 @@ void SolverFDTD::solver_run_cu(int Nt)
     cudaFree(monitors_dev.n_step);
     cudaFree(monitors_dev.values);
     cudaFree(monitors_dev.is_phasor);
+    cudaFree(monitors_dev.dtft_phase);
     
-    if (monitors_dev.n_phasors)
-    {
-        cudaFree(monitors_dev.dtft_phase);
-    }
+
 }
