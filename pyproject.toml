@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 requires-python = ">=3.9"
 name = "rfnetwork"
-version = "0.4.3"
+version = "0.4.4"
 description = "rf/microwave network simulation tool"
 readme = "README.md"
 authors = [{ name = "Rick Lyon", email = "rlyon14@gmail.com" }]
@@ -57,7 +57,7 @@ include-package-data = true
 repository = "https://github.com/ricklyon/rfnetwork"
 
 [tool.bumpversion]
-current_version = "0.4.3"
+current_version = "0.4.4"
 commit = true
 tag = true
 
