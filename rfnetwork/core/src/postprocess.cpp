@@ -1,3 +1,12 @@
+/**
+ * @file postprocess.cpp
+ * @brief Performs postprocessing functions on raw time-domain data from a completed FDTD solve, including
+ * near-field to far-field transformations.
+ *
+ * @author Rick Lyon
+ * @date 2026-07-12
+ *
+ */
 
 #define PY_SSIZE_T_CLEAN
 #define _USE_MATH_DEFINES
@@ -40,6 +49,33 @@ typedef Eigen::Map<Eigen::Matrix<std::complex<float>, Eigen::Dynamic, Eigen::Dyn
 
 #define MAX_THREADS 20
 
+/**
+ * @brief Validate and extract a pointer of a numpy complex64 array
+ *
+ * Verifies that the supplied Python object is a NumPy array with the expected
+ * number of dimensions, shape, data type, and memory layout. If all checks
+ * pass, a pointer to the underlying array data is returned.
+ *
+ * @param py_obj
+ *     Python object expected to be a NumPy array (`PyArrayObject`).
+ *
+ * @param shape
+ *     Pointer to an array of length `ndim` containing the expected size of
+ *     each dimension.
+ *
+ * @param ndim
+ *     Expected number of array dimensions.
+ *
+ * @return Pointer to the underlying array data as
+ *         `std::complex<float>*`.
+ *
+ * @throws std::runtime_error
+ *     If any of the following conditions are not met:
+ *     - The array has the wrong number of dimensions.
+ *     - The array is not of type `numpy.complex64`.
+ *     - The array is not C-contiguous.
+ *     - The array shape does not match the expected shape.
+ */
 std::complex<float> * get_complex_array(PyObject* py_obj, int * shape, int ndim) 
 {   
     PyArrayObject* array = (PyArrayObject*) py_obj;
@@ -73,6 +109,33 @@ std::complex<float> * get_complex_array(PyObject* py_obj, int * shape, int ndim)
     return (std::complex<float> *) PyArray_DATA(array);
 }
 
+/**
+ * @brief Validate and extract a pointer of a numpy float32 array
+ *
+ * Verifies that the supplied Python object is a NumPy array with the expected
+ * number of dimensions, shape, data type, and memory layout. If all checks
+ * pass, a pointer to the underlying array data is returned.
+ *
+ * @param py_obj
+ *     Python object expected to be a NumPy array (`PyArrayObject`).
+ *
+ * @param shape
+ *     Pointer to an array of length `ndim` containing the expected size of
+ *     each dimension.
+ *
+ * @param ndim
+ *     Expected number of array dimensions.
+ *
+ * @return Pointer to the underlying array data as
+ *         `float *`.
+ *
+ * @throws std::runtime_error
+ *     If any of the following conditions are not met:
+ *     - The array has the wrong number of dimensions.
+ *     - The array is not of type `numpy.float32`.
+ *     - The array is not C-contiguous.
+ *     - The array shape does not match the expected shape.
+ */
 float * get_float_array(PyObject * py_obj, int * shape, int ndim) 
 {   
     PyArrayObject* array = (PyArrayObject*) py_obj;
@@ -106,6 +169,24 @@ float * get_float_array(PyObject * py_obj, int * shape, int ndim)
     return (float *) PyArray_DATA(array);
 }
 
+/**
+ * @brief Convert a 4-dimensional array index into a linear array offset.
+ *
+ * Computes the zero-based linear index corresponding to a 4-dimensional
+ * index for an array stored in C-style (row-major) contiguous memory.
+ *
+ * @param shape
+ *     Pointer to an array of four integers containing the size of each
+ *     dimension.
+ *
+ * @param index
+ *     Four-dimensional array index.
+ * 
+ * @return offset into the contiguous array.
+ *
+ * @note
+ * This function performs no bounds checking. 
+ */
 int get_pointer_index_4(int * shape, const std::array<int, 4>& index)
 {
     int idx = 0;
@@ -127,9 +208,59 @@ int get_pointer_index_4(int * shape, const std::array<int, 4>& index)
     return idx;
 }
 
-
-// Integrate J and M equivalent surface currents on a rectangular box to produce the far-field electric field values.
-// See Section 6.8.2 in Balanis Advanced Engineering Electromagnetics 2nd Edition
+/**
+ * @brief Integrate J and M equivalent surface currents on a rectangular box to produce the far-field electric field values.
+ * See Section 6.8.2 in Balanis Advanced Engineering Electromagnetics 2nd Edition.
+ * 
+ * @param J_xyz_py
+ *      Python list object containing the equivalent electric current (Js = n X Hs) on each of the 6 faces of a closed box.
+ *      Object must contain three sub-lists, each of length 2, (3 axes, 2 faces on each axis). Each item in the length 
+ *      2 lists are numpy arrays of type float32.
+ * 
+  * @param M_xyz_py
+ *      Python list object containing the equivalent magnetic current (Ms = -n X Es) on each of the 6 faces of a closed box.
+ *      Object must contain three sub-lists, each of length 2, (3 axes, 2 faces on each axis). Each item in the length 
+ *      2 lists are numpy arrays of type float32.
+ * 
+ *  @param r_grid_py
+ *      Python list object of the xyz positions of each cell of the grid. List contains three sub-lists for each 
+ *      axis, each containing two 2D matrices of the grid cell center locations, in meters. For the x-axis, the
+ *      two matrices hold the cell positions along the yz plane. For y-axis, the cell positions are on the xz plane. 
+ *      For the z-axis, cell positions are on the xy plane. The dtype is float32.
+ * 
+ *  @param ds_grid_py
+ *      Python list object of the area of each grid cell. List contains three sub-lists for each 
+ *      axis, each item in the list is a 2D matrix of the grid cell area, in m^2. The dtype of these arrays
+ *      is complex64 (avoids a re-cast in c++)
+ * 
+ *  @param surf_pos_py
+ *      Python list object of the location of the surfaces for each axis. List contains three sub-lists, one for
+ *      each axis. Each sub-list contains two float32 values that store the location of the surface on each side of the 
+ *      box, in meters. 
+ * 
+ *  @param ff_data_py
+ *      Python dictionary objecting containing the following Python array objects:
+ *       
+ *      - beta : wavenumber for each frequency, float32
+ * 
+ *      - phi : phi angles in radians, float32
+ *
+ *      - data : Empty 2xFxTxP matrix where far-field data will be written to. F is the number of frequencies,
+ *                  T is the number of theta points, P is the number of phi points,
+ *
+ *      - working_grid_cmplx : Empty matrix used as temporary working memory. Must be large enough to hold
+ *                                a full grid of values for the largest of the box faces, for each thread. dtype is
+ *                                complex64. *
+ *      - working_grid_float : Empty matrix used as temporary working memory. Must be large enough to hold
+ *                                a full grid of values for the largest of the box faces, for each thread. dtype is
+ *                                float32.
+ * 
+ * @param n_threads
+ *      Number of parallel threads to run computation in. The theta values are split evenly across the threads,
+ *      each thread will compute the same number of frequencies and phi values.
+ * 
+ * @return 0 if successful.
+ */
 int postprocess_nf2ff(
     PyObject * J_xyz_py, 
     PyObject * M_xyz_py, 
