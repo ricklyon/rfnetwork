@@ -6,11 +6,19 @@ Linear circuit solver for networks of RF components.
 Installation
 ============
 
-``rfnetwork`` requires Python >= 3.9. Wheels are currently only available on linux, and can be built from
-source on Windows.
+``rfnetwork`` requires Python >= 3.9. Wheels are currently only available on Linux.
 
 ```bash
    pip install rfnetwork
+```
+
+To build from source on Windows or Linux, 
+
+```bash
+   git clone https://github.com/ricklyon/rfnetwork.git
+   cd rfnetwork
+   git submodule update --init --recursive
+   pip install -e .
 ```
 
 If building from source, a C++ compiler must be available on the system. On Windows systems the recommended compiler
@@ -26,6 +34,21 @@ Features
 * Interactive tuning of variable components (i.e. switches, phase shifters, capacitors). 
 * Supports internal voltage probes inside a network. 
 * GPU accelerated FDTD solver.
+
+Performance
+===========
+
+FDTD solver metrics for the [dipole.py example](https://rfnetwork.readthedocs.io/en/latest/auto_examples/dipole/html#sphx-glr-auto-examples-dipole-py):
+
+CPU: Intel i7-9700 (8) @ 4.700GHz   
+Memory Speed: 2666 MT/s  
+GPU: NVIDIA Quadro P2000   
+
+| Cells | Time Steps | CPU | GPU |
+|------ |------------|-----|------|
+| 156k | 1291 | 5.43s  | 1.73s  |
+| 1.253M   | 1721 | 56.12s | 14.95s |
+
 
 
 Documentation

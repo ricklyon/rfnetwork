@@ -18,6 +18,7 @@ Linear circuit solver for networks of RF components.
 
 |github| `Github Repository <https://github.com/ricklyon/rfnetwork>`_
 
+
 Installation
 ============
 
@@ -26,6 +27,14 @@ Installation
 .. code-block:: bash
 
    pip install rfnetwork
+
+To build from source on Windows or Linux, 
+
+.. code-block:: bash
+   git clone https://github.com/ricklyon/rfnetwork.git
+   cd rfnetwork
+   git submodule update --init --recursive
+   pip install -e .
 
 
 If building from source, a C++ compiler must be available on the system. On Windows systems the 
