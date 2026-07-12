@@ -45,7 +45,7 @@ CPU: Intel i7-9700 (8) @ 4.700GHz
 Memory Speed: 2666 MT/s  
 GPU: NVIDIA Quadro P2000   
 
-Model is simulated over a time span of 400ns.
+Model is simulated over a time span of 400ps.
 
 | Cells | Time Steps | Grid Cell Max/Min [in]| CPU | GPU | 
 |------ |------------|-----|------|-----|
