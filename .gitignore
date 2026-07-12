@@ -20,3 +20,4 @@ docs/sg_execution_times.rst
 *.gif
 *.log
 notes/
+.outputs/
