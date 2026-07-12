@@ -74,7 +74,7 @@ class build_cuda(setuptools.Command):
         )
 
         if result.returncode != 0:
-            raise RuntimeError(result.stdout)
+            raise RuntimeError(result.stderr.decode("utf-8"))
 
     def finalize_options(self):
         pass
