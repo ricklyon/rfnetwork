@@ -23,9 +23,10 @@ def find_cuda_lib() -> Path:
 
     # ask nvcc where it lives
     if cuda_home is None:
+        cmd_name = "where" if sys.platform == "win32" else "which"
         try:
             nvcc_path = subprocess.check_output(
-                ["which", "nvcc"], stderr=subprocess.DEVNULL
+                [cmd_name, "nvcc"], stderr=subprocess.DEVNULL
             ).decode().strip()
             # nvcc lives at <cuda_home>/bin/nvcc
             cuda_home = str(Path(nvcc_path).parent.parent)
