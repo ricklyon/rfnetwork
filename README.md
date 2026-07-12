@@ -44,10 +44,11 @@ CPU: Intel i7-9700 (8) @ 4.700GHz
 Memory Speed: 2666 MT/s  
 GPU: NVIDIA Quadro P2000   
 
-| Cells | Time Steps | CPU | GPU |
-|------ |------------|-----|------|
-| 156k | 1291 | 5.43s  | 1.73s  |
-| 1.253M   | 1721 | 56.12s | 14.95s |
+| Cells | Time Steps | CPU | GPU | File | Mesh Settings|
+|------ |------------|-----|------|-----| ----- |
+| 156k | 1291 | 5.43s  | 1.73s  | [dipole.py](https://rfnetwork.readthedocs.io/en/latest/auto_examples/dipole/html#sphx-glr-auto-examples-dipole-py) | d_max=0.01, d_min=0.005, t_len=400e-12 |
+| 1.253M   | 1721 | 56.12s | 14.95s | [dipole.py](https://rfnetwork.readthedocs.io/en/latest/auto_examples/dipole/html#sphx-glr-auto-examples-dipole-py) | d_max = 0.02, d_min = 0.01, t_len = 600e-12 |
+| 43k      | 50k  | 12.3s  | 5.8s   | [combline_stripline.py](https://rfnetwork.readthedocs.io/en/latest/auto_examples/combline_stripline.html#sphx-glr-auto-examples-combline-stripline-py) | d_max = 0.02, d_min = 0.005, t_len=1.11e-8|
 
 
 
