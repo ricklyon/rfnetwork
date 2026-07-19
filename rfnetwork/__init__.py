@@ -11,3 +11,4 @@ from . solver import FDTD_Solver
 from . import utils
 from . import math
 from . import utils_mesh
+from . import antennas
