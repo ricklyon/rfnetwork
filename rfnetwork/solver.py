@@ -2802,10 +2802,11 @@ class FDTD_Solver():
         )
 
     def get_farfield_gain(
-        self, theta: np.ndarray, phi: np.ndarray, polarization: np.ndarray = None, n_threads: int = 4
+        self, theta: np.ndarray, phi: np.ndarray, n_threads: int = 4
     ) -> ldarray:
         """
-        Compile farfield realized gain from the farfield monitor attached to the solver.
+        Compile farfield realized gain from the farfield monitor attached to the solver. Returned value
+        is the square root of the gain, with the same phase as rE.
 
         Parameters
         ----------
@@ -2814,36 +2815,17 @@ class FDTD_Solver():
 
         phi : np.ndarray | float
             spatial phi values in degrees
-        
-        polarization : {"thetapol", "phipol", "rhcp", "lhcp"}, optional
-            List of multiple polarizations, or a single polarization. Default is ["thetapol", "phipol"]
 
         Returns
         -------
         ldarray
-            labeled numpy array with dimensions (polarization, frequency, theta, phi)
+            labeled numpy array with dimensions (polarization, frequency, theta, phi). 
+            Use rfn.conv.db20_lin(...) to convert to gain in dB.
         """
 
         rE = self.get_farfield_rE(theta, phi, n_threads=n_threads)
 
-        if polarization is None:
-            polarization = ["thetapol", "phipol"]
-
-        # project phi/theta to specified polarization. project vectors project from thetapol, phipol to a
-        # different polarization. 
-        projection_vectors = dict(
-            thetapol = [1, 0],
-            phipol = [0, 1],
-            rhcp = [1 / np.sqrt(2), 1j / np.sqrt(2)],  # advance phi component by 90 deg for rhcp
-            lhcp = [1 / np.sqrt(2), -1j / np.sqrt(2)]  # delay phi component by 90 deg for lhcp
-        )
-        
-        # assmeble the projection vectors into a matrix, each specified pol is in it's own row
-        projection_matrix = np.array([projection_vectors[k] for k in polarization])
-        # take dot product with each polarization vector, for multiple rows this is just a matrix multiplication
-        rE_pol = np.einsum("ij, j...->i...", projection_matrix, rE)
-
-        frequency = self.farfield["frequency"]
+        frequency = rE.coords["frequency"]
 
         # get all voltage sources in model
         v_sources = [p["src"] for p in self.ports if p["src"] is not None]
@@ -2857,16 +2839,21 @@ class FDTD_Solver():
         # sum total power across all sources
         Pin = np.sum(Pin_src, axis=0)
 
-        # radiation intensity,
+        # radiation intensity, in voltage space. Normally rE is squared to get U, but we want U to have the 
+        # same phase as rE.
         # U_theta = (1 / 2 eta) * |E_theta|^2
         # U_phi = (1 / 2 eta) * |E_phi|^2
-        U = (1 / (2 * const.eta0)) * np.abs(rE_pol)**2
+        # sqrt(U_v) = sqrt(1 / 2 eta) * E_theta
+        U_v = np.sqrt((1 / (2 * const.eta0))) * rE
 
-        # compute gain. broadcast Pin across polarization, theta, and phi
-        gain = (4 * np.pi / Pin[None, :, None, None]) * U
+        # compute gain. broadcast Pin across polarization, theta, and phi.
+        # square root of the gain is:
+        # G = (4pi / Pin) * U
+        # sqrt(G) = sqrt(4pi / Pin) * U_v
+        gain_v = np.sqrt((4 * np.pi / Pin[None, :, None, None])) * U_v
 
         return ldarray(
-            gain, coords=dict(polarization=polarization, frequency=frequency, theta=theta, phi=phi)
+            gain_v, coords=dict(polarization=["thetapol", "phipol"], frequency=frequency, theta=theta, phi=phi)
         )
 
     def get_farfield_rE(self, theta: np.ndarray, phi: np.ndarray, n_threads: int = 4) -> ldarray:

@@ -190,7 +190,7 @@ def pattern_uv2phitheta(pattern: ldarray, phi: np.ndarray, theta: np.ndarray):
     return pattern.interpolate(u=u_i, v=v_i)
 
 
-def pattern_project2rectangular(pattern: ldarray):
+def pattern_spherical2rectangular(pattern: ldarray):
     r"""
     Convert pattern defined with spherical polarization vectors to rectangular polarization.
     """
@@ -222,9 +222,9 @@ def pattern_project2rectangular(pattern: ldarray):
     )
 
 
-def pattern_project2spherical(pattern: ldarray):
+def pattern_rectangular2spherical(pattern: ldarray):
     r"""
-    Convert pattern defined with cartesian polarization vectors to spherical polarization.
+    Project pattern from cartesian polarization vectors to spherical polarization.
 
     """
     if not all(pattern.polarization == ("x", "y", "z")):
@@ -250,4 +250,26 @@ def pattern_project2spherical(pattern: ldarray):
     # matrix multiply by the transformation matrix to get spherical polarization vectors
     return ldarray(
         np.einsum("nmtp,mftp->nftp", A, pattern), coords=coords
+    )
+
+def pattern_spherical2cp(pattern: ldarray):
+    """
+    Project pattern from spherical polarization to circular polarization
+    """
+    if not all(pattern.polarization == ("thetapol", "phipol")):
+        raise ValueError("Pattern polarization must be defined with spherical component vectors.")
+    
+    # project phi/theta to specified polarization. project vectors project from thetapol, phipol to a
+    # different polarization. 
+    A = [
+        [1 / np.sqrt(2), 1j / np.sqrt(2)],  # advance phi component by 90 deg for rhcp
+        [1 / np.sqrt(2), -1j / np.sqrt(2)]  # delay phi component by 90 deg for lhcp
+    ]
+
+    coords = dict(**pattern.coords)
+    coords["polarization"] = ["rhcp", "lhcp"]
+
+    # matrix multiply by the transformation matrix to get spherical polarization vectors
+    return ldarray(
+        np.einsum("nm,mftp->nftp", A, pattern), coords=coords
     )
