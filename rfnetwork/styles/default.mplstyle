@@ -23,11 +23,11 @@ axes.prop_cycle: cycler('color', ['348ABD', 'E24A33', 'tab:green', 'tab:purple',
 
 xtick.color: 555555
 xtick.direction: inout
-xtick.labelsize: small
+xtick.labelsize: medium
 
 ytick.color: 555555
 ytick.direction: inout
-ytick.labelsize: small
+ytick.labelsize: medium
 
 grid.color: E5E5E5
 grid.linestyle: -    # solid line
