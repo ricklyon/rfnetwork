@@ -118,8 +118,9 @@ ax.legend(["Measured S11", "Simulated S11"])
 ax.set_xticks(np.arange(0, 4.5, 0.5))
 
 # plot far-field cut along theta at phi=0
-theta_cut = rfn.conv.db10_lin(
-    s.get_farfield_gain(theta=np.arange(-180, 181, 2), phi=0).sel(polarization="thetapol")
+ph = 0
+theta_cut = rfn.conv.db20_lin(
+    s.get_farfield_gain(theta=np.arange(-180, 181, 2), phi=ph).sel(polarization="thetapol")
 )
 
 fig1, ax = plt.subplots(subplot_kw=dict(projection="polar"))
@@ -137,9 +138,38 @@ ax.set_xticks(np.linspace(0, 2 * np.pi, 8, endpoint=False))
 labels = [f"{d}°" for d in [0, 45, 90, 135, 180, -135, -90, -45]]
 ax.set_xticklabels(labels)
 
-ax.set_xlabel(r"$\theta$ [deg], $\phi$=0°")
+ax.set_xlabel(f"$\\theta$ [deg], $\\phi$={ph}°")
 ax.legend(["{:.3f}GHz".format(f/1e9) for f in theta_cut.coords["frequency"]])
-plt.show()
+
+
+# %%
+# 2D Pattern
+# ----------
+pattern = s.get_farfield_gain(theta=np.arange(0, 91, 2), phi=np.arange(-180, 182, 2))
+
+# project to x-polarization
+ptn_xpol = rfn.antennas.pattern_spherical2rectangular(pattern)
+# convert to uv coordinates
+ptn_uv = rfn.antennas.pattern_phitheta2uv(
+    ptn_xpol, 
+    u=np.linspace(-1, 1, 301), 
+    v=np.linspace(-1, 1, 301)
+)
+
+pattern_db = rfn.conv.db20_lin(ptn_uv).sel(frequency=3e9)
+
+fig, axes = plt.subplots(1, 2, figsize=(8, 5))
+
+for (ax, pol) in zip(axes, ["x", "y"]):
+    im = ax.pcolormesh(ptn_uv.u, ptn_uv.v, pattern_db.sel(polarization=pol).T, vmin=-20, vmax=10, cmap="jet")
+    fig.colorbar(im, label="Gain [dB]", shrink=0.5)
+    ax.set_xlabel("U")
+    ax.set_ylabel("V")
+    ax.set_aspect("equal")
+    ax.set_title(f"{pol}-polarization, 3 GHz")
+
+fig.tight_layout()
+
 
 # %%
 # Plot near-field
