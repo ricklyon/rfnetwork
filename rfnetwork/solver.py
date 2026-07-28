@@ -2789,16 +2789,21 @@ class FDTD_Solver():
 
         # average components on the xy plane to get the fields at the cell corners.
         # fields at the grid edge are dropped
-        e1 = (e1[:, 1:, 1:-1] + e1[:, :-1, 1:-1]) / 2
-        e2 = (e2[:, 1:-1, 1:] + e2[:, 1:-1, :-1]) / 2
-        e3 = (e3[:, 1:-1, 1:-1])
-
+        e1_av = (e1[:, 1:, 1:-1] + e1[:, :-1, 1:-1]) / 2
+        e2_av = (e2[:, 1:-1, 1:] + e2[:, 1:-1, :-1]) / 2
+        e3_av = (e3[:, 1:-1, 1:-1])
         # order back to x, y, z. Look up where each cartesian axis falls in the surface order
-        e_xyz = [(e1, e2, e3)[axis_surf_ordered.index(a)] for a in range(3)]
+        e_xyz = [(e1_av, e2_av, e3_av)[axis_surf_ordered.index(a)] for a in range(3)]
 
-        # concatenate the data from the three monitors together
+        # build coordinates
+        k1, k2 = list(e1.coords.keys())[1:]
+        c1 = {k1: (e1.coords[k1][1:] + e1.coords[k1][:-1]) / 2}
+        c2 = {k2: (e2.coords[k2][1:] + e2.coords[k2][:-1]) / 2}
+
+        # concatenate the data from the three monitors together. The position coords are not correct here since 
+        # the values are averaged to be at the cell corners
         return ldarray(
-            np.array(e_xyz), coords=dict(component=("x", "y", "z"), **e_xyz[0].coords)
+            np.array(e_xyz), coords=dict(component=("x", "y", "z"), time=e1.time, **c1, **c2)
         )
 
     def get_farfield_gain(
