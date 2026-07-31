@@ -214,15 +214,16 @@ s.assign_excitation(vsrc_v_long, 2)
 s.solve(n_threads=4)
 
 # plot far-field cut along theta at phi=0
-theta_cut = rfn.conv.db10_lin(
-    s.get_farfield_gain(theta=np.arange(-180, 181, 2), phi=0, polarization=["rhcp", "lhcp"])
+theta_cut = s.get_farfield_gain(theta=np.arange(-180, 181, 2), phi=0)
+
+# get cp polarization
+theta_cut_cp = rfn.conv.db20_lin(
+    rfn.antennas.pattern_spherical2cp(theta_cut)
 )
 
-theta_cut = theta_cut.interpolate(theta=np.arange(-180, 180.5, 0.5))
-
 fig1, ax = plt.subplots(subplot_kw=dict(projection="polar"))
-theta_rad = np.deg2rad(theta_cut.coords["theta"])
-ax.plot(theta_rad, theta_cut.squeeze().T)
+theta_rad = np.deg2rad(theta_cut_cp.coords["theta"])
+ax.plot(theta_rad, theta_cut_cp.squeeze().T)
 
 ax.set_theta_zero_location('N') 
 ax.set_theta_direction(-1) 

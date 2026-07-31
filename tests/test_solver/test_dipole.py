@@ -92,7 +92,7 @@ class TestDipole(unittest.TestCase):
         s.assign_excitation(vsrc, 1)
         s.solve(n_threads=4, show_progress=False)
 
-        gain_db = conv.db10_lin(s.get_farfield_gain(theta=np.arange(0, 190, 10), phi=np.arange(-180, 184, 4)))
+        gain_db = conv.db20_lin(s.get_farfield_gain(theta=np.arange(0, 190, 10), phi=np.arange(-180, 184, 4)))
 
         thetapol_gain = gain_db.sel(frequency=10e9, polarization="thetapol", theta=90)
         phipol_gain = gain_db.sel(polarization="phipol")
