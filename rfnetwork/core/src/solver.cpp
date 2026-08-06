@@ -747,6 +747,9 @@ void SolverFDTD::solver_thread(int x_start, int x_stop, int Nt, int thread_idx)
     float * p_hz_y = mbuffer_allocate(Nx * hz_NyNz); //  
     float * p_hz   = mbuffer_allocate(Nx * hz_NyNz); //  
 
+    float * p_temp_1 = mbuffer_allocate((Ny + 1) * (Nz + 1));
+    float * p_temp_2 = mbuffer_allocate((Ny + 1) * (Nz + 1));
+
     // populate thread data. Hy and Hz at the beginning of the x-block are used by the previous thread to update
     // the E fields at the edge. Ey and Ez are used by the next thread to update the H fields.
     thread_data[thread_idx].hy = p_hy;
@@ -848,6 +851,8 @@ void SolverFDTD::solver_thread(int x_start, int x_stop, int Nt, int thread_idx)
         cv_th.wait(lock, [this] { return th_init_done; });
     }
 
+    int d_pml = 10;
+
     // main time stepping loop
     for (int n = 0; n < Nt; n++)
     {
@@ -856,7 +861,14 @@ void SolverFDTD::solver_thread(int x_start, int x_stop, int Nt, int thread_idx)
         {   
             x_offset = x * ex_NyNz;
             MatrixFloatType ex_y (p_ex_y + x_offset, Nyp1, Nzp1);
+            // set stride to skip first column
+            MatrixFloatStride ex_y_in (p_ex_y + x_offset + Nzp1 + 1, Nym1, Nzm1, StrideType(Nzp1, 1));
+            // MatrixFloatType ex_y_in (p_ex_y + x_offset + Nzp1 + 1, Nym1, Nzm1);
+
             MatrixFloatType ex_z (p_ex_z + x_offset, Nyp1, Nzp1);
+            MatrixFloatStride ex_z_in (p_ex_z + x_offset + Nzp1 + 1, Nym1, Nzm1, StrideType(Nzp1, 1));
+            // MatrixFloatType ex_z_in (p_ex_z + x_offset + Nzp1 + 1, Nym1, Nzm1);
+
             MatrixFloatType ex   (p_ex   + x_offset, Nyp1, Nzp1);
             
             x_offset = x * ey_NyNz;
@@ -910,16 +922,41 @@ void SolverFDTD::solver_thread(int x_start, int x_stop, int Nt, int thread_idx)
             // ex_y update
             // ex_yd = Cb_ex_y * np.diff(hz, axis=1)[:, :, 1:-1]
             // ex_y[:, 1:-1, 1:-1] = (Ca_ex_y * ex_y[:, 1:-1, 1:-1]) + ex_yd
-            ex_y.block(1, 1, Nym1, Nzm1) = Ca_ex_y.cwiseProduct(ex_y.block(1, 1, Nym1, Nzm1)) + (
-                Cb_ex_y.cwiseProduct((hz.bottomRows(Nym1) - hz.topRows(Nym1)).block(0, 1, Nym1, Nzm1))
-            );
+            MatrixFloatType temp_yz_1 (p_temp_1, Nym1, Nzm1);
+            MatrixFloatType temp_yz_2 (p_temp_2, Nym1, Nzm1);
+            // difference terms along y axis and z axis, 
+            // TODO: use block directly on hz/hy to get correct shapes
+            temp_yz_1 = (hz.block(1, 1, Nym1, Nzm1) - hz.block(0, 1, Nym1, Nzm1));
+            temp_yz_2 = (hy.block(1, 1, Nym1, Nzm1) - hy.block(1, 0, Nym1, Nzm1));
+            // temp_yz_1 = Cb_ex_y.cwiseProduct(temp_yz_1);
+            // temp_yz_2 = Cb_ex_z.cwiseProduct(temp_yz_2);
+
+            // use normal update for interior cells
+            // ex.block(1, 1, Nym1, Nzm1) = Ca_ex_y.cwiseProduct(ex.block(1, 1, Nym1, Nzm1));
+            // ex.block(1, 1, Nym1, Nzm1) += (temp_yz_1 + temp_yz_2)
+            
+            // TODO: get a matrix with the block to avoid calling block three times
+            // MatrixFloatType ex_y_in ()
+            ex_y_in = Ca_ex_y.cwiseProduct(ex_y_in);
+
+            // ex_y.block(1, 1, Nym1, Nzm1) = Ca_ex_y.cwiseProduct(ex_y.block(1, 1, Nym1, Nzm1)) + (
+            //     Cb_ex_y.cwiseProduct((hz.bottomRows(Nym1) - hz.topRows(Nym1)).block(0, 1, Nym1, Nzm1))
+            // );
+            ex_y_in += Cb_ex_y.cwiseProduct(temp_yz_1);
 
             // ex_z update
             // ex_zd = Cb_ex_z * np.diff(hy, axis=2)[:, 1:-1, :]
             // ex_z[:, 1:-1, 1:-1] = (Ca_ex_z * ex_z[:, 1:-1, 1:-1]) + ex_zd
-            ex_z.block(1, 1, Nym1, Nzm1) = Ca_ex_z.cwiseProduct(ex_z.block(1, 1, Nym1, Nzm1) ) + (
-                Cb_ex_z.cwiseProduct((hy.rightCols(Nzm1) - hy.leftCols(Nzm1)).block(1, 0, Nym1, Nzm1))
-            );
+
+            ex_z_in = Ca_ex_z.cwiseProduct(ex_z_in) ;
+            // ex_z.block(1, 1, Nym1, Nzm1) = Ca_ex_z.cwiseProduct(ex_z.block(1, 1, Nym1, Nzm1) ) + (
+            //     Cb_ex_z.cwiseProduct((hy.rightCols(Nzm1) - hy.leftCols(Nzm1)).block(1, 0, Nym1, Nzm1))
+            // );
+            ex_z_in += Cb_ex_z.cwiseProduct(temp_yz_2);
+            
+            // combine split field components
+            ex = ex_y + ex_z;
+
 
             // ----------------- update ey -------------------------- //
             // ey_z update
@@ -958,7 +995,6 @@ void SolverFDTD::solver_thread(int x_start, int x_stop, int Nt, int thread_idx)
             // e components include the first index so the h-field can be updated
 
             // combine split components
-            ex = ex_y + ex_z;
             ey = ey_z + ey_x;
             ez = ez_x + ez_y;
         }
