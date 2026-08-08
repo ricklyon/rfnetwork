@@ -848,6 +848,8 @@ void SolverFDTD::solver_thread(int x_start, int x_stop, int Nt, int thread_idx)
         cv_th.wait(lock, [this] { return th_init_done; });
     }
 
+    int has_pml = 0;
+
     // main time stepping loop
     for (int n = 0; n < Nt; n++)
     {
@@ -906,61 +908,104 @@ void SolverFDTD::solver_thread(int x_start, int x_stop, int Nt, int thread_idx)
             MatrixFloatType hz_1 (p_hz_1, Ny, Nzp1);
             MatrixFloatType hy_1 (p_hy_1, Nyp1, Nz);
 
-            // ----------------- update ex -------------------------- //
-            // ex_y update
-            // ex_yd = Cb_ex_y * np.diff(hz, axis=1)[:, :, 1:-1]
-            // ex_y[:, 1:-1, 1:-1] = (Ca_ex_y * ex_y[:, 1:-1, 1:-1]) + ex_yd
-            ex_y.block(1, 1, Nym1, Nzm1) = Ca_ex_y.cwiseProduct(ex_y.block(1, 1, Nym1, Nzm1)) + (
-                Cb_ex_y.cwiseProduct((hz.bottomRows(Nym1) - hz.topRows(Nym1)).block(0, 1, Nym1, Nzm1))
-            );
+            if (has_pml)
+            {
+                // ----------------- update ex -------------------------- //
+                // ex_y update
+                // ex_yd = Cb_ex_y * np.diff(hz, axis=1)[:, :, 1:-1]
+                // ex_y[:, 1:-1, 1:-1] = (Ca_ex_y * ex_y[:, 1:-1, 1:-1]) + ex_yd
 
-            // ex_z update
-            // ex_zd = Cb_ex_z * np.diff(hy, axis=2)[:, 1:-1, :]
-            // ex_z[:, 1:-1, 1:-1] = (Ca_ex_z * ex_z[:, 1:-1, 1:-1]) + ex_zd
-            ex_z.block(1, 1, Nym1, Nzm1) = Ca_ex_z.cwiseProduct(ex_z.block(1, 1, Nym1, Nzm1) ) + (
-                Cb_ex_z.cwiseProduct((hy.rightCols(Nzm1) - hy.leftCols(Nzm1)).block(1, 0, Nym1, Nzm1))
-            );
+                auto ex_y_opt = ex_y.block(1, 1, Nym1, Nzm1) ;
+                ex_y_opt.noalias() = Ca_ex_y.cwiseProduct(ex_y_opt) + (
+                    Cb_ex_y.cwiseProduct((hz.bottomRows(Nym1) - hz.topRows(Nym1)).block(0, 1, Nym1, Nzm1))
+                );
 
-            // ----------------- update ey -------------------------- //
-            // ey_z update
-            // ey_zd = Cb_ey_z * np.diff(hx, axis=2)[1:-1, :, :]
-            // ey_z[1:-1, :, 1:-1] = (Ca_ey_z * ey_z[1:-1, :, 1:-1]) + ey_zd
-            ey_z.block(0, 1, Ny, Nzm1) = Ca_ey_z.cwiseProduct(ey_z.block(0, 1, Ny, Nzm1)) + (
-                Cb_ey_z.cwiseProduct(hx.rightCols(Nzm1) - hx.leftCols(Nzm1))
-            );
+                // ex_z update
+                // ex_zd = Cb_ex_z * np.diff(hy, axis=2)[:, 1:-1, :]
+                // ex_z[:, 1:-1, 1:-1] = (Ca_ex_z * ex_z[:, 1:-1, 1:-1]) + ex_zd
+                auto ex_z_opt = ex_z.block(1, 1, Nym1, Nzm1);
+                ex_z_opt.noalias() = Ca_ex_z.cwiseProduct(ex_z_opt ) + (
+                    Cb_ex_z.cwiseProduct((hy.rightCols(Nzm1) - hy.leftCols(Nzm1)).block(1, 0, Nym1, Nzm1))
+                );
 
-            // ey_x update
-            // ey_xd = Cb_ey_x * np.diff(hz, axis=0)[:, :, 1:-1]
-            // ey_x[1:-1, :, 1:-1] = (Ca_ey_x * ey_x[1:-1, :, 1:-1]) + ey_xd
-            ey_x.block(0, 1, Ny, Nzm1)  = Ca_ey_x.cwiseProduct(ey_x.block(0, 1, Ny, Nzm1)) + (
-                Cb_ey_x.cwiseProduct((hz_1 - hz).block(0, 1, Ny, Nzm1))
-            );
-            
-            // ----------------- update ez -------------------------- //
-            // ez_x update
-            // ez_xd = Cb_ez_x * np.diff(hy, axis=0)[:, 1:-1, :]
-            // ez_x[1:-1, 1:-1, :] = (Ca_ez_x * ez_x[1:-1, 1:-1, :]) + ez_xd
-            // get hy components on either side of x-slice, the hz component below ez is in the same cell,
-            ez_x.block(1, 0, Nym1, Nz)  = Ca_ez_x.cwiseProduct(ez_x.block(1, 0, Nym1, Nz) ) + (
-                Cb_ez_x.cwiseProduct((hy_1 - hy).block(1, 0, Nym1, Nz))
-            );
+                // ----------------- update ey -------------------------- //
+                // ey_z update
+                // ey_zd = Cb_ey_z * np.diff(hx, axis=2)[1:-1, :, :]
+                // ey_z[1:-1, :, 1:-1] = (Ca_ey_z * ey_z[1:-1, :, 1:-1]) + ey_zd
+                auto ey_z_opt = ey_z.block(0, 1, Ny, Nzm1);
+                ey_z_opt.noalias() = Ca_ey_z.cwiseProduct(ey_z_opt) + (
+                    Cb_ey_z.cwiseProduct(hx.rightCols(Nzm1) - hx.leftCols(Nzm1))
+                );
 
-            // update ez_y
-            // ez_yd = Cb_ez_y * np.diff(hx, axis=1)[1:-1, :, :]
-            // ez_y[1:-1, 1:-1, :] = (Ca_ez_y * ez_y[1:-1, 1:-1, :]) + ez_yd
-            ez_y.block(1, 0, Nym1, Nz)  = Ca_ez_y.cwiseProduct(ez_y.block(1, 0, Nym1, Nz) ) + (
-                Cb_ez_y.cwiseProduct(hx.bottomRows(Nym1) - hx.topRows(Nym1))
-            );
+                // ey_x update
+                // ey_xd = Cb_ey_x * np.diff(hz, axis=0)[:, :, 1:-1]
+                // ey_x[1:-1, :, 1:-1] = (Ca_ey_x * ey_x[1:-1, :, 1:-1]) + ey_xd
+                auto ey_x_opt = ey_x.block(0, 1, Ny, Nzm1) ;
+                ey_x_opt.noalias() = Ca_ey_x.cwiseProduct(ey_x_opt) + (
+                    Cb_ey_x.cwiseProduct((hz_1 - hz).block(0, 1, Ny, Nzm1))
+                );
+                
+                // ----------------- update ez -------------------------- //
+                // ez_x update
+                // ez_xd = Cb_ez_x * np.diff(hy, axis=0)[:, 1:-1, :]
+                // ez_x[1:-1, 1:-1, :] = (Ca_ez_x * ez_x[1:-1, 1:-1, :]) + ez_xd
+                // get hy components on either side of x-slice, the hz component below ez is in the same cell,
+                auto ez_x_opt = ez_x.block(1, 0, Nym1, Nz) ;
+                ez_x_opt.noalias() = Ca_ez_x.cwiseProduct(ez_x_opt) + (
+                    Cb_ez_x.cwiseProduct((hy_1 - hy).block(1, 0, Nym1, Nz))
+                );
 
-            // h components have an extra component past the edge of the grid
-            // make sure the D and C coefficients are set to zero at the edges because they will be updated
+                // update ez_y
+                // ez_yd = Cb_ez_y * np.diff(hx, axis=1)[1:-1, :, :]
+                // ez_y[1:-1, 1:-1, :] = (Ca_ez_y * ez_y[1:-1, 1:-1, :]) + ez_yd
+                auto ez_y_opt = ez_y.block(1, 0, Nym1, Nz);
+                ez_y_opt.noalias()  = Ca_ez_y.cwiseProduct(ez_y_opt) + (
+                    Cb_ez_y.cwiseProduct(hx.bottomRows(Nym1) - hx.topRows(Nym1))
+                );
 
-            // e components include the first index so the h-field can be updated
+                // h components have an extra component past the edge of the grid
+                // make sure the D and C coefficients are set to zero at the edges because they will be updated
 
-            // combine split components
-            ex = ex_y + ex_z;
-            ey = ey_z + ey_x;
-            ez = ez_x + ez_y;
+                // e components include the first index so the h-field can be updated
+
+                // combine split components
+                ex = ex_y + ex_z;
+                ey = ey_z + ey_x;
+                ez = ez_x + ez_y;
+            }
+
+            else
+            {
+                // ----------------- update ex -------------------------- //
+                // ex_y update
+                // ex_yd = Cb_ex_y * np.diff(hz, axis=1)[:, :, 1:-1]
+                // ex_y[:, 1:-1, 1:-1] = (Ca_ex_y * ex_y[:, 1:-1, 1:-1]) + ex_yd
+
+                auto ex_opt = ex.block(1, 1, Nym1, Nzm1) ;
+                ex_opt.noalias() = Ca_ex_y.cwiseProduct(ex_opt) + (
+                    Cb_ex_y.cwiseProduct((hz.bottomRows(Nym1) - hz.topRows(Nym1)).block(0, 1, Nym1, Nzm1)) + Cb_ex_z.cwiseProduct((hy.rightCols(Nzm1) - hy.leftCols(Nzm1)).block(1, 0, Nym1, Nzm1))
+                );
+
+                // ----------------- update ey -------------------------- //
+                // ey_z update
+                // ey_zd = Cb_ey_z * np.diff(hx, axis=2)[1:-1, :, :]
+                // ey_z[1:-1, :, 1:-1] = (Ca_ey_z * ey_z[1:-1, :, 1:-1]) + ey_zd
+                auto ey_opt = ey.block(0, 1, Ny, Nzm1);
+                ey_opt.noalias() = Ca_ey_z.cwiseProduct(ey_opt) + (
+                    Cb_ey_z.cwiseProduct(hx.rightCols(Nzm1) - hx.leftCols(Nzm1)) + Cb_ey_x.cwiseProduct((hz_1 - hz).block(0, 1, Ny, Nzm1))
+                );
+
+                // ----------------- update ez -------------------------- //
+                // ez_x update
+                // ez_xd = Cb_ez_x * np.diff(hy, axis=0)[:, 1:-1, :]
+                // ez_x[1:-1, 1:-1, :] = (Ca_ez_x * ez_x[1:-1, 1:-1, :]) + ez_xd
+                // get hy components on either side of x-slice, the hz component below ez is in the same cell,
+                auto ez_opt = ez.block(1, 0, Nym1, Nz) ;
+                ez_opt.noalias() = Ca_ez_x.cwiseProduct(ez_opt) + (
+                    Cb_ez_x.cwiseProduct((hy_1 - hy).block(1, 0, Nym1, Nz)) + Cb_ez_y.cwiseProduct(hx.bottomRows(Nym1) - hx.topRows(Nym1))
+                );
+
+            }
         }
 
         // update e-probe values
@@ -1017,9 +1062,9 @@ void SolverFDTD::solver_thread(int x_start, int x_stop, int Nt, int thread_idx)
 
             // hx coefficients
             x_offset = (x_start + x) * dx_NyNz;
-            MatrixFloatType Db_hx_y1 (Dx.Db_hx_y1 + x_offset, Ny, Nz);
+            // MatrixFloatType Db_hx_y1 (Dx.Db_hx_y1 + x_offset, Ny, Nz);
             MatrixFloatType Db_hx_y2 (Dx.Db_hx_y2 + x_offset, Ny, Nz);
-            MatrixFloatType Db_hx_z1 (Dx.Db_hx_z1 + x_offset, Ny, Nz);
+            // MatrixFloatType Db_hx_z1 (Dx.Db_hx_z1 + x_offset, Ny, Nz);
             MatrixFloatType Db_hx_z2 (Dx.Db_hx_z2 + x_offset, Ny, Nz);
 
             MatrixFloatType Da_hx_y (Dx.Da_hx_y + x_offset, Ny, Nz);
@@ -1027,9 +1072,9 @@ void SolverFDTD::solver_thread(int x_start, int x_stop, int Nt, int thread_idx)
 
             // hy coefficients
             x_offset = (x_start + x) * dy_NyNz;
-            MatrixFloatType Db_hy_z1 (Dy.Db_hy_z1 + x_offset, Nyp1, Nz);
+            // MatrixFloatType Db_hy_z1 (Dy.Db_hy_z1 + x_offset, Nyp1, Nz);
             MatrixFloatType Db_hy_z2 (Dy.Db_hy_z2 + x_offset, Nyp1, Nz);
-            MatrixFloatType Db_hy_x1 (Dy.Db_hy_x1 + x_offset, Nyp1, Nz);
+            // MatrixFloatType Db_hy_x1 (Dy.Db_hy_x1 + x_offset, Nyp1, Nz);
             MatrixFloatType Db_hy_x2 (Dy.Db_hy_x2 + x_offset, Nyp1, Nz);
 
             MatrixFloatType Da_hy_z (Dy.Da_hy_z + x_offset, Nyp1, Nz);
@@ -1037,9 +1082,9 @@ void SolverFDTD::solver_thread(int x_start, int x_stop, int Nt, int thread_idx)
 
             // hz coefficients
             x_offset = (x_start + x) * dz_NyNz;
-            MatrixFloatType Db_hz_x1 (Dz.Db_hz_x1 + x_offset, Ny, Nzp1);
+            // MatrixFloatType Db_hz_x1 (Dz.Db_hz_x1 + x_offset, Ny, Nzp1);
             MatrixFloatType Db_hz_x2 (Dz.Db_hz_x2 + x_offset, Ny, Nzp1);
-            MatrixFloatType Db_hz_y1 (Dz.Db_hz_y1 + x_offset, Ny, Nzp1);
+            // MatrixFloatType Db_hz_y1 (Dz.Db_hz_y1 + x_offset, Ny, Nzp1);
             MatrixFloatType Db_hz_y2 (Dz.Db_hz_y2 + x_offset, Ny, Nzp1);
 
             MatrixFloatType Da_hz_x (Dz.Da_hz_x + x_offset, Ny, Nzp1);
@@ -1052,55 +1097,86 @@ void SolverFDTD::solver_thread(int x_start, int x_stop, int Nt, int thread_idx)
             MatrixFloatType ey_0 (p_ey_0, Ny, Nzp1);
             MatrixFloatType ez_0 (p_ez_0, Nyp1, Nz);
 
-            // ----------------- update hx -------------------------- //
-            // hx_y update
-            // hx_yd = Db_hx_y * np.diff(ez, axis=1)
-            // hx_y = Da_hx_y * hx_y + hx_yd
-            hx_y = Da_hx_y.cwiseProduct(hx_y) + (
-                Db_hx_y2.cwiseProduct(ez.bottomRows(Ny)) - Db_hx_y1.cwiseProduct(ez.topRows(Ny))
-            );
+            if (has_pml)
+            {
+                // ----------------- update hx -------------------------- //
+                // hx_y update
+                // hx_yd = Db_hx_y * np.diff(ez, axis=1)
+                // hx_y = Da_hx_y * hx_y + hx_yd
+                hx_y.noalias() = Da_hx_y.cwiseProduct(hx_y) + (
+                    Db_hx_y2.cwiseProduct(ez.bottomRows(Ny) - ez.topRows(Ny))
+                );
 
-            // hx_z update
-            // hx_zd = Db_hx_z * np.diff(ey, axis=2)
-            // hx_z = Da_hx_z * hx_z + hx_zd
-            hx_z = Da_hx_z.cwiseProduct(hx_z) + (
-                Db_hx_z2.cwiseProduct(ey.rightCols(Nz)) - Db_hx_z1.cwiseProduct(ey.leftCols(Nz))
-            );
-            
-            // ----------------- update hy -------------------------- //
-            // hy_z update
-            // hy_zd = Db_hy_z * np.diff(ex, axis=2)
-            // hy_z = Da_hy_z * hy_z + hy_zd
-            hy_z = Da_hy_z.cwiseProduct(hy_z) + (
-                Db_hy_z2.cwiseProduct(ex.rightCols(Nz)) - Db_hy_z1.cwiseProduct(ex.leftCols(Nz))
-            );
+                // hx_z update
+                // hx_zd = Db_hx_z * np.diff(ey, axis=2)
+                // hx_z = Da_hx_z * hx_z + hx_zd
+                hx_z.noalias() = Da_hx_z.cwiseProduct(hx_z) + (
+                    Db_hx_z2.cwiseProduct(ey.rightCols(Nz) - ey.leftCols(Nz))
+                );
+                
+                // ----------------- update hy -------------------------- //
+                // hy_z update
+                // hy_zd = Db_hy_z * np.diff(ex, axis=2)
+                // hy_z = Da_hy_z * hy_z + hy_zd
+                hy_z.noalias() = Da_hy_z.cwiseProduct(hy_z) + (
+                    Db_hy_z2.cwiseProduct(ex.rightCols(Nz) - ex.leftCols(Nz))
+                );
 
-            // update hy_x
-            // hy_xd = Db_hy_x * np.diff(ez, axis=0)
-            // hy_x = Da_hy_x * hy_x + hy_xd
-            hy_x = Da_hy_x.cwiseProduct(hy_x) + (
-                Db_hy_x2.cwiseProduct(ez) - Db_hy_x1.cwiseProduct(ez_0)
-            );
+                // update hy_x
+                // hy_xd = Db_hy_x * np.diff(ez, axis=0)
+                // hy_x = Da_hy_x * hy_x + hy_xd
+                hy_x.noalias() = Da_hy_x.cwiseProduct(hy_x) + (
+                    Db_hy_x2.cwiseProduct(ez - ez_0)
+                );
 
-            // ----------------- update hz -------------------------- //
-            // hz_x update
-            // hz_xd = Db_hz_x * np.diff(ey, axis=0) 
-            // hz_x = Da_hz_x * hz_x + hz_xd
-            hz_x = Da_hz_x.cwiseProduct(hz_x) + (
-                Db_hz_x2.cwiseProduct(ey) - Db_hz_x1.cwiseProduct(ey_0)
-            );
+                // ----------------- update hz -------------------------- //
+                // hz_x update
+                // hz_xd = Db_hz_x * np.diff(ey, axis=0) 
+                // hz_x = Da_hz_x * hz_x + hz_xd
+                hz_x.noalias() = Da_hz_x.cwiseProduct(hz_x) + (
+                    Db_hz_x2.cwiseProduct(ey - ey_0)
+                );
 
-            // update hz_y
-            // hz_yd = Db_hz_y * np.diff(ex, axis=1)
-            // hz_y = Da_hz_y * hz_y + hz_yd
-            hz_y = Da_hz_y.cwiseProduct(hz_y) + (
-                Db_hz_y2.cwiseProduct(ex.bottomRows(Ny)) - Db_hz_y1.cwiseProduct(ex.topRows(Ny))
-            );
+                // update hz_y
+                // hz_yd = Db_hz_y * np.diff(ex, axis=1)
+                // hz_y = Da_hz_y * hz_y + hz_yd
+                hz_y.noalias() = Da_hz_y.cwiseProduct(hz_y) + (
+                    Db_hz_y2.cwiseProduct(ex.bottomRows(Ny) - ex.topRows(Ny))
+                );
 
-            // combine split components
-            hx = hx_y + hx_z;
-            hy = hy_z + hy_x;
-            hz = hz_x + hz_y;
+                // combine split components
+                hx = hx_y + hx_z;
+                hy = hy_z + hy_x;
+                hz = hz_x + hz_y;
+            }
+
+            else
+            {
+                // ----------------- update hx -------------------------- //
+                // hx_y update
+                // hx_yd = Db_hx_y * np.diff(ez, axis=1)
+                // hx_y = Da_hx_y * hx_y + hx_yd
+                hx.noalias() = Da_hx_y.cwiseProduct(hx) + (
+                    Db_hx_y2.cwiseProduct(ez.bottomRows(Ny) - ez.topRows(Ny)) + Db_hx_z2.cwiseProduct(ey.rightCols(Nz) - ey.leftCols(Nz))
+                );
+                
+                // ----------------- update hy -------------------------- //
+                // hy_z update
+                // hy_zd = Db_hy_z * np.diff(ex, axis=2)
+                // hy_z = Da_hy_z * hy_z + hy_zd
+                hy.noalias() = Da_hy_z.cwiseProduct(hy) + (
+                    Db_hy_z2.cwiseProduct(ex.rightCols(Nz) - ex.leftCols(Nz)) + Db_hy_x2.cwiseProduct(ez - ez_0)
+                );
+
+                // ----------------- update hz -------------------------- //
+                // hz_x update
+                // hz_xd = Db_hz_x * np.diff(ey, axis=0) 
+                // hz_x = Da_hz_x * hz_x + hz_xd
+                hz.noalias() = Da_hz_x.cwiseProduct(hz) + (
+                    Db_hz_x2.cwiseProduct(ey - ey_0) + Db_hz_y2.cwiseProduct(ex.bottomRows(Ny) - ex.topRows(Ny))
+                );
+
+            }
 
         }
 
@@ -1110,9 +1186,16 @@ void SolverFDTD::solver_thread(int x_start, int x_stop, int Nt, int thread_idx)
             // apply soft source
             if (p->is_source)
             {
-                *(p->field_s1_p) = *(p->field_s1_p) + (p->values)[n];
-                *(p->field_s2_p) = *(p->field_s2_p) + (p->values)[n];
-                *(p->field_p) = *(p->field_s1_p) + *(p->field_s2_p);
+                if (has_pml)
+                {
+                    *(p->field_s1_p) = *(p->field_s1_p) + (p->values)[n];
+                    *(p->field_s2_p) = *(p->field_s2_p) + (p->values)[n];
+                    *(p->field_p) = *(p->field_s1_p) + *(p->field_s2_p);
+                }
+                else
+                {
+                    *(p->field_p) = *(p->field_p) + 2 * (p->values)[n];
+                }
             }
             // put the resulting total voltage in the source_values array once the value is used for this
             // time step.
