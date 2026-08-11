@@ -931,18 +931,18 @@ void SolverFDTD::solver_thread(int x_start, int x_stop, int Nt, int thread_idx)
             auto hy_diff_x = (hy_1 - hy);
             auto hx_diff_y = hx.bottomRows(Nym1) - hx.topRows(Nym1);
 
-            exb.noalias() = Ca_ex_y.cwiseProduct(exb) + (
-                Cb_ex_y.cwiseProduct(hz_diff_y.block(N_pml, N_pml + 1, Ny_b -1, Nz_b -1)) + 
-                Cb_ex_z.cwiseProduct(hy_diff_z.block(N_pml + 1, N_pml, Ny_b -1, Nz_b -1))
+            exb.noalias() = Ca_ex_y.block(N_pml, N_pml, Ny_b -1, Nz_b -1).cwiseProduct(exb) + (
+                Cb_ex_y.block(N_pml, N_pml, Ny_b -1, Nz_b -1).cwiseProduct(hz_diff_y.block(N_pml, N_pml + 1, Ny_b -1, Nz_b -1)) + 
+                Cb_ex_z.block(N_pml, N_pml, Ny_b -1, Nz_b -1).cwiseProduct(hy_diff_z.block(N_pml + 1, N_pml, Ny_b -1, Nz_b -1))
             );
 
             // ----------------- update ey -------------------------- //
             // ey_z update
             // ey_zd = Cb_ey_z * np.diff(hx, axis=2)[1:-1, :, :]
             // ey_z[1:-1, :, 1:-1] = (Ca_ey_z * ey_z[1:-1, :, 1:-1]) + ey_zd
-            eyb.noalias() = Ca_ey_z.cwiseProduct(eyb) + (
-                Cb_ey_z.cwiseProduct(hx_diff_z.block(N_pml, N_pml, Ny_b, Nz_b - 1)) + 
-                Cb_ey_x.cwiseProduct(hz_diff_x.block(N_pml, N_pml + 1, Ny_b, Nz_b - 1))
+            eyb.noalias() = Ca_ey_z.block(N_pml, N_pml, Ny_b, Nz_b - 1).cwiseProduct(eyb) + (
+                Cb_ey_z.block(N_pml, N_pml, Ny_b, Nz_b - 1).cwiseProduct(hx_diff_z.block(N_pml, N_pml, Ny_b, Nz_b - 1)) + 
+                Cb_ey_x.block(N_pml, N_pml, Ny_b, Nz_b - 1).cwiseProduct(hz_diff_x.block(N_pml, N_pml + 1, Ny_b, Nz_b - 1))
             );
 
             // ----------------- update ez -------------------------- //
@@ -950,9 +950,9 @@ void SolverFDTD::solver_thread(int x_start, int x_stop, int Nt, int thread_idx)
             // ez_xd = Cb_ez_x * np.diff(hy, axis=0)[:, 1:-1, :]
             // ez_x[1:-1, 1:-1, :] = (Ca_ez_x * ez_x[1:-1, 1:-1, :]) + ez_xd
             // get hy components on either side of x-slice, the hz component below ez is in the same cell,
-            ezb.noalias() = Ca_ez_x.cwiseProduct(ezb) + (
-                Cb_ez_x.cwiseProduct(hy_diff_x.block(N_pml + 1, N_pml, Ny_b - 1, Nz_b)) + 
-                Cb_ez_y.cwiseProduct(hx_diff_y.block(N_pml, N_pml, Ny_b - 1, Nz_b))
+            ezb.noalias() = Ca_ez_x.block(N_pml, N_pml, Ny_b - 1, Nz_b).cwiseProduct(ezb) + (
+                Cb_ez_x.block(N_pml, N_pml, Ny_b - 1, Nz_b).cwiseProduct(hy_diff_x.block(N_pml + 1, N_pml, Ny_b - 1, Nz_b)) + 
+                Cb_ez_y.block(N_pml, N_pml, Ny_b - 1, Nz_b).cwiseProduct(hx_diff_y.block(N_pml, N_pml, Ny_b - 1, Nz_b))
             );
     
 
@@ -1071,6 +1071,10 @@ void SolverFDTD::solver_thread(int x_start, int x_stop, int Nt, int thread_idx)
 
             else
             {
+                auto hxb = hx.block(N_pml, N_pml, Ny_b, Nz_b) ;
+                auto hyb = hy.block(N_pml, N_pml, Ny_b, Nz_b);
+                auto hzb = hz.block(N_pml, N_pml, Ny_b, Nz_b) ;
+
                 auto ez_diff_y = ez.bottomRows(Ny) - ez.topRows(Ny);
                 auto ey_diff_z = ey.rightCols(Nz) - ey.leftCols(Nz);
                 auto ex_diff_z = ex.rightCols(Nz) - ex.leftCols(Nz);
@@ -1081,24 +1085,27 @@ void SolverFDTD::solver_thread(int x_start, int x_stop, int Nt, int thread_idx)
                 // hx_y update
                 // hx_yd = Db_hx_y * np.diff(ez, axis=1)
                 // hx_y = Da_hx_y * hx_y + hx_yd
-                hx.noalias() = Da_hx_y.cwiseProduct(hx) + (
-                    Db_hx_y2.cwiseProduct(ez_diff_y) + Db_hx_z2.cwiseProduct(ey_diff_z)
+                hx.noalias() = Da_hx_y.block(N_pml, N_pml, Ny_b, Nz_b).cwiseProduct(hx) + (
+                    Db_hx_y2.block(N_pml, N_pml, Ny_b, Nz_b).cwiseProduct(ez_diff_y) + 
+                    Db_hx_z2.block(N_pml, N_pml, Ny_b, Nz_b).cwiseProduct(ey_diff_z)
                 );
                 
                 // ----------------- update hy -------------------------- //
                 // hy_z update
                 // hy_zd = Db_hy_z * np.diff(ex, axis=2)
                 // hy_z = Da_hy_z * hy_z + hy_zd
-                hy.noalias() = Da_hy_z.cwiseProduct(hy) + (
-                    Db_hy_z2.cwiseProduct(ex_diff_z) + Db_hy_x2.cwiseProduct(ez_diff_x)
+                hy.noalias() = Da_hy_z.block(N_pml, N_pml, Ny_b, Nz_b).cwiseProduct(hy) + (
+                    Db_hy_z2.block(N_pml, N_pml, Ny_b, Nz_b).cwiseProduct(ex_diff_z) + 
+                    Db_hy_x2.block(N_pml, N_pml, Ny_b, Nz_b).cwiseProduct(ez_diff_x)
                 );
 
                 // ----------------- update hz -------------------------- //
                 // hz_x update
                 // hz_xd = Db_hz_x * np.diff(ey, axis=0) 
                 // hz_x = Da_hz_x * hz_x + hz_xd
-                hz.noalias() = Da_hz_x.cwiseProduct(hz) + (
-                    Db_hz_x2.cwiseProduct(ey_diff_x) + Db_hz_y2.cwiseProduct(ex_diff_y)
+                hz.noalias() = Da_hz_x.block(N_pml, N_pml, Ny_b, Nz_b).cwiseProduct(hz) + (
+                    Db_hz_x2.block(N_pml, N_pml, Ny_b, Nz_b).cwiseProduct(ey_diff_x) + 
+                    Db_hz_y2.block(N_pml, N_pml, Ny_b, Nz_b).cwiseProduct(ex_diff_y)
                 );
 
             }
