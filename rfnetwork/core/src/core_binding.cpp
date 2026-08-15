@@ -349,6 +349,8 @@ static PyObject * cascade_self_ndata_bind(PyObject *self, PyObject *args)
 
 static PyObject* solver_run(PyObject* self, PyObject* args) {
 
+    PyObject *fields;
+    PyObject *fields_pml;
     PyObject *coefficients;
     PyObject *probes;
     PyObject *monitors;
@@ -358,13 +360,24 @@ static PyObject* solver_run(PyObject* self, PyObject* args) {
     int Ny;
     int Nz;
     int Nt;
+    int N_pml;
     int n_threads;
     int update_interval;
 
     // Parse arguments: expecting a single Python object
     if (!PyArg_ParseTuple(
-        args, "OOOOIIIIII", &coefficients, &probes, &monitors, &mem, &Nx, &Ny, &Nz, &Nt, &n_threads, &update_interval
+        args, "OOOOOIIIIIII", &fields, &fields_pml, &coefficients, &probes, &monitors, &Nx, &Ny, &Nz, &Nt, &N_pml, &n_threads, &update_interval
     )) {
+        return PyLong_FromLong(1);
+    }
+
+    if (!PyDict_Check(fields)) {
+        PyErr_SetString(PyExc_TypeError, "Expected a fields dictionary");
+        return PyLong_FromLong(1);
+    }
+
+    if (!PyDict_Check(fields_pml)) {
+        PyErr_SetString(PyExc_TypeError, "Expected a fields_pml dictionary");
         return PyLong_FromLong(1);
     }
 
@@ -384,11 +397,22 @@ static PyObject* solver_run(PyObject* self, PyObject* args) {
     }
 
     SolverFDTD s;
-    s.solver_init_fields(mem, coefficients, Nx, Ny, Nz, 0);
-    s.solver_init_monitors(monitors, Nt, 0);
-    s.solver_init_probes(probes, Nt);
 
-    s.solver_run(Nt, n_threads, update_interval);
+    try 
+    {
+        s.solver_init_fields(fields, fields_pml, coefficients, Nx, Ny, Nz, N_pml, 0);
+        s.solver_init_monitors(monitors, Nt, 0);
+        s.solver_init_probes(probes, Nt);
+
+        s.solver_run(Nt, n_threads, update_interval);
+    }
+    
+    catch (const std::exception& e) {
+        PyErr_SetString(PyExc_RuntimeError, e.what());
+        return NULL;
+    }
+
+
 
     return PyLong_FromLong(0);
 }

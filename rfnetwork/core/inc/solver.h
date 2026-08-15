@@ -78,6 +78,35 @@ struct Coeff_Hz {
     float * Db_hz_y2;
 };
 
+struct Fields_PML {
+    float * ex_y;
+    float * ex_z;
+
+    float * ey_z;
+    float * ey_x;
+
+    float * ez_x;
+    float * ez_y;
+
+    float * hx_y;
+    float * hx_z;
+    
+    float * hy_z;
+    float * hy_x;
+
+    float * hz_x;
+    float * hz_y;
+};
+
+struct Fields {
+    float * ex;
+    float * ey;
+    float * ez;
+    float * hx;
+    float * hy; 
+    float * hz;
+};
+
 struct Monitor {
     char * values;
     std::complex<float> * dtft_phase;
@@ -125,6 +154,9 @@ private:
     Coeff_Hy Dy;
     Coeff_Hz Dz;
 
+    Fields_PML fields_pml[3][2];
+    Fields fields;
+
     Monitor monitors[MAX_MONITORS];
     int n_monitors;
 
@@ -153,7 +185,10 @@ private:
     int Ny;
     int Nz;
 
-    mbuffer_t m_pool{NULL, NULL, 0};
+    // number of pml cells
+    int N_pml;
+
+    // mbuffer_t m_pool{NULL, NULL, 0};
 
     float * mbuffer_allocate(uint64_t size);
 
@@ -165,7 +200,7 @@ private:
 
 public:
     SolverFDTD();          // constructor
-    int solver_init_fields(PyObject * py_mem, PyObject * coefficients, int Nx, int Ny, int Nz, int gpu);
+    int solver_init_fields(PyObject * fields, PyObject * fields_pml, PyObject * coefficients, int Nx, int Ny, int Nz, int N_pml, int gpu);
     int solver_init_monitors(PyObject * py_monitors, int Nt, int gpu);
     int solver_init_probes(PyObject * py_probes, int Nt);
 

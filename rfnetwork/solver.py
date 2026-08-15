@@ -1442,10 +1442,12 @@ class FDTD_Solver():
         dx_h, dy_h, dz_h = [conv.m_in(d).astype(dtype_) for d in self.dh_cells]
         Nx, Ny, Nz = len(dx), len(dy), len(dz)
 
+        # inverse of the cell widths, measured from cell edge to edge.
         dx_inv = 1 / dx[:, None, None]
         dy_inv = 1 / dy[None, :, None]
         dz_inv = 1 / dz[None, None, :]
 
+        # cell widths as viewed from the components on the cell edges, measured from cell center to cell center
         dx_h_inv = 1 / dx_h[:, None, None]
         dy_h_inv = 1 / dy_h[None, :, None]
         dz_h_inv = 1 / dz_h[None, None, :]
@@ -1453,9 +1455,9 @@ class FDTD_Solver():
         # dx, dy, dz with an extra component for the last component at the edge of the grid that has no neighboring
         # cell.
         # This also ensures the fields remain at 0 at the end of the grid (PEC boundary)
-        dx1_h_inv = np.concatenate([dx_h_inv, [[[0]]]], axis=0)
-        dy1_h_inv = np.concatenate([dy_h_inv, [[[0]]]], axis=1)
-        dz1_h_inv = np.concatenate([dz_h_inv, [[[0]]]], axis=2)
+        # dx1_h_inv = np.concatenate([dx_h_inv, [[[0]]]], axis=0)
+        # dy1_h_inv = np.concatenate([dy_h_inv, [[[0]]]], axis=1)
+        # dz1_h_inv = np.concatenate([dz_h_inv, [[[0]]]], axis=2)
 
         # cpu solver drops the coefficients at the edges of the grid, gpu does not so that all fields and 
         # coefficents are the same shape. Equally sized arrays don't work as well for the CPU because an extra
@@ -1465,29 +1467,29 @@ class FDTD_Solver():
         hs = 1 if gpu else 0
 
 
-        # to avoid inefficiently indexing the coefficients at every update, the ends of the coefficients are indexed
-        # out so they can be directly multiplied with the difference operations in the update equations. 
         # The grid in the C++ solver is parallelized along x, each x cell is defined as the Ex, Hz, Hy components, and
         # the Ey, Ez, and Hx components at the right end of the cell. The Ey, Ez, and Hx components at the left end of
         # the grid are not included in any cell and are not updated (PEC boundary.) 
+        # np.pad is used to add extra zero widths for the boundary elements with no neighboring cell. These
+        # components are not updated so the zero is arbitrary.
         coefficients = dict(
             # ex coefficients, edges along y and z do not get updated
-            Ca_ex_y = self.Ca["ex_y"][:, 1:end, 1:end],
-            Ca_ex_z = self.Ca["ex_z"][:, 1:end, 1:end],
-            Cb_ex_y = self.Cb["ex_y"][:, 1:end, 1:end] * dy1_h_inv[:, :end],
-            Cb_ex_z = -self.Cb["ex_z"][:, 1:end, 1:end] * dz1_h_inv[..., :end],
+            Ca_ex_y = self.Ca["ex_y"],
+            Ca_ex_z = self.Ca["ex_z"],
+            Cb_ex_y = self.Cb["ex_y"] * np.pad(dy_h_inv, ((0, 0), (1, 1), (0, 0))), 
+            Cb_ex_z = -self.Cb["ex_z"] * np.pad(dz_h_inv, ((0, 0), (0, 0), (1, 1))),
 
             # ey coefficients, edges along x and z do not get updated
-            Ca_ey_z = self.Ca["ey_z"][1:, :, 1:end],
-            Ca_ey_x = self.Ca["ey_x"][1:, :, 1:end],
-            Cb_ey_z = self.Cb["ey_z"][1:, :, 1:end] * dz1_h_inv[..., :end],
-            Cb_ey_x = -self.Cb["ey_x"][1:, :, 1:end] * dx1_h_inv,
+            Ca_ey_z = self.Ca["ey_z"][1:],
+            Ca_ey_x = self.Ca["ey_x"][1:],
+            Cb_ey_z = self.Cb["ey_z"][1:] * np.pad(dz_h_inv, ((0, 0), (0, 0), (1, 1))),
+            Cb_ey_x = -self.Cb["ey_x"][1:] * np.pad(dx_h_inv, ((0, 1), (0, 0), (0, 0))),
 
             # ez coefficients, edges along x and y do not get updated
-            Ca_ez_x = self.Ca["ez_x"][1:, 1:end, :],
-            Ca_ez_y = self.Ca["ez_y"][1:, 1:end, :],
-            Cb_ez_x = self.Cb["ez_x"][1:, 1:end, :] * dx1_h_inv,
-            Cb_ez_y = -self.Cb["ez_y"][1:, 1:end, :] * dy1_h_inv[:, :end],
+            Ca_ez_x = self.Ca["ez_x"][1:],
+            Ca_ez_y = self.Ca["ez_y"][1:],
+            Cb_ez_x = self.Cb["ez_x"][1:] * np.pad(dx_h_inv, ((0, 1), (0, 0), (0, 0))),
+            Cb_ez_y = -self.Cb["ez_y"][1:] * np.pad(dy_h_inv, ((0, 0), (1, 1), (0, 0))),
 
             # hx coefficients
             Da_hx_y = self.Da["hx_y"][1:],
@@ -1499,39 +1501,46 @@ class FDTD_Solver():
             Db_hx_z2 = self.Db["hx_z2"][1:] * dz_inv,
 
             # hy coefficients
-            Da_hy_z = self.Da["hy_z"][:, hs:],
-            Da_hy_x = self.Da["hy_x"][:, hs:],
+            Da_hy_z = self.Da["hy_z"],
+            Da_hy_x = self.Da["hy_x"],
             
-            Db_hy_z1 = -self.Db["hy_z1"][:, hs:] * dz_inv,
-            Db_hy_z2 = -self.Db["hy_z2"][:, hs:] * dz_inv,
-            Db_hy_x1 = self.Db["hy_x1"][:, hs:] * dx_inv,
-            Db_hy_x2 = self.Db["hy_x2"][:, hs:] * dx_inv,
+            Db_hy_z1 = -self.Db["hy_z1"] * dz_inv,
+            Db_hy_z2 = -self.Db["hy_z2"] * dz_inv,
+            Db_hy_x1 = self.Db["hy_x1"] * dx_inv,
+            Db_hy_x2 = self.Db["hy_x2"] * dx_inv,
 
             # hz coefficients
-            Da_hz_x = self.Da["hz_x"][:, :, hs:],
-            Da_hz_y = self.Da["hz_y"][:, :, hs:],
+            Da_hz_x = self.Da["hz_x"],
+            Da_hz_y = self.Da["hz_y"],
             
-            Db_hz_x1 = -self.Db["hz_x1"][:, :, hs:] * dx_inv,
-            Db_hz_x2 = -self.Db["hz_x2"][:, :, hs:] * dx_inv,
-            Db_hz_y1 = self.Db["hz_y1"][:, :, hs:] * dy_inv,
-            Db_hz_y2 = self.Db["hz_y2"][:, :, hs:] * dy_inv,
+            Db_hz_x1 = -self.Db["hz_x1"] * dx_inv,
+            Db_hz_x2 = -self.Db["hz_x2"] * dx_inv,
+            Db_hz_y1 = self.Db["hz_y1"] * dy_inv,
+            Db_hz_y2 = self.Db["hz_y2"] * dy_inv,
         )
 
+        # initialize field arrays
+        fields = {k: np.zeros(self.fshape[k], dtype=dtype_) for k in self.fshape.keys()}
 
-        # copy arrays to row-ordered arrays in the solver dtype
-        for k in coefficients.keys():
-            coefficients[k] = np.array(coefficients[k], order="C", dtype=dtype_)
+        # drop components on the edge of the x-axis
+        for k in ("ey", "ez", "hx"):
+            fields[k] = fields[k][1:]
 
-        temp_mem_size = 0
-        for s in self.fshape.values():
-            # three copies of each field, two for the split fields and one combined field
-            # the first components at x=0 are not updated and not included in the memory buffer
-            temp_mem_size += 3 * np.prod((Nx,) + s[1:])
+        # initialize split fields in PML regions
+        fields_pml = dict()
+        f_split_names = ("ex_y", "ex_z", "ey_z", "ey_x", "ez_x", "ez_y", "hx_y", "hx_z", "hy_z", "hy_x", "hz_x", "hz_y")
 
-        # add a buffer for each thread, and the endpoints for the edge components
-        temp_mem_size += (4 * (Ny + 1) * (Nz + 1)) * n_threads * 8
-
-        mem = np.zeros(temp_mem_size, dtype=dtype_)
+        for i, axis in enumerate(["x", "y", "z"]):
+            fields_pml[axis] = dict()
+            for f_name in f_split_names:
+                # update field shape along axis to be the pml width
+                f_shape = list(self.fshape[f_name[:2]])
+                f_shape[i] = self._n_pml
+                # add two field arrays for each side of the axis
+                fields_pml[axis][f_name] = [
+                    np.zeros(tuple(f_shape), dtype=dtype_),
+                    np.zeros(tuple(f_shape), dtype=dtype_)
+                ]
 
         probes = []
         # initialize sources. Sources act like probes, but the values are input to the 
@@ -1638,7 +1647,8 @@ class FDTD_Solver():
         else:
             solver_func = core.core_func.solver_run
 
-        solver_func(coefficients, probes, monitors, mem, Nx, Ny, Nz, Nt, n_threads, update_interval)
+        ret_val = solver_func(fields, fields_pml, coefficients, probes, monitors, Nx, Ny, Nz, Nt, 0, n_threads, update_interval)
+        print(ret_val)
 
         if show_progress:
             sys.stdout.write(f"\rDone in {time.time() - stime:.3f}s" + (" " * 20) + "\n")
