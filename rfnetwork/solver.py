@@ -1523,8 +1523,8 @@ class FDTD_Solver():
         fields = {k: np.zeros(self.fshape[k], dtype=dtype_) for k in self.fshape.keys()}
 
         # drop components on the edge of the x-axis
-        for k in ("ey", "ez", "hx"):
-            fields[k] = fields[k][1:]
+        # for k in ("ey", "ez", "hx"):
+        #     fields[k] = fields[k][1:]
 
         # initialize split fields in PML regions
         fields_pml = dict()
