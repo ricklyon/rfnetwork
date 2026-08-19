@@ -1036,7 +1036,7 @@ void SolverFDTD::solver_thread(int x_start, int x_stop, int Nt, int thread_idx)
             // apply soft source
             if (p->is_source)
             {
-                *(p->field_p) = *(p->field_p) + 2 * (p->values)[n];
+                *(p->field_p) = *(p->field_p) + (p->values)[n];
             }
             // put the resulting total voltage in the source_values array once the value is used for this
             // time step.
