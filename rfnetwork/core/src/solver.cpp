@@ -760,20 +760,20 @@ void SolverFDTD::solver_thread(int x_start, int x_stop, int Nt, int thread_idx)
             // ey
             else if ((p->field_type) == EY)
             {
-                x_offset = ((px - x_start + 1) * ey_NyNz) + ((py) * Nzp1) + (pz + 1);
+                x_offset = ((px - x_start) * ey_NyNz) + ((py) * Nzp1) + (pz + 1);
                 e_probes.push_back(p);
             }
             // ez
             else if ((p->field_type) == EZ)
             {
-                x_offset = ((px - x_start + 1) * ez_NyNz) + ((py + 1) * Nz) + (pz);
+                x_offset = ((px - x_start) * ez_NyNz) + ((py + 1) * Nz) + (pz);
                 e_probes.push_back(p);
             }
             // add h-field probe
             // hx
             else if ((p->field_type) == HX)
             {
-                x_offset = ((px - x_start + 1) * hx_NyNz) + ((py) * Nz) + (pz);
+                x_offset = ((px - x_start) * hx_NyNz) + ((py) * Nz) + (pz);
                 h_probes.push_back(p);
             }
             else if ((p->field_type) == HY)
@@ -930,7 +930,7 @@ void SolverFDTD::solver_thread(int x_start, int x_stop, int Nt, int thread_idx)
             // apply soft source
             if (p->is_source)
             {
-                *(p->field_p) = *(p->field_p) + 2 * (p->values)[n];
+                *(p->field_p) = *(p->field_p) + (p->values)[n];
             }
 
             // update probes
