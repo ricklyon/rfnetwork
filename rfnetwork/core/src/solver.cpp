@@ -351,8 +351,6 @@ int SolverFDTD::solver_init_fields(PyObject * py_fields, PyObject * py_fields_pm
 
     }
 
-    std::cout << "init fields done\n";
-
     return 0;
 }
 
@@ -556,12 +554,13 @@ int SolverFDTD::solver_run(int Nt, int n_th, int update_interval)
     }
 
     // number of x slices computed by each thread
-    int n_batch = Nx / n_threads;
+    // skip first and last cells (used only as all zero dummy cells)
+    int n_batch = (Nx - 2) / n_threads;
     // remainder of batch size
-    int r_batch = Nx % n_threads;
+    int r_batch = (Nx - 2) % n_threads;
 
-    int x_start_th = 0;
-    int x_stop_th = 0;
+    int x_start_th = 1;
+    int x_stop_th = 1;
 
     // start controller thread
     std::thread control_th = std::thread(&SolverFDTD::solver_controller, this, Nt, n_threads, update_interval);
@@ -821,116 +820,128 @@ void SolverFDTD::solver_thread(int x_start, int x_stop, int Nt, int thread_idx)
         cv_th.wait(lock, [this] { return th_init_done; });
     }
 
+    int TILE_Y = 32;
+    int Nyb;
+
+
     // main time stepping loop
     for (int n = 0; n < Nt; n++)
     {
+
         // operate on a single slice of the field on the x axis
         for (int x = 0; x < Nx_th; x++)
         {   
-            x_offset = x * ex_NyNz;
-            MatrixFloatType ex   (p_ex   + x_offset, Nyp1, Nzp1);
-            
-            x_offset = x * ey_NyNz;
-            MatrixFloatType ey   (p_ey   + x_offset, Ny, Nzp1);
-            
-            x_offset = x * ez_NyNz;
-            MatrixFloatType ez   (p_ez   + x_offset, Nyp1, Nz);
+            // break y axis up into blocks, skip buffer cells on edges
+            for (int y = 1; y < (Ny - 1); y += TILE_Y) {
+                
+                Nyb = std::min(TILE_Y, (Ny - 1) - y);
+                // std::cout << y << " Nyb " << Nyb << "\n";
+                    
+                // e-field updates inside block, start on second cell along y
+                x_offset = (x * ex_NyNz) + ((y + 1) * Nzp1);
+                MatrixFloatType ex   (p_ex   + x_offset, Nyb, Nzp1);
 
-            // h-fields
-            MatrixFloatType hx   (p_hx   + (x * hx_NyNz), Ny, Nz);
-            MatrixFloatType hy   (p_hy   + (x * hy_NyNz), Nyp1, Nz);
-            MatrixFloatType hz   (p_hz   + (x * hz_NyNz), Ny, Nzp1);
+                x_offset = (x_start + x) * (ex_NyNz) + ((y + 1) * Nzp1);
+                MatrixFloatType Cb_ex_y (Cx.Cb_ex_y + x_offset, Nyb, Nzp1);
+                MatrixFloatType Cb_ex_z (Cx.Cb_ex_z + x_offset, Nyb, Nzp1);
+                MatrixFloatType Ca_ex (Cx.Ca_ex_y + x_offset, Nyb, Nzp1);
 
-            // ex coefficients
-            x_offset = (x_start + x) * (ex_NyNz);
-            MatrixFloatType Cb_ex_y (Cx.Cb_ex_y + x_offset, Nyp1, Nzp1);
-            MatrixFloatType Cb_ex_z (Cx.Cb_ex_z + x_offset, Nyp1, Nzp1);
-            MatrixFloatType Ca_ex (Cx.Ca_ex_y + x_offset, Nyp1, Nzp1);
+                x_offset = (x * ey_NyNz) + ((y) * Nzp1);
+                MatrixFloatType ey   (p_ey   + x_offset, Nyb, Nzp1);
 
-            // ey coefficients
-            x_offset = (x_start + x) * (ey_NyNz);
-            MatrixFloatType Cb_ey_z (Cy.Cb_ey_z + x_offset, Ny, Nzp1);
-            MatrixFloatType Cb_ey_x (Cy.Cb_ey_x + x_offset, Ny, Nzp1);
-            MatrixFloatType Ca_ey (Cy.Ca_ey_z + x_offset, Ny, Nzp1);
-            
-            // ez coefficients
-            x_offset = (x_start + x) * (ez_NyNz);
-            MatrixFloatType Cb_ez_x (Cz.Cb_ez_x + x_offset, Nyp1, Nz);
-            MatrixFloatType Cb_ez_y (Cz.Cb_ez_y + x_offset, Nyp1, Nz);
-            MatrixFloatType Ca_ez (Cz.Ca_ez_x + x_offset, Nyp1, Nz);
+                x_offset = (x_start + x) * (ey_NyNz)  + ((y) * Nzp1);
+                MatrixFloatType Cb_ey_z (Cy.Cb_ey_z + x_offset, Nyb, Nzp1);
+                MatrixFloatType Cb_ey_x (Cy.Cb_ey_x + x_offset, Nyb, Nzp1);
+                MatrixFloatType Ca_ey (Cy.Ca_ey_z + x_offset, Nyb, Nzp1);
 
-            // next cell components. Dummy cells provide all zero components for the threads at the end points
-            // of the grid
-            
-            
-            
-            
+                x_offset = (x * ez_NyNz) + ((y + 1) * Nz);
+                MatrixFloatType ez   (p_ez   + x_offset, Nyb, Nz);
 
-            // it helps to use N_pml=0 to follow the indices here
-            // auto ex_opt = ex.block(1, 1, Nym1, Nzm1) ;
-            
-            // e-field values in the bulk region (excludes the PML)
-            auto exb = ex.block(N_pml + 1, N_pml + 1, Ny_b -1, Nz_b -1) ;
-            auto eyb = ey.block(N_pml, N_pml + 1, Ny_b, Nz_b - 1);
-            auto ezb = ez.block(N_pml + 1, N_pml, Ny_b - 1, Nz_b) ;
+                x_offset = (x_start + x) * (ez_NyNz) + ((y + 1) * Nz);
+                MatrixFloatType Cb_ez_x (Cz.Cb_ez_x + x_offset, Nyb, Nz);
+                MatrixFloatType Cb_ez_y (Cz.Cb_ez_y + x_offset, Nyb, Nz);
+                MatrixFloatType Ca_ez (Cz.Ca_ez_x + x_offset, Nyb, Nz);
 
-            // compute difference terms across the entire grid, including PML
-            auto hz_diff_y = hz.bottomRows(Nym1) - hz.topRows(Nym1);
-            auto hy_diff_z = hy.rightCols(Nzm1) - hy.leftCols(Nzm1);
-            auto hx_diff_z = hx.rightCols(Nzm1) - hx.leftCols(Nzm1);
-            auto hx_diff_y = hx.bottomRows(Nym1) - hx.topRows(Nym1);
+                // h-fields
+                MatrixFloatType hx   (p_hx   + (x * hx_NyNz + (y * Nz)), Nyb+1, Nz);
+                MatrixFloatType hy   (p_hy   + (x * hy_NyNz + ((y + 1) * Nz)), Nyb, Nz);
+                MatrixFloatType hz   (p_hz   + (x * hz_NyNz + (y * Nzp1)), Nyb+1, Nzp1);
 
-            // ----------------- update ex -------------------------- //
-            // ex_y update
-            // ex_yd = Cb_ex_y * np.diff(hz, axis=1)[:, :, 1:-1]
-            // ex_y[:, 1:-1, 1:-1] = (Ca_ex_y * ex_y[:, 1:-1, 1:-1]) + ex_yd
-            exb.noalias() = Ca_ex.block(N_pml + 1, N_pml + 1, Ny_b -1, Nz_b -1).cwiseProduct(exb) + (
-                Cb_ex_y.block(N_pml + 1, N_pml + 1, Ny_b -1, Nz_b -1).cwiseProduct(hz_diff_y.block(N_pml, N_pml + 1, Ny_b -1, Nz_b -1)) + 
-                Cb_ex_z.block(N_pml + 1, N_pml + 1, Ny_b -1, Nz_b -1).cwiseProduct(hy_diff_z.block(N_pml + 1, N_pml, Ny_b -1, Nz_b -1))
-            );
+                // it helps to use N_pml=0 to follow the indices here
+                // auto ex_opt = ex.block(1, 1, Nym1, Nzm1) ;
+                
+                // e-field values in the bulk region (excludes the PML)
+                auto exb = ex.block(0, 1, Nyb, Nz_b -1);
+                auto eyb = ey.block(0, 1, Nyb, Nz_b - 1);
+                auto ezb = ez.block(0, 0, Nyb, Nz_b) ;
 
-            // ----------------- update ey -------------------------- //
-            if ((x + x_start) < (Nx - 1))
-            {
-                p_hz_1 = p_hz + ((x + 1) * hz_NyNz);
-                MatrixFloatType hz_1 (p_hz_1, Ny, Nzp1);
+                // compute difference terms across the entire grid, including PML
+                auto hz_diff_y = hz.bottomRows(Nyb) - hz.topRows(Nyb);
+                auto hy_diff_z = hy.rightCols(Nzm1) - hy.leftCols(Nzm1);
+                auto hx_diff_z = hx.rightCols(Nzm1) - hx.leftCols(Nzm1);
+                auto hx_diff_y = hx.bottomRows(Nyb) - hx.topRows(Nyb);
+
+                // std::cout << "exb: " << exb.rows() << "x" << exb.cols() << std::endl;
+                // std::cout << "exb: " << Ca_ex.block(0, 1, Nyb, Nz_b -1).rows() << "x" << Ca_ex.block(0, 1, Nyb, Nz_b -1).cols() << std::endl;
+
+                // ----------------- update ex -------------------------- //
+                // ex_y update
+                // ex_yd = Cb_ex_y * np.diff(hz, axis=1)[:, :, 1:-1]
+                // ex_y[:, 1:-1, 1:-1] = (Ca_ex_y * ex_y[:, 1:-1, 1:-1]) + ex_yd
+                exb.noalias() = Ca_ex.block(0, 1, Nyb, Nz_b -1).cwiseProduct(exb) + (
+                    Cb_ex_y.block(0, N_pml + 1, Nyb, Nz_b -1).cwiseProduct(hz_diff_y.block(0, N_pml + 1, Nyb, Nz_b -1)) + 
+                    Cb_ex_z.block(0, N_pml + 1, Nyb, Nz_b -1).cwiseProduct(hy_diff_z.block(0, N_pml, Nyb, Nz_b -1))
+                );
+
+                // ----------------- update ey -------------------------- //
+                p_hz_1 = p_hz + ((x + 1) * hz_NyNz + (y) * Nzp1);
+                MatrixFloatType hz_1 (p_hz_1, Nyb, Nzp1);
                 auto hz_diff_x = (hz_1 - hz);
 
                 // ey_z update
                 // ey_zd = Cb_ey_z * np.diff(hx, axis=2)[1:-1, :, :]
                 // ey_z[1:-1, :, 1:-1] = (Ca_ey_z * ey_z[1:-1, :, 1:-1]) + ey_zd
-                eyb.noalias() = Ca_ey.block(N_pml, N_pml + 1, Ny_b, Nz_b - 1).cwiseProduct(eyb) + (
-                    Cb_ey_z.block(N_pml, N_pml + 1, Ny_b, Nz_b - 1).cwiseProduct(hx_diff_z.block(N_pml, N_pml, Ny_b, Nz_b - 1)) + 
-                    Cb_ey_x.block(N_pml, N_pml + 1, Ny_b, Nz_b - 1).cwiseProduct(hz_diff_x.block(N_pml, N_pml + 1, Ny_b, Nz_b - 1))
+                eyb.noalias() = Ca_ey.block(0, N_pml + 1, Nyb, Nz_b - 1).cwiseProduct(eyb) + (
+                    Cb_ey_z.block(0, N_pml + 1, Nyb, Nz_b - 1).cwiseProduct(hx_diff_z.block(0, N_pml, Nyb, Nz_b - 1)) + 
+                    Cb_ey_x.block(0, N_pml + 1, Nyb, Nz_b - 1).cwiseProduct(hz_diff_x.block(0, N_pml + 1, Nyb, Nz_b - 1))
                 );
-            }
+            
 
-            // // ----------------- update ez -------------------------- //
-            if ((x + x_start) < (Nx - 1))
-            {
-                p_hy_1 = p_hy + ((x + 1) * hy_NyNz);
-                MatrixFloatType hy_1 (p_hy_1, Nyp1, Nz);
+                // // ----------------- update ez -------------------------- //
+                p_hy_1 = p_hy + ((x + 1) * hy_NyNz + ((y + 1) * Nz));
+                MatrixFloatType hy_1 (p_hy_1, Nyb, Nz);
                 auto hy_diff_x = (hy_1 - hy);
 
                 // ez_x update
                 // ez_xd = Cb_ez_x * np.diff(hy, axis=0)[:, 1:-1, :]
                 // ez_x[1:-1, 1:-1, :] = (Ca_ez_x * ez_x[1:-1, 1:-1, :]) + ez_xd
                 // get hy components on either side of x-slice, the hz component below ez is in the same cell,
-                ezb.noalias() = Ca_ez.block(N_pml + 1, N_pml, Ny_b - 1, Nz_b).cwiseProduct(ezb) + (
-                    Cb_ez_x.block(N_pml + 1, N_pml, Ny_b - 1, Nz_b).cwiseProduct(hy_diff_x.block(N_pml + 1, N_pml, Ny_b - 1, Nz_b)) + 
-                    Cb_ez_y.block(N_pml + 1, N_pml, Ny_b - 1, Nz_b).cwiseProduct(hx_diff_y.block(N_pml, N_pml, Ny_b - 1, Nz_b))
+                ezb.noalias() = Ca_ez.block(0, N_pml, Nyb, Nz_b).cwiseProduct(ezb) + (
+                    Cb_ez_x.block(0, N_pml, Nyb, Nz_b).cwiseProduct(hy_diff_x.block(0, N_pml, Nyb, Nz_b)) + 
+                    Cb_ez_y.block(0, N_pml, Nyb, Nz_b).cwiseProduct(hx_diff_y.block(0, N_pml, Nyb, Nz_b))
                 );
+                
+
+
+
             }
+         }
 
 
-        }
+
+
+
+
+            // next cell components. Dummy cells provide all zero components for the threads at the end points
+            // of the grid
+            
 
         // update e-probe values
         for (Probe * p : e_probes) {
             // apply soft source
             if (p->is_source)
             {
-                *(p->field_p) = *(p->field_p) + (p->values)[n];
+                *(p->field_p) = *(p->field_p) + 2 * (p->values)[n];
             }
 
             // update probes
@@ -955,78 +966,83 @@ void SolverFDTD::solver_thread(int x_start, int x_stop, int Nt, int thread_idx)
         // h-updates
         for (int x = 0; x < Nx_th; x++)
         {   
-            x_offset = x * hx_NyNz;
-            MatrixFloatType hx   (p_hx   + x_offset, Ny, Nz);
+            // break y axis up into blocks, skip buffer cells on edges
+            for (int y = 1; y < (Ny - 1); y += TILE_Y) {
+                
+                Nyb = std::min(TILE_Y, (Ny - 1) - y);
+                
+                // hx coefficients
+                x_offset = x * hx_NyNz + ((y) * Nz);
+                MatrixFloatType hx   (p_hx   + x_offset, Nyb, Nz);
 
-            x_offset = x * hy_NyNz;
-            MatrixFloatType hy   (p_hy   + x_offset, Nyp1, Nz);
+                x_offset = (x_start + x) * hx_NyNz + ((y) * Nz);
+                MatrixFloatType Db_hx_y (Dx.Db_hx_y1 + x_offset, Nyb, Nz);
+                MatrixFloatType Db_hx_z (Dx.Db_hx_z1 + x_offset, Nyb, Nz);
+                MatrixFloatType Da_hx (Dx.Da_hx_y + x_offset, Nyb, Nz);
 
-            x_offset = x * hz_NyNz;
-            MatrixFloatType hz   (p_hz   + x_offset, Ny, Nzp1);
+                // hy coefficients
+                x_offset = x * hy_NyNz + ((y + 1) * Nz);
+                MatrixFloatType hy   (p_hy   + x_offset, Nyb, Nz);
 
-            // e-fields 
-            MatrixFloatType ex   (p_ex   + (x * ex_NyNz), Nyp1, Nzp1);
-            MatrixFloatType ey   (p_ey   + (x * ey_NyNz), Ny, Nzp1);
-            MatrixFloatType ez   (p_ez   + (x * ez_NyNz), Nyp1, Nz);
+                x_offset = (x_start + x) * hy_NyNz + ((y + 1) * Nz);
+                MatrixFloatType Db_hy_z (Dy.Db_hy_z1 + x_offset, Nyb, Nz);
+                MatrixFloatType Db_hy_x (Dy.Db_hy_x1 + x_offset, Nyb, Nz);
+                MatrixFloatType Da_hy (Dy.Da_hy_z + x_offset, Nyb, Nz);
 
-            // hx coefficients
-            x_offset = (x_start + x) * hx_NyNz;
-            MatrixFloatType Db_hx_y (Dx.Db_hx_y1 + x_offset, Ny, Nz);
-            MatrixFloatType Db_hx_z (Dx.Db_hx_z1 + x_offset, Ny, Nz);
-            MatrixFloatType Da_hx (Dx.Da_hx_y + x_offset, Ny, Nz);
+                // hz coefficients
+                x_offset = x * hz_NyNz + ((y) * Nzp1);
+                MatrixFloatType hz   (p_hz   + x_offset, Nyb, Nzp1);
 
-            // hy coefficients
-            x_offset = (x_start + x) * hy_NyNz;
-            MatrixFloatType Db_hy_z (Dy.Db_hy_z1 + x_offset, Nyp1, Nz);
-            MatrixFloatType Db_hy_x (Dy.Db_hy_x1 + x_offset, Nyp1, Nz);
-            MatrixFloatType Da_hy (Dy.Da_hy_z + x_offset, Nyp1, Nz);
+                x_offset = (x_start + x) * hz_NyNz + ((y) * Nzp1);
+                MatrixFloatType Db_hz_x (Dz.Db_hz_x1 + x_offset, Nyb, Nzp1);
+                MatrixFloatType Db_hz_y (Dz.Db_hz_y1 + x_offset, Nyb, Nzp1);
+                MatrixFloatType Da_hz (Dz.Da_hz_x + x_offset, Nyb, Nzp1);
 
-            // hz coefficients
-            x_offset = (x_start + x) * hz_NyNz;
-            MatrixFloatType Db_hz_x (Dz.Db_hz_x1 + x_offset, Ny, Nzp1);
-            MatrixFloatType Db_hz_y (Dz.Db_hz_y1 + x_offset, Ny, Nzp1);
-            MatrixFloatType Da_hz (Dz.Da_hz_x + x_offset, Ny, Nzp1);
+                // e-fields 
+                MatrixFloatType ex   (p_ex   + (x * ex_NyNz + ((y) * Nzp1)), Nyb+1, Nzp1);
+                MatrixFloatType ey   (p_ey   + (x * ey_NyNz + ((y) * Nzp1)), Nyb, Nzp1);
+                MatrixFloatType ez   (p_ez   + (x * ez_NyNz + ((y) * Nz)), Nyb+1, Nz);
 
-            // previous cell components. Dummy cells provide all zero components for the threads at the end points
-            // of the grid
-            p_ey_0 = p_ey + ((x - 1) * ey_NyNz);
-            p_ez_0 = p_ez + ((x - 1) * ez_NyNz);
-            MatrixFloatType ey_0 (p_ey_0, Ny, Nzp1);
-            MatrixFloatType ez_0 (p_ez_0, Nyp1, Nz);
+                auto ez_diff_y = ez.bottomRows(Nyb) - ez.topRows(Nyb);
+                auto ey_diff_z = ey.rightCols(Nz) - ey.leftCols(Nz);
+                auto ex_diff_z = ex.rightCols(Nz) - ex.leftCols(Nz);
+                auto ex_diff_y = ex.bottomRows(Nyb) - ex.topRows(Nyb);
+                
+                // ----------------- update hx -------------------------- //
+                // hx_y update
+                // hx_yd = Db_hx_y * np.diff(ez, axis=1)
+                // hx_y = Da_hx_y * hx_y + hx_yd
+                hx.noalias() = Da_hx.block(0, N_pml, Nyb, Nz_b).cwiseProduct(hx) + (
+                    Db_hx_y.block(0, N_pml, Nyb, Nz_b).cwiseProduct(ez_diff_y) + 
+                    Db_hx_z.block(0, N_pml, Nyb, Nz_b).cwiseProduct(ey_diff_z)
+                );
+                
+                // ----------------- update hy -------------------------- //
+                // hy_z update
+                // hy_zd = Db_hy_z * np.diff(ex, axis=2)
+                // hy_z = Da_hy_z * hy_z + hy_zd
+                p_ez_0 = p_ez + ((x - 1) * ez_NyNz) + ((y) * Nz);
+                MatrixFloatType ez_0 (p_ez_0, Nyb+1, Nz);
+                auto ez_diff_x = ez - ez_0;
 
-            auto ez_diff_y = ez.bottomRows(Ny) - ez.topRows(Ny);
-            auto ey_diff_z = ey.rightCols(Nz) - ey.leftCols(Nz);
-            auto ex_diff_z = ex.rightCols(Nz) - ex.leftCols(Nz);
-            auto ez_diff_x = ez - ez_0;
-            auto ey_diff_x = ey - ey_0;
-            auto ex_diff_y = ex.bottomRows(Ny) - ex.topRows(Ny);
-            // ----------------- update hx -------------------------- //
-            // hx_y update
-            // hx_yd = Db_hx_y * np.diff(ez, axis=1)
-            // hx_y = Da_hx_y * hx_y + hx_yd
-            hx.noalias() = Da_hx.block(N_pml, N_pml, Ny_b, Nz_b).cwiseProduct(hx) + (
-                Db_hx_y.block(N_pml, N_pml, Ny_b, Nz_b).cwiseProduct(ez_diff_y) + 
-                Db_hx_z.block(N_pml, N_pml, Ny_b, Nz_b).cwiseProduct(ey_diff_z)
-            );
-            
-            // ----------------- update hy -------------------------- //
-            // hy_z update
-            // hy_zd = Db_hy_z * np.diff(ex, axis=2)
-            // hy_z = Da_hy_z * hy_z + hy_zd
-            hy.noalias() = Da_hy.block(N_pml, N_pml, Ny_b+1, Nz_b).cwiseProduct(hy) + (
-                Db_hy_z.block(N_pml, N_pml, Ny_b+1, Nz_b).cwiseProduct(ex_diff_z) + 
-                Db_hy_x.block(N_pml, N_pml, Ny_b+1, Nz_b).cwiseProduct(ez_diff_x)
-            );
+                hy.noalias() = Da_hy.block(0, N_pml, Nyb, Nz_b).cwiseProduct(hy) + (
+                    Db_hy_z.block(0, N_pml, Nyb, Nz_b).cwiseProduct(ex_diff_z.block(1, N_pml, Nyb, Nz_b)) + 
+                    Db_hy_x.block(0, N_pml, Nyb, Nz_b).cwiseProduct(ez_diff_x.block(1, N_pml, Nyb, Nz_b))
+                );
 
-            // ----------------- update hz -------------------------- //
-            // hz_x update
-            // hz_xd = Db_hz_x * np.diff(ey, axis=0) 
-            // hz_x = Da_hz_x * hz_x + hz_xd
-            hz.noalias() = Da_hz.block(N_pml, N_pml, Ny_b, Nz_b+1).cwiseProduct(hz) + (
-                Db_hz_x.block(N_pml, N_pml, Ny_b, Nz_b+1).cwiseProduct(ey_diff_x) + 
-                Db_hz_y.block(N_pml, N_pml, Ny_b, Nz_b+1).cwiseProduct(ex_diff_y)
-            );
+                // ----------------- update hz -------------------------- //
+                // hz_x update
+                // hz_xd = Db_hz_x * np.diff(ey, axis=0) 
+                // hz_x = Da_hz_x * hz_x + hz_xd
+                p_ey_0 = p_ey + ((x - 1) * ey_NyNz) + ((y) * Nzp1);
+                MatrixFloatType ey_0 (p_ey_0, Nyb, Nzp1);
+                auto ey_diff_x = ey - ey_0;
 
+                hz.noalias() = Da_hz.block(0, N_pml, Nyb, Nz_b+1).cwiseProduct(hz) + (
+                    Db_hz_x.block(0, N_pml, Nyb, Nz_b+1).cwiseProduct(ey_diff_x) + 
+                    Db_hz_y.block(0, N_pml, Nyb, Nz_b+1).cwiseProduct(ex_diff_y)
+                );
+            }
 
         }
 
@@ -1036,7 +1052,7 @@ void SolverFDTD::solver_thread(int x_start, int x_stop, int Nt, int thread_idx)
             // apply soft source
             if (p->is_source)
             {
-                *(p->field_p) = *(p->field_p) + (p->values)[n];
+                *(p->field_p) = *(p->field_p) + 2 * (p->values)[n];
             }
             // put the resulting total voltage in the source_values array once the value is used for this
             // time step.
