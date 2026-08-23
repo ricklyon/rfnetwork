@@ -290,6 +290,53 @@ class FDTD_Solver():
             name=name
         )
 
+    def add_current_source(self, face: pv.PolyData, field: str, src: np.ndarray, distribution: float = None):
+        """
+        Add a current sheet with an arbitrary magnitude distribution (wip). Must be called after generate_mesh().
+
+        Parameters
+        ----------
+        face : pv.PolyData
+            pyvista PolyData object of 2D face
+        field : str
+            field string. If "ex", "ey", or "ez", a electric current is added. If "hx", "hy" or "hz", a
+            magnetic current is added.
+        src : np.ndarray
+            time domain source excitation.
+        distribution : ldarray
+            labeled array of the magnitude distribution across the sheet. If not provided, current will have uniform
+            magnitude across the surface.
+
+        """
+
+        src = self._validate_source_waveform(src)
+
+        # get indices of the grid edges that bound the conductor. The mesh ensures that conductor edges fall
+        # on grid edges.
+        p0 = list(self.field_pos_to_idx(np.min(face.points, axis=0), field))
+        p1 = list(self.field_pos_to_idx(np.max(face.points, axis=0), field))
+
+        # default to uniform distribution
+        if distribution is None:
+            distribution = np.ones((p1[0] - p0[0]+1, p1[1] - p0[1]+1, p1[2] - p0[2]+1))
+
+        # add current source
+        self.ports += [
+            dict(
+                idx = (
+                    slice(p0[0], p1[0] +1, None),
+                    slice(p0[1], p1[1] +1, None),
+                    slice(p0[2], p1[2] +1, None)
+                ),
+                Vs_a = distribution,
+                field = field,
+                src = src
+            )
+        ]
+
+        self.ports_inv += [None]
+
+
     def add_image_layer(
         self,
         filepath: Path,
@@ -1236,7 +1283,7 @@ class FDTD_Solver():
                 self.add_current_probe(f"port_{port}", current_face)
 
 
-    def _init_PML(self, side: str):
+    def _init_PML(self, side: str, n_pml: int = None):
         """
         Add PML layer to a single side of the grid.
 
@@ -1245,7 +1292,9 @@ class FDTD_Solver():
         side : list, str
             Valid values are ("x+", "x-", "y+", "y-", "z+", "z-",)
         """
-        n_pml = self._n_pml
+
+        if n_pml is None:
+            n_pml = self._n_pml
 
         if n_pml is None:
             return
@@ -1372,6 +1421,19 @@ class FDTD_Solver():
         self.invalidate_solution()
         self.check_mesh()
 
+        waveform = self._validate_source_waveform(waveform)
+                
+        for p in np.atleast_1d(ports):
+            self.ports[p-1]["src"] = waveform
+
+            # assign the inverted version of the waveform to the secondary port, if present. The integration
+            # axis points in the opposite direction as the primary which will flip the sign and we don't need
+            # to do it here.
+            if self.ports_inv[p-1] is not None:
+                self.ports_inv[p-1]["src"] = waveform
+
+    def _validate_source_waveform(self, waveform):
+
         if self._time is None:
             self._time = np.arange(0, self.dt * len(waveform), self.dt)
         
@@ -1385,15 +1447,8 @@ class FDTD_Solver():
         # truncate waveform
         if len(self._time) < len(waveform):
             waveform = waveform[:len(self._time)]
-                
-        for p in np.atleast_1d(ports):
-            self.ports[p-1]["src"] = waveform.astype(np.float32)
 
-            # assign the inverted version of the waveform to the secondary port, if present. The integration
-            # axis points in the opposite direction as the primary which will flip the sign and we don't need
-            # to do it here.
-            if self.ports_inv[p-1] is not None:
-                self.ports_inv[p-1]["src"] = waveform.astype(np.float32)
+        return waveform.astype(np.float32)
 
     def reset_excitations(self):
         """ Remove excitations from all ports. """
