@@ -1535,43 +1535,34 @@ class FDTD_Solver():
             Cb_ex_z = -self.Cb["ex_z"] * np.pad(dz_h_inv, ((0, 0), (0, 0), (1, 1))),
 
             # ey coefficients, edges along x and z do not get updated
-            Ca_ey_z = self.Ca["ey_z"][1:],
-            Ca_ey_x = self.Ca["ey_x"][1:],
-            Cb_ey_z = self.Cb["ey_z"][1:] * np.pad(dz_h_inv, ((0, 0), (0, 0), (1, 1))),
-            Cb_ey_x = -self.Cb["ey_x"][1:] * np.pad(dx_h_inv, ((0, 1), (0, 0), (0, 0))),
+            Ca_ey_z = self.Ca["ey_z"],
+            Ca_ey_x = self.Ca["ey_x"],
+            Cb_ey_z = self.Cb["ey_z"] * np.pad(dz_h_inv, ((0, 0), (0, 0), (1, 1))),
+            Cb_ey_x = -self.Cb["ey_x"] * np.pad(dx_h_inv, ((0, 1), (0, 0), (0, 0))),
 
             # ez coefficients, edges along x and y do not get updated
-            Ca_ez_x = self.Ca["ez_x"][1:],
-            Ca_ez_y = self.Ca["ez_y"][1:],
-            Cb_ez_x = self.Cb["ez_x"][1:] * np.pad(dx_h_inv, ((0, 1), (0, 0), (0, 0))),
-            Cb_ez_y = -self.Cb["ez_y"][1:] * np.pad(dy_h_inv, ((0, 0), (1, 1), (0, 0))),
+            Ca_ez_x = self.Ca["ez_x"],
+            Ca_ez_y = self.Ca["ez_y"],
+            Cb_ez_x = self.Cb["ez_x"] * np.pad(dx_h_inv, ((0, 1), (0, 0), (0, 0))),
+            Cb_ez_y = -self.Cb["ez_y"] * np.pad(dy_h_inv, ((0, 0), (1, 1), (0, 0))),
 
             # hx coefficients
             Da_hx_y = self.Da["hx_y"][1:],
             Da_hx_z = self.Da["hx_z"][1:],
-            
-            Db_hx_y1 = -self.Db["hx_y1"][1:] * dy_inv,
-            Db_hx_y2 = -self.Db["hx_y2"][1:] * dy_inv,
-            Db_hx_z1 = self.Db["hx_z1"][1:] * dz_inv, 
-            Db_hx_z2 = self.Db["hx_z2"][1:] * dz_inv,
+            Db_hx_y = -self.Db["hx_y"][1:] * dy_inv,
+            Db_hx_z = self.Db["hx_z"][1:] * dz_inv,
 
             # hy coefficients
             Da_hy_z = self.Da["hy_z"],
             Da_hy_x = self.Da["hy_x"],
-            
-            Db_hy_z1 = -self.Db["hy_z1"] * dz_inv,
-            Db_hy_z2 = -self.Db["hy_z2"] * dz_inv,
-            Db_hy_x1 = self.Db["hy_x1"] * dx_inv,
-            Db_hy_x2 = self.Db["hy_x2"] * dx_inv,
+            Db_hy_z = -self.Db["hy_z"] * dz_inv,
+            Db_hy_x = self.Db["hy_x"] * dx_inv,
 
             # hz coefficients
             Da_hz_x = self.Da["hz_x"],
             Da_hz_y = self.Da["hz_y"],
-            
-            Db_hz_x1 = -self.Db["hz_x1"] * dx_inv,
-            Db_hz_x2 = -self.Db["hz_x2"] * dx_inv,
-            Db_hz_y1 = self.Db["hz_y1"] * dy_inv,
-            Db_hz_y2 = self.Db["hz_y2"] * dy_inv,
+            Db_hz_x = -self.Db["hz_x"] * dx_inv,
+            Db_hz_y = self.Db["hz_y"] * dy_inv,
         )
 
         # initialize field arrays

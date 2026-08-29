@@ -188,6 +188,20 @@ private:
     // number of pml cells
     int N_pml;
 
+    int Nyp1;
+    int Nzp1;
+
+    int Nym1;
+    int Nzm1;
+
+    int ex_NyNz;
+    int ey_NyNz;
+    int ez_NyNz;
+
+    int hx_NyNz;
+    int hy_NyNz;
+    int hz_NyNz;
+
     // mbuffer_t m_pool{NULL, NULL, 0};
 
     float * mbuffer_allocate(uint64_t size);
