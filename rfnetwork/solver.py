@@ -1028,25 +1028,23 @@ class FDTD_Solver():
         self.Da = dict(
             hx_y = np.ones((Nx+1, Ny, Nz), dtype=dtype_) * Da_0,
             hx_z = np.ones((Nx+1, Ny, Nz), dtype=dtype_) * Da_0,
+
             hy_z = np.ones((Nx, Ny+1, Nz), dtype=dtype_) * Da_0,
             hy_x = np.ones((Nx, Ny+1, Nz), dtype=dtype_) * Da_0,
+
             hz_x = np.ones((Nx, Ny, Nz+1), dtype=dtype_) * Da_0,
             hz_y = np.ones((Nx, Ny, Nz+1), dtype=dtype_) * Da_0,
         )
         
         self.Db = dict(
-            hx_y1 = np.ones((Nx+1, Ny, Nz), dtype=dtype_) * Db_0,
-            hx_y2 = np.ones((Nx+1, Ny, Nz), dtype=dtype_) * Db_0,
-            hx_z1 = np.ones((Nx+1, Ny, Nz), dtype=dtype_) * Db_0,
-            hx_z2 = np.ones((Nx+1, Ny, Nz), dtype=dtype_) * Db_0,
-            hy_z1 = np.ones((Nx, Ny+1, Nz), dtype=dtype_) * Db_0,
-            hy_z2 = np.ones((Nx, Ny+1, Nz), dtype=dtype_) * Db_0,
-            hy_x1 = np.ones((Nx, Ny+1, Nz), dtype=dtype_) * Db_0,
-            hy_x2 = np.ones((Nx, Ny+1, Nz), dtype=dtype_) * Db_0,
-            hz_x1 = np.ones((Nx, Ny, Nz+1), dtype=dtype_) * Db_0,
-            hz_x2 = np.ones((Nx, Ny, Nz+1), dtype=dtype_) * Db_0,
-            hz_y1 = np.ones((Nx, Ny, Nz+1), dtype=dtype_) * Db_0,
-            hz_y2 = np.ones((Nx, Ny, Nz+1), dtype=dtype_) * Db_0,
+            hx_y = np.ones((Nx+1, Ny, Nz), dtype=dtype_) * Db_0,
+            hx_z = np.ones((Nx+1, Ny, Nz), dtype=dtype_) * Db_0,
+
+            hy_z = np.ones((Nx, Ny+1, Nz), dtype=dtype_) * Db_0,
+            hy_x = np.ones((Nx, Ny+1, Nz), dtype=dtype_) * Db_0,
+
+            hz_x = np.ones((Nx, Ny, Nz+1), dtype=dtype_) * Db_0,
+            hz_y = np.ones((Nx, Ny, Nz+1), dtype=dtype_) * Db_0,
         )
 
     def _init_image_coefficients(self):
@@ -1370,8 +1368,7 @@ class FDTD_Solver():
             sigma_m = simga_e * u0 / eps
 
             self.Da[f"{h}_{axis}"][tuple(h_idx)] = (2 * u0 - (sigma_m * dt)) / (2 * u0 + (sigma_m * dt))
-            self.Db[f"{h}_{axis}1"][tuple(h_idx)] = (2 * dt) / ((2 * u0 + (sigma_m * dt))) 
-            self.Db[f"{h}_{axis}2"][tuple(h_idx)] = (2 * dt) / ((2 * u0 + (sigma_m * dt))) 
+            self.Db[f"{h}_{axis}"][tuple(h_idx)] = (2 * dt) / ((2 * u0 + (sigma_m * dt))) 
 
 
     def gaussian_source(self, width: float, t0: float, t_len: float):
@@ -1538,19 +1535,19 @@ class FDTD_Solver():
             Ca_ey_z = self.Ca["ey_z"],
             Ca_ey_x = self.Ca["ey_x"],
             Cb_ey_z = self.Cb["ey_z"] * np.pad(dz_h_inv, ((0, 0), (0, 0), (1, 1))),
-            Cb_ey_x = -self.Cb["ey_x"] * np.pad(dx_h_inv, ((0, 1), (0, 0), (0, 0))),
+            Cb_ey_x = -self.Cb["ey_x"] * np.pad(dx_h_inv, ((1, 1), (0, 0), (0, 0))),
 
             # ez coefficients, edges along x and y do not get updated
             Ca_ez_x = self.Ca["ez_x"],
             Ca_ez_y = self.Ca["ez_y"],
-            Cb_ez_x = self.Cb["ez_x"] * np.pad(dx_h_inv, ((0, 1), (0, 0), (0, 0))),
+            Cb_ez_x = self.Cb["ez_x"] * np.pad(dx_h_inv, ((1, 1), (0, 0), (0, 0))),
             Cb_ez_y = -self.Cb["ez_y"] * np.pad(dy_h_inv, ((0, 0), (1, 1), (0, 0))),
 
             # hx coefficients
-            Da_hx_y = self.Da["hx_y"][1:],
-            Da_hx_z = self.Da["hx_z"][1:],
-            Db_hx_y = -self.Db["hx_y"][1:] * dy_inv,
-            Db_hx_z = self.Db["hx_z"][1:] * dz_inv,
+            Da_hx_y = self.Da["hx_y"],
+            Da_hx_z = self.Da["hx_z"],
+            Db_hx_y = -self.Db["hx_y"] * dy_inv,
+            Db_hx_z = self.Db["hx_z"] * dz_inv,
 
             # hy coefficients
             Da_hy_z = self.Da["hy_z"],

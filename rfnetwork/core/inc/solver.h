@@ -48,34 +48,23 @@ struct Coeff_Ez {
 struct Coeff_Hx {
     float * Da_hx_y;
     float * Da_hx_z;
-
-    float * Db_hx_y1;
-    float * Db_hx_y2;
-    
-    float * Db_hx_z1;
-    float * Db_hx_z2;
+    float * Db_hx_y;
+    float * Db_hx_z;
 };
 
 struct Coeff_Hy {
     float * Da_hy_z;
     float * Da_hy_x;
-
-    float * Db_hy_z1;
-    float * Db_hy_z2;
-
-    float * Db_hy_x1;
-    float * Db_hy_x2;
+    float * Db_hy_z;
+    float * Db_hy_x;
 };
 
 struct Coeff_Hz {
     float * Da_hz_x;
     float * Da_hz_y;
 
-    float * Db_hz_x1;
-    float * Db_hz_x2;
-
-    float * Db_hz_y1;
-    float * Db_hz_y2;
+    float * Db_hz_x;
+    float * Db_hz_y;
 };
 
 struct Fields_PML {
@@ -214,7 +203,9 @@ private:
 
 public:
     SolverFDTD();          // constructor
-    int solver_init_fields(PyObject * fields, PyObject * fields_pml, PyObject * coefficients, int Nx, int Ny, int Nz, int N_pml, int gpu);
+    int solver_init_fields(
+        PyObject * fields, PyObject * fields_pml, PyObject * coefficients, int Nx, int Ny, int Nz, int N_pml, int gpu
+    );
     int solver_init_monitors(PyObject * py_monitors, int Nt, int gpu);
     int solver_init_probes(PyObject * py_probes, int Nt);
 
@@ -222,6 +213,8 @@ public:
     void solver_controller(int Nt, int n_threads, int update_interval);
 
     void solver_run_cu(int Nt);
+    void efield_slice_update(int x);
+    void hfield_slice_update(int x);
 };
 
 
