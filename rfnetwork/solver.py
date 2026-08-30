@@ -37,15 +37,17 @@ class FDTD_Solver():
         self.lumped_elements = dict()
         self.images = dict()
 
-        self.pml_boundaries = []
+        self.pml_boundaries = set()
+        # pml width on each axis
+        self.n_pml = [0, 0, 0]
 
         self.monitors = dict()
         self.farfield = dict()
         self.probes = dict()
         self.ports = []
         self.ports_inv = []
-        
-        self._n_pml = None
+
+        # width of PML for each axis
         self._auto_name_counter = 0
 
         self.sbox_max = np.max(bounding_box.points, axis=0)
@@ -399,9 +401,9 @@ class FDTD_Solver():
             style={**style, "cmap":cmap} # add cmap to style so it's passed to add_mesh
         )
 
-    def assign_PML_boundaries(self, *sides: str, n_pml: float = 10):
+    def add_PML(self, *sides: str, n_pml: float = 10):
         """
-        Assign a PML boundary to sides of the solve box. All sides must have the same number of PML cells.
+        Assign a PML boundary to sides of the solve box.
 
         Parameters
         ----------
@@ -416,8 +418,12 @@ class FDTD_Solver():
         if any([s not in valid_sides for s in sides]):
             raise ValueError(f"PML side not recognized. Expecting one of {valid_sides}")
 
-        self.pml_boundaries = copy(list(sides))
-        self._n_pml = n_pml
+        self.pml_boundaries.update(sides)
+
+        axis_map = dict(x=0, y=1, z=2)
+        for s in sides:
+            self.n_pml[axis_map[s[0]]] = int(n_pml)
+
 
     def pos_to_idx(self, position: tuple, mode: str = "edge"):
         """
@@ -487,8 +493,7 @@ class FDTD_Solver():
 
         # add PML layers before conductors and ports, this gives priority to any conductors that may extend into the 
         # PML
-        for pml_side in self.pml_boundaries:
-            self._init_PML(pml_side)
+        self._init_PML()
 
         self._init_image_coefficients()
         self._init_conductors(surface_tolerance=surface_tolerance, d_min=d_min) # allow conductors to override image layers
@@ -1281,94 +1286,86 @@ class FDTD_Solver():
                 self.add_current_probe(f"port_{port}", current_face)
 
 
-    def _init_PML(self, side: str, n_pml: int = None):
+    def _init_PML(self):
         """
         Add PML layer to a single side of the grid.
 
-        Parameters
-        ----------
-        side : list, str
-            Valid values are ("x+", "x-", "y+", "y-", "z+", "z-",)
         """
 
-        if n_pml is None:
-            n_pml = self._n_pml
+        for side in self.pml_boundaries:
+            axis = side[0]
+            axis_i = dict(x=0, y=1, z=2)[axis]
+            m_pml = 3 # sigma profile order
+            n_pml = self.n_pml[axis_i]
 
-        if n_pml is None:
-            return
+            dt = self.dt
+            dcells = self.d_cells[axis_i]
+            d_border = conv.m_in(dcells[-1]) if side[1] == "+" else conv.m_in(dcells[0])
+            eta0 = np.sqrt(u0 / e0)
+            # now define the values of sigma and sigma_m from the profiles
+            sigma_max = 0.8 * (m_pml + 1) / (eta0 * d_border)
+        
+            # define sigma profile in the PML region on the right side of the grid.
+            i_pml_axis = np.arange(0, n_pml)
+            # broadcast across other dimensions that are not the PML direction
+            i_pml_b = [None] * 3
+            i_pml_b[axis_i] = slice(None)
+            i_pml = i_pml_axis[tuple(i_pml_b)]
+        
+            # sigma on the cell edges. Components on the edge of the PML have a sigma of 0.
+            sigma_e_n = sigma_max * ((i_pml) / (n_pml))**m_pml
+            # sigma in the middle of the cells. First Hz component in the PML is 0.5 cells into the PML
+            sigma_e_np5 = sigma_max * ((i_pml + 0.5) / (n_pml))**m_pml
 
-        axis = side[0]
-        axis_i = dict(x=0, y=1, z=2)[axis]
-        m_pml = 3 # sigma profile order
-
-        dt = self.dt
-        dcells = self.d_cells[axis_i]
-        d_border = conv.m_in(dcells[-1]) if side[1] == "+" else conv.m_in(dcells[0])
-        eta0 = np.sqrt(u0 / e0)
-        # now define the values of sigma and sigma_m from the profiles
-        sigma_max = 0.8 * (m_pml + 1) / (eta0 * d_border)
-    
-        # define sigma profile in the PML region on the right side of the grid.
-        i_pml_axis = np.arange(0, n_pml)
-        # broadcast across other dimensions that are not the PML direction
-        i_pml_b = [None] * 3
-        i_pml_b[axis_i] = slice(None)
-        i_pml = i_pml_axis[tuple(i_pml_b)]
-    
-        # sigma on the cell edges. Components on the edge of the PML have a sigma of 0.
-        sigma_e_n = sigma_max * ((i_pml) / (n_pml))**m_pml
-        # sigma in the middle of the cells. First Hz component in the PML is 0.5 cells into the PML
-        sigma_e_np5 = sigma_max * ((i_pml + 0.5) / (n_pml))**m_pml
-
-        # magnetic conductivity
-        # plt.figure()
-        # plt.plot(np.arange(0, n_pml, 1), sigma_e_n.squeeze())
-        # plt.plot(np.arange(0.5, n_pml + .5, 1), sigma_e_np5.squeeze())
-
-        e_idx = [slice(None) for i in range(3)]
-        h_idx = [slice(None) for i in range(3)]
-
-        e_idx[axis_i] = slice(n_pml, 0, -1) if side[1] == "-" else slice(-n_pml-1, -1)
-        h_idx[axis_i] = slice(n_pml-1, None, -1) if side[1] == "-" else slice(-n_pml, None)
-
-        field_eps = dict(
-            ex=self.eps_ex,
-            ey=self.eps_ey,
-            ez=self.eps_ez,
-            hx=self.eps_hx,
-            hy=self.eps_hy,
-            hz=self.eps_hz,  
-        )
-
-        # get the two e and h fields that are graded by the PML for the given axis direction
-        pml_efields = [("ey", "ez"), ("ez", "ex"), ("ex", "ey")][axis_i]
-        pml_hfields = [("hy", "hz"), ("hz", "hx"), ("hx", "hy")][axis_i]
-
-        # grade the e-field components along axis
-        for e in pml_efields:
-            # first e component is at the edge of the PML where sigma = 0, last component is at the solve boundary 
-            # and not updated.
-            # sigma / eps must be constant across y and z, page 291 in taflove
-            # scale sigma by eps so that sigma / eps is constant
-            eps = field_eps[e][tuple(e_idx)]
-            sigma_e = np.broadcast_to(sigma_e_n, eps.shape).copy()
-            sigma_e *= (eps / e0)
-            
-            self.Ca[f"{e}_{axis}"][tuple(e_idx)] = (2 * eps - (sigma_e * dt)) / (2 * eps + (sigma_e * dt))
-            self.Cb[f"{e}_{axis}"][tuple(e_idx)] = (2 * dt) / ((2 * eps + (sigma_e * dt)))
-
-        # grade the h-field components along axis
-        for h in pml_hfields:
-            # h components are in the middle of the PML cells, use half cell indices
-            eps = field_eps[h][tuple(h_idx)]
-            # electrical conductivity
-            simga_e = np.broadcast_to(sigma_e_np5, eps.shape).copy()
-            simga_e *= (eps / e0)
             # magnetic conductivity
-            sigma_m = simga_e * u0 / eps
+            # plt.figure()
+            # plt.plot(np.arange(0, n_pml, 1), sigma_e_n.squeeze())
+            # plt.plot(np.arange(0.5, n_pml + .5, 1), sigma_e_np5.squeeze())
 
-            self.Da[f"{h}_{axis}"][tuple(h_idx)] = (2 * u0 - (sigma_m * dt)) / (2 * u0 + (sigma_m * dt))
-            self.Db[f"{h}_{axis}"][tuple(h_idx)] = (2 * dt) / ((2 * u0 + (sigma_m * dt))) 
+            e_idx = [slice(None) for i in range(3)]
+            h_idx = [slice(None) for i in range(3)]
+
+            e_idx[axis_i] = slice(n_pml, 0, -1) if side[1] == "-" else slice(-n_pml-1, -1)
+            h_idx[axis_i] = slice(n_pml-1, None, -1) if side[1] == "-" else slice(-n_pml, None)
+
+            field_eps = dict(
+                ex=self.eps_ex,
+                ey=self.eps_ey,
+                ez=self.eps_ez,
+                hx=self.eps_hx,
+                hy=self.eps_hy,
+                hz=self.eps_hz,  
+            )
+
+            # get the two e and h fields that are graded by the PML for the given axis direction
+            pml_efields = [("ey", "ez"), ("ez", "ex"), ("ex", "ey")][axis_i]
+            pml_hfields = [("hy", "hz"), ("hz", "hx"), ("hx", "hy")][axis_i]
+
+            # grade the e-field components along axis
+            for e in pml_efields:
+                # first e component is at the edge of the PML where sigma = 0, last component is at the solve boundary 
+                # and not updated.
+                # sigma / eps must be constant across y and z, page 291 in taflove
+                # scale sigma by eps so that sigma / eps is constant
+                eps = field_eps[e][tuple(e_idx)]
+                sigma_e = np.broadcast_to(sigma_e_n, eps.shape).copy()
+                sigma_e *= (eps / e0)
+                
+                self.Ca[f"{e}_{axis}"][tuple(e_idx)] = (2 * eps - (sigma_e * dt)) / (2 * eps + (sigma_e * dt))
+                self.Cb[f"{e}_{axis}"][tuple(e_idx)] = (2 * dt) / ((2 * eps + (sigma_e * dt)))
+
+            # grade the h-field components along axis
+            for h in pml_hfields:
+                # h components are in the middle of the PML cells, use half cell indices
+                eps = field_eps[h][tuple(h_idx)]
+                # electrical conductivity
+                simga_e = np.broadcast_to(sigma_e_np5, eps.shape).copy()
+                simga_e *= (eps / e0)
+                # magnetic conductivity
+                sigma_m = simga_e * u0 / eps
+
+                self.Da[f"{h}_{axis}"][tuple(h_idx)] = (2 * u0 - (sigma_m * dt)) / (2 * u0 + (sigma_m * dt))
+                self.Db[f"{h}_{axis}"][tuple(h_idx)] = (2 * dt) / ((2 * u0 + (sigma_m * dt))) 
 
 
     def gaussian_source(self, width: float, t0: float, t_len: float):
@@ -1578,7 +1575,7 @@ class FDTD_Solver():
             for f_name in f_split_names:
                 # update field shape along axis to be the pml width
                 f_shape = list(self.fshape[f_name[:2]])
-                f_shape[i] = self._n_pml
+                f_shape[i] = self.n_pml[i]
                 # add two field arrays for each side of the axis
                 fields_pml[axis][f_name] = [
                     np.zeros(tuple(f_shape), dtype=dtype_),
@@ -1690,7 +1687,7 @@ class FDTD_Solver():
         else:
             solver_func = core.core_func.solver_run
 
-        ret_val = solver_func(fields, fields_pml, coefficients, probes, monitors, Nx, Ny, Nz, Nt, 0, n_threads, update_interval)
+        ret_val = solver_func(fields, fields_pml, coefficients, probes, monitors, Nx, Ny, Nz, Nt, self.n_pml, n_threads, update_interval)
         print(ret_val)
 
         if show_progress:
@@ -1883,9 +1880,9 @@ class FDTD_Solver():
                 else:
                     # set the position of farfield integration surface by index value in the grid
                     if side == "n":
-                        ff_idx[axis, j] = self._n_pml + padding
+                        ff_idx[axis, j] = self.n_pml[axis] + padding
                     else:
-                        ff_idx[axis, j] = len(self.g_edges[axis]) - self._n_pml - 1 - padding
+                        ff_idx[axis, j] = len(self.g_edges[axis]) - self.n_pml[axis] - 1 - padding
 
                 # integration face position, inches
                 surf_idx = ff_idx[axis, j] 

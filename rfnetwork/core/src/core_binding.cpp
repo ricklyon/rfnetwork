@@ -355,18 +355,19 @@ static PyObject* solver_run(PyObject* self, PyObject* args) {
     PyObject *probes;
     PyObject *monitors;
     PyObject *mem;
+    PyObject *N_pml;
     
     int Nx;
     int Ny;
     int Nz;
     int Nt;
-    int N_pml;
+    
     int n_threads;
     int update_interval;
 
     // Parse arguments: expecting a single Python object
     if (!PyArg_ParseTuple(
-        args, "OOOOOIIIIIII", &fields, &fields_pml, &coefficients, &probes, &monitors, &Nx, &Ny, &Nz, &Nt, &N_pml, &n_threads, &update_interval
+        args, "OOOOOIIIIOII", &fields, &fields_pml, &coefficients, &probes, &monitors, &Nx, &Ny, &Nz, &Nt, &N_pml, &n_threads, &update_interval
     )) {
         return PyLong_FromLong(1);
     }
@@ -393,6 +394,11 @@ static PyObject* solver_run(PyObject* self, PyObject* args) {
 
     if (!PyList_Check(probes)) {
         PyErr_SetString(PyExc_TypeError, "Expected a probes list");
+        return PyLong_FromLong(1);
+    }
+
+    if (!PyList_Check(N_pml)) {
+        PyErr_SetString(PyExc_TypeError, "Expected a N_pml list");
         return PyLong_FromLong(1);
     }
 

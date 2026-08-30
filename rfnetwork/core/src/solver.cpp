@@ -225,7 +225,12 @@ SolverFDTD::SolverFDTD(){
     n_threads = 0;
 }
 
-int SolverFDTD::solver_init_fields(PyObject * py_fields, PyObject * py_fields_pml, PyObject * coefficients, int Nx_, int Ny_, int Nz_, int N_pml, int gpu)
+int SolverFDTD::solver_init_fields(
+    PyObject * py_fields, 
+    PyObject * py_fields_pml, 
+    PyObject * coefficients, 
+    int Nx_, int Ny_, int Nz_, 
+    PyObject * py_N_pml, int gpu)
 {
     Nx = Nx_;
     Ny = Ny_;
@@ -258,6 +263,12 @@ int SolverFDTD::solver_init_fields(PyObject * py_fields, PyObject * py_fields_pm
     int Nyp1 = (gpu) ? Ny : Ny+1;
     int Nzp1 = (gpu) ? Nz : Nz+1;
 
+    // get pml length for each axis
+    for (int i = 0; i < 3; i ++)
+    {
+        N_pml[i] = PyLong_AsLong(PyList_GetItem(py_N_pml, i));
+    }
+    
     // error check memory buffer
     std::ostringstream oss;
 
@@ -693,9 +704,10 @@ void SolverFDTD::efield_slice_update(int x)
         return;
     }
     
-    int Nz_pml = 0;
-    int Ny_pml = 0;
-    int Nx_pml = 0;
+    int Nx_pml = N_pml[0];
+    int Ny_pml = N_pml[1];
+    int Nz_pml = N_pml[2];
+
     int TILE_Y = 16;
     int x_offset;
 
@@ -752,7 +764,7 @@ void SolverFDTD::efield_slice_update(int x)
         // is the block inside a y-pml section?
         bool is_y_pml = ((Ny_pml > 0) && ((y == 0) || (y >= (Ny - Ny_pml))));
         // is the block inside a x-pml section?
-        bool is_x_pml = ((x < Nx_pml) || (x >= (Nx - Nx_pml)));
+        bool is_x_pml = ((x < Nx_pml) || (x >= (Nx - Nx_pml -1)));
 
         int ex_offset;
         int ey_offset;
@@ -767,13 +779,14 @@ void SolverFDTD::efield_slice_update(int x)
             if (is_x_pml)
             {
                 s = (x <= Nx_pml) ? 0 : 1;
+                int pml_x = (x < Nx_pml) ? x : x - (Nx - Nx_pml - 1);
                 pml_idx = 0;
 
                 // ex split fields. PML fields contain n_pml components along the axis they are assigned to.
                 // the edge components at the left edge of the grid are not included
-                ex_offset = (x * ex_NyNz) + ((y + 1) * Nzp1);
-                ey_offset = (x * ey_NyNz) + ((y) * Nzp1);
-                ez_offset = (x * ez_NyNz) + ((y + 1) * Nz);
+                ex_offset = (pml_x * ex_NyNz) + ((y + 1) * Nzp1);
+                ey_offset = (pml_x * ey_NyNz) + ((y) * Nzp1);
+                ez_offset = (pml_x * ez_NyNz) + ((y + 1) * Nz);
 
             }
             
@@ -954,9 +967,9 @@ void SolverFDTD::efield_slice_update(int x)
 **/
 void SolverFDTD::hfield_slice_update(int x)
 {
-    int Nz_pml = 0;
-    int Nx_pml = 0;
-    int Ny_pml = 0;
+    int Nx_pml = N_pml[0];
+    int Ny_pml = N_pml[1];
+    int Nz_pml = N_pml[2];
 
     int TILE_Y = 16;
     int x_offset;
@@ -1015,7 +1028,7 @@ void SolverFDTD::hfield_slice_update(int x)
         // is the block inside a y-pml section?
         bool is_y_pml = ((Ny_pml > 0) && ((y == 0) || (y >= (Ny - Ny_pml))));
         // is the block inside a x-pml section?
-        bool is_x_pml = ((x < Nx_pml) || (x >= (Nx - Nx_pml)));
+        bool is_x_pml = ((x < Nx_pml) || (x >= (Nx - Nx_pml - 1)));
         
         if (is_x_pml || is_y_pml)
         {
@@ -1030,10 +1043,11 @@ void SolverFDTD::hfield_slice_update(int x)
             {
                 s = (x <= Nx_pml) ? 0 : 1;
                 pml_idx = 0;
+                int pml_x = (x < Nx_pml) ? x : x - (Nx - Nx_pml - 1);
 
-                hx_offset = (x * hx_NyNz) + ((y) * Nz);
-                hy_offset = (x * hy_NyNz) + ((y+1) * Nz);
-                hz_offset = (x * hz_NyNz) + ((y) * Nzp1);
+                hx_offset = (pml_x * hx_NyNz) + ((y) * Nz);
+                hy_offset = (pml_x * hy_NyNz) + ((y+1) * Nz);
+                hz_offset = (pml_x * hz_NyNz) + ((y) * Nzp1);
             }
             // y-PML that spans the entire slice
             else // (is_y_pml)
@@ -1052,14 +1066,14 @@ void SolverFDTD::hfield_slice_update(int x)
                 hz_offset = (x * hz_NyNz) + ((y) * Nzp1);
             }
 
-            MatrixFloatType hx_y   (fields_pml[pml_idx][s].hx_y   + x_offset, Nyb, Nz);
-            MatrixFloatType hx_z   (fields_pml[pml_idx][s].hx_z   + x_offset, Nyb, Nz);
+            MatrixFloatType hx_y   (fields_pml[pml_idx][s].hx_y   + hx_offset, Nyb, Nz);
+            MatrixFloatType hx_z   (fields_pml[pml_idx][s].hx_z   + hx_offset, Nyb, Nz);
 
-            MatrixFloatType hy_z   (fields_pml[pml_idx][s].hy_z   + x_offset, Nyb, Nz);
-            MatrixFloatType hy_x   (fields_pml[pml_idx][s].hy_x   + x_offset, Nyb, Nz);
+            MatrixFloatType hy_z   (fields_pml[pml_idx][s].hy_z   + hy_offset, Nyb, Nz);
+            MatrixFloatType hy_x   (fields_pml[pml_idx][s].hy_x   + hy_offset, Nyb, Nz);
 
-            MatrixFloatType hz_x   (fields_pml[pml_idx][s].hz_x   + x_offset, Nyb, Nzp1);
-            MatrixFloatType hz_y   (fields_pml[pml_idx][s].hz_y   + x_offset, Nyb, Nzp1);
+            MatrixFloatType hz_x   (fields_pml[pml_idx][s].hz_x   + hz_offset, Nyb, Nzp1);
+            MatrixFloatType hz_y   (fields_pml[pml_idx][s].hz_y   + hz_offset, Nyb, Nzp1);
 
             // ----------------- update hx -------------------------- //
             hx_y.noalias() = Da_hx_y.cwiseProduct(hx_y) + (

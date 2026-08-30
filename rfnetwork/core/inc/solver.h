@@ -175,7 +175,7 @@ private:
     int Nz;
 
     // number of pml cells
-    int N_pml;
+    int N_pml[3];
 
     int Nyp1;
     int Nzp1;
@@ -204,7 +204,7 @@ private:
 public:
     SolverFDTD();          // constructor
     int solver_init_fields(
-        PyObject * fields, PyObject * fields_pml, PyObject * coefficients, int Nx, int Ny, int Nz, int N_pml, int gpu
+        PyObject * fields, PyObject * fields_pml, PyObject * coefficients, int Nx, int Ny, int Nz, PyObject * N_pml, int gpu
     );
     int solver_init_monitors(PyObject * py_monitors, int Nt, int gpu);
     int solver_init_probes(PyObject * py_probes, int Nt);
