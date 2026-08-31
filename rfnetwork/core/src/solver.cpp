@@ -919,23 +919,23 @@ void SolverFDTD::efield_slice_update(int x)
                 for (int s = 0; s < 2; s++)
                 {   
                     // ex split fields
-                    x_offset = (x * (Nyb+1) * Nz_pml) + ((y + 1) * Nz_pml);
+                    x_offset = (x * Nyp1 * Nz_pml) + ((y + 1) * Nz_pml);
                     MatrixFloatType ex_y   (fields_pml[2][s].ex_y   + x_offset, Nyb, Nz_pml);
                     MatrixFloatType ex_z   (fields_pml[2][s].ex_z   + x_offset, Nyb, Nz_pml);
 
                     // ey split fields
-                    x_offset = ((x + 1) * Nyb * Nz_pml) + ((y) * Nz_pml);
+                    x_offset = ((x + 1) * Ny * Nz_pml) + ((y) * Nz_pml);
                     MatrixFloatType ey_z   (fields_pml[2][s].ey_z   + x_offset, Nyb, Nz_pml);
                     MatrixFloatType ey_x   (fields_pml[2][s].ey_x   + x_offset, Nyb, Nz_pml);
 
                     // ez split fields
-                    x_offset = ((x + 1) * (Nyb+1) * Nz_pml) + ((y + 1) * Nz_pml);
+                    x_offset = ((x + 1) * Nyp1 * Nz_pml) + ((y + 1) * Nz_pml);
                     MatrixFloatType ez_x  (fields_pml[2][s].ez_x   + x_offset, Nyb, Nz_pml);
                     MatrixFloatType ez_y  (fields_pml[2][s].ez_y   + x_offset, Nyb, Nz_pml);
 
                     // ----------------- update ex -------------------------- // ;
                     // first edge idx of PML (ex or ey)
-                    int z0 = (s == 0) ? 1 : (Nz - Nz_pml);
+                    int z0 = (s == 0) ? Nz_pml : (Nz - Nz_pml);
                     ex_y.noalias() = Ca_ex_y.block(0, z0, Nyb, Nz_pml).cwiseProduct(ex_y) + (
                         Cb_ex_y.block(0, z0, Nyb, Nz_pml).cwiseProduct(hz_diff_y.block(0, z0, Nyb, Nz_pml))
                     );
@@ -961,7 +961,7 @@ void SolverFDTD::efield_slice_update(int x)
 
                     // ----------------- update ez -------------------------- //
                     // index for first ez in pml
-                    z0 = (s == 0) ? 0 : (Nz - Nz_pml);
+                    z0 = (s == 0) ? Nz_pml : (Nz - Nz_pml);
                     ez_x.block(0, z0, Nyb, Nz_pml)  = Ca_ez_x.cwiseProduct(ez_x.block(0, z0, Nyb, Nz_pml) ) + (
                         Cb_ez_x.cwiseProduct(hy_diff_x.block(0, z0, Nyb, Nz_pml))
                     );
@@ -1181,23 +1181,23 @@ void SolverFDTD::hfield_slice_update(int x)
                 for (int s = 0; s < 2; s++)
                 {   
                     // hx split fields
-                    x_offset = (x * Nyb * Nz_pml) + ((y) * Nz_pml);
+                    x_offset = (x * Ny * Nz_pml) + ((y) * Nz_pml);
                     MatrixFloatType hx_y   (fields_pml[2][s].hx_y   + x_offset, Nyb, Nz_pml);
                     MatrixFloatType hx_z   (fields_pml[2][s].hx_z   + x_offset, Nyb, Nz_pml);
 
                     // hy split fields
-                    x_offset = (x * (Nyb+1) * Nz_pml) + ((y+1) * Nz_pml);
+                    x_offset = (x * Nyp1 * Nz_pml) + ((y+1) * Nz_pml);
                     MatrixFloatType hy_z   (fields_pml[2][s].hy_z   + x_offset, Nyb, Nz_pml);
                     MatrixFloatType hy_x   (fields_pml[2][s].hy_x   + x_offset, Nyb, Nz_pml);
 
                     // hz split fields
-                    x_offset = (x * (Nyb) * Nz_pml) + ((y) * Nz_pml);
+                    x_offset = (x * (Ny) * Nz_pml) + ((y) * Nz_pml);
                     MatrixFloatType hz_x   (fields_pml[2][s].hz_x   + x_offset, Nyb, Nz_pml);
                     MatrixFloatType hz_y   (fields_pml[2][s].hz_y   + x_offset, Nyb, Nz_pml);
 
                     // ----------------- update hx -------------------------- //
                     // first idx of PML (hy or hx)
-                    int z0 = (s == 0) ? 0 : (Nz - Nz_pml);
+                    int z0 = (s == 0) ? Nz_pml : (Nz - Nz_pml);
                     hx_y.noalias() = Da_hx_y.block(0, z0, Nyb, Nz_pml).cwiseProduct(hx_y) + (
                         Db_hx_y.block(0, z0, Nyb, Nz_pml).cwiseProduct(ez_diff_y.block(0, z0, Nyb, Nz_pml))
                     );
@@ -1217,7 +1217,7 @@ void SolverFDTD::hfield_slice_update(int x)
                     
                     // ----------------- update hz -------------------------- //
                     // index for first hz along z in PML
-                    z0 = (s == 0) ? 1 : (Nz - Nz_pml);
+                    z0 = (s == 0) ? Nz_pml + 1 : (Nz - Nz_pml);
                     hz_x.noalias() = Da_hz_x.block(0, z0, Nyb, Nz_pml).cwiseProduct(hz_x) + (
                         Db_hz_x.block(0, z0, Nyb, Nz_pml).cwiseProduct(ey_diff_x.block(0, z0, Nyb, Nz_pml))
                     );
