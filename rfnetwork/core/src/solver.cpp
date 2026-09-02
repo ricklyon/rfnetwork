@@ -1164,13 +1164,15 @@ void SolverFDTD::hfield_slice_update(int x)
             );
             
             // ----------------- update hy -------------------------- //
-            hy.noalias() = Da_hy_z.block(0, Nz_pml, Nyb, Nzb).cwiseProduct(hy) + (
+            auto hyb = hx.block(0, Nz_pml, Nyb, Nzb);
+            hyb.noalias() = Da_hy_z.block(0, Nz_pml, Nyb, Nzb).cwiseProduct(hyb) + (
                 Db_hy_z.block(0, Nz_pml, Nyb, Nzb).cwiseProduct(ex_diff_z.block(0, Nz_pml, Nyb, Nzb)) + 
                 Db_hy_x.block(0, Nz_pml, Nyb, Nzb).cwiseProduct(ez_diff_x.block(0, Nz_pml, Nyb, Nzb))
             );
 
             // ----------------- update hz -------------------------- //
-            hz.noalias() = Da_hz_x.block(0, Nz_pml, Nyb, Nzb+1).cwiseProduct(hz) + (
+            auto hzb = hx.block(0, Nz_pml, Nyb, Nzb+1);
+            hzb.noalias() = Da_hz_x.block(0, Nz_pml, Nyb, Nzb+1).cwiseProduct(hzb) + (
                 Db_hz_x.block(0, Nz_pml, Nyb, Nzb+1).cwiseProduct(ey_diff_x.block(0, Nz_pml, Nyb, Nzb+1)) + 
                 Db_hz_y.block(0, Nz_pml, Nyb, Nzb+1).cwiseProduct(ex_diff_y.block(0, Nz_pml, Nyb, Nzb+1))
             );
