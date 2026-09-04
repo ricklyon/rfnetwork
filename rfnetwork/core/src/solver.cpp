@@ -713,7 +713,7 @@ void SolverFDTD::efield_slice_update(int x)
 
     // width of bulk section of grid along z axis, excluding PML
     int Nzb = Nz - (Nz_pml * 2);
-
+    
     std::vector<int> n_yb;
     n_yb.push_back(Ny_pml);
 
@@ -748,9 +748,9 @@ void SolverFDTD::efield_slice_update(int x)
     // h-fields
     MatrixFloatType hx   (fields.hx   + ((x + 1) * hx_NyNz), Ny, Nz);
 
-    MatrixFloatType hy   (fields.hy   + (x * hy_NyNz + ((1) * Nz)), Ny, Nz);
+    MatrixFloatType hy   (fields.hy   + (x * hy_NyNz), Nyp1, Nz);
     // hy at next x cell
-    MatrixFloatType hy_1 (fields.hy   + ((x + 1) * hy_NyNz + ((1) * Nz)), Ny, Nz);
+    MatrixFloatType hy_1 (fields.hy   + ((x + 1) * hy_NyNz), Nyp1, Nz);
 
     MatrixFloatType hz   (fields.hz   + (x * hz_NyNz ), Ny, Nzp1);
     // hz at next x cell
@@ -776,14 +776,14 @@ void SolverFDTD::efield_slice_update(int x)
         }
         
         // compute difference terms across the y-block, including PML along z axis
-        auto hy_diff_x = (hy_1.block(y, 0, Nyb, Nz) - hy.block(y, 0, Nyb, Nz));
+        auto hy_diff_x = (hy_1.block(y+1, 0, Nyb, Nz) - hy.block(y+1, 0, Nyb, Nz));
         auto hz_diff_x = (hz_1.block(y, 1, Nyb, Nzm1) - hz.block(y, 1, Nyb, Nzm1));
 
         auto hx_diff_y = hx.block(y+1, 0, Nyb, Nz) - hx.block(y, 0, Nyb, Nz);
         auto hz_diff_y = hz.block(y+1, 1, Nyb, Nzm1) - hz.block(y, 1, Nyb, Nzm1);
 
-        auto hy_diff_z = hy.block(y, 1, Nyb, Nzm1) - hy.block(y, 0, Nyb, Nzm1);
-        auto hx_diff_z = (hx.block(y, 1, Nyb, Nzm1) - hx.block(y, 1, Nyb, Nzm1));
+        auto hy_diff_z = hy.block(y+1, 1, Nyb, Nzm1) - hy.block(y+1, 0, Nyb, Nzm1);
+        auto hx_diff_z = (hx.block(y, 1, Nyb, Nzm1) - hx.block(y, 0, Nyb, Nzm1));
 
 
         // is the block inside a y-pml section?
@@ -796,7 +796,6 @@ void SolverFDTD::efield_slice_update(int x)
         int ez_offset;
         int s;
         int pml_idx;
-
 
         if (is_x_pml || is_y_pml)
         {
@@ -910,11 +909,11 @@ void SolverFDTD::efield_slice_update(int x)
             // ----------------- update ez -------------------------- //
             // ez_x update
             // get hy components on either side of x-slice, the hz component below ez is in the same cell,
-            ezb.noalias() = Ca_ez_x.block(0, Nz_pml, Nyb, Nzb).cwiseProduct(ezb) + (
+            ezb.noalias() = Ca_ez_x.block(y, Nz_pml, Nyb, Nzb).cwiseProduct(ezb) + (
                 Cb_ez_x.block(y, Nz_pml, Nyb, Nzb).cwiseProduct(hy_diff_x.block(0, Nz_pml, Nyb, Nzb)) + 
                 Cb_ez_y.block(y, Nz_pml, Nyb, Nzb).cwiseProduct(hx_diff_y.block(0, Nz_pml, Nyb, Nzb))
             );
-        
+       
         }
     } 
 
@@ -1164,7 +1163,7 @@ void SolverFDTD::hfield_slice_update(int x)
 
         } // end if (is_x_pml || is_y_pml)
         
-        // update bulk section
+        // update bulk section 
         else
         {
             // h-field values in the bulk region (excludes the PML)
@@ -1190,10 +1189,10 @@ void SolverFDTD::hfield_slice_update(int x)
                 Db_hz_y.block(y, Nz_pml+1, Nyb, Nzb-1).cwiseProduct(ex_diff_y.block(0, Nz_pml, Nyb, Nzb-1))
             );
 
-        } // end update bulk section
+        } // end bulk section
     } // end y loop
 
-    // update PML along z axis
+        // update PML along z axis
     if (Nz_pml)
     {
         for (int s = 0; s < 2; s++)
