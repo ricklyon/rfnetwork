@@ -922,6 +922,7 @@ void SolverFDTD::efield_slice_update(int x)
     // update PML fields along z axis, don't break up into y-blocks since the width along z is already small
     if (Nz_pml)
     {
+        int Nyb = Ny - 2 * Ny_pml;
 
         for (int s = 0; s < 2; s++)
         {   
@@ -945,59 +946,59 @@ void SolverFDTD::efield_slice_update(int x)
             // ----------------- update ex -------------------------- // ;
             // first edge idx of PML (ex or ey)
             int z0 = (s == 0) ? 1 : (Nz - Nz_pml);
-            auto ex_y_pml = ex_y.block(0, 0, Ny-1, Nz_pml);
-            auto hz_diff_y = hz.block(1, z0, Ny-1, Nz_pml) - hz.block(0, z0, Ny-1, Nz_pml);
+            auto ex_y_pml = ex_y.block(Ny_pml, 0, Nyb-1, Nz_pml);
+            auto hz_diff_y = hz.block(Ny_pml+1, z0, Nyb-1, Nz_pml) - hz.block(Ny_pml, z0, Nyb-1, Nz_pml);
 
-            ex_y_pml.noalias() = Ca_ex_y.block(0, z0, Ny-1, Nz_pml).cwiseProduct(ex_y_pml) + (
-                Cb_ex_y.block(0, z0, Ny-1, Nz_pml).cwiseProduct(hz_diff_y)
+            ex_y_pml.noalias() = Ca_ex_y.block(Ny_pml, z0, Nyb-1, Nz_pml).cwiseProduct(ex_y_pml) + (
+                Cb_ex_y.block(Ny_pml, z0, Nyb-1, Nz_pml).cwiseProduct(hz_diff_y)
             );
             
-            auto ex_z_pml = ex_z.block(0, 0, Ny-1, Nz_pml);
-            auto hy_diff_z = hy.block(1, z0, Ny-1, Nz_pml) - hy.block(1, z0-1, Ny-1, Nz_pml);
+            auto ex_z_pml = ex_z.block(Ny_pml, 0, Nyb-1, Nz_pml);
+            auto hy_diff_z = hy.block(Ny_pml, z0, Nyb-1, Nz_pml) - hy.block(Ny_pml+1, z0-1, Nyb-1, Nz_pml);
 
-            ex_z_pml.noalias() = Ca_ex_z.block(0, z0, Ny-1, Nz_pml).cwiseProduct(ex_z_pml ) + (
-                Cb_ex_z.block(0, z0, Ny-1, Nz_pml).cwiseProduct(hy_diff_z)
+            ex_z_pml.noalias() = Ca_ex_z.block(Ny_pml, z0, Nyb-1, Nz_pml).cwiseProduct(ex_z_pml ) + (
+                Cb_ex_z.block(Ny_pml, z0, Nyb-1, Nz_pml).cwiseProduct(hy_diff_z)
             );
 
-            ex.block(0, z0, Ny-1, Nz_pml) = ex_y_pml + ex_z_pml;
+            ex.block(Ny_pml, z0, Nyb-1, Nz_pml) = ex_y_pml + ex_z_pml;
 
 
             // ----------------- update ey -------------------------- //
-            auto ey_z_pml = ey_z.block(0, 0, Ny, Nz_pml);
-            auto hx_diff_z = (hx.block(0, z0, Ny, Nz_pml) - hx.block(0, z0-1, Ny, Nz_pml));
+            auto ey_z_pml = ey_z.block(Ny_pml, 0, Nyb, Nz_pml);
+            auto hx_diff_z = (hx.block(Ny_pml, z0, Nyb, Nz_pml) - hx.block(Ny_pml, z0-1, Nyb, Nz_pml));
 
-            ey_z_pml.noalias() = Ca_ey_z.block(0, z0, Ny, Nz_pml).cwiseProduct(ey_z_pml) + (
-                Cb_ey_z.block(0, z0, Ny, Nz_pml).cwiseProduct(hx_diff_z)
+            ey_z_pml.noalias() = Ca_ey_z.block(Ny_pml, z0, Nyb, Nz_pml).cwiseProduct(ey_z_pml) + (
+                Cb_ey_z.block(Ny_pml, z0, Nyb, Nz_pml).cwiseProduct(hx_diff_z)
             );
 
-            auto ey_x_pml = ey_x.block(0, 0, Ny, Nz_pml);
-            auto hz_diff_x = (hz_1.block(0, z0, Ny, Nz_pml) - hz.block(0, z0, Ny, Nz_pml));
+            auto ey_x_pml = ey_x.block(Ny_pml, 0, Nyb, Nz_pml);
+            auto hz_diff_x = (hz_1.block(Ny_pml, z0, Nyb, Nz_pml) - hz.block(Ny_pml, z0, Nyb, Nz_pml));
 
-            ey_x_pml.noalias()  = Ca_ey_x.block(0, z0, Ny, Nz_pml).cwiseProduct(ey_x_pml) + (
-                Cb_ey_x.block(0, z0, Ny, Nz_pml).cwiseProduct(hz_diff_x)
+            ey_x_pml.noalias()  = Ca_ey_x.block(Ny_pml, z0, Nyb, Nz_pml).cwiseProduct(ey_x_pml) + (
+                Cb_ey_x.block(Ny_pml, z0, Nyb, Nz_pml).cwiseProduct(hz_diff_x)
             );
 
-            ey.block(0, z0, Ny, Nz_pml) = ey_z_pml + ey_x_pml;
+            ey.block(Ny_pml, z0, Nyb, Nz_pml) = ey_z_pml + ey_x_pml;
             
 
             // ----------------- update ez -------------------------- //
             // index for first ez in pml
             z0 = (s == 0) ? 0 : (Nz - Nz_pml);
-            auto ez_x_pml = ez_x.block(0, 0, Ny-1, Nz_pml);
-            auto hy_diff_x = (hy_1.block(1, z0, Ny-1, Nz_pml) - hy.block(1, z0, Ny-1, Nz_pml));
+            auto ez_x_pml = ez_x.block(Ny_pml, 0, Nyb-1, Nz_pml);
+            auto hy_diff_x = (hy_1.block(Ny_pml+1, z0, Nyb-1, Nz_pml) - hy.block(Ny_pml+1, z0, Nyb-1, Nz_pml));
 
-            ez_x_pml.noalias()  = Ca_ez_x.block(0, z0, Ny-1, Nz_pml).cwiseProduct(ez_x_pml) + (
-                Cb_ez_x.block(0, z0, Ny-1, Nz_pml).cwiseProduct(hy_diff_x)
+            ez_x_pml.noalias()  = Ca_ez_x.block(Ny_pml, z0, Nyb-1, Nz_pml).cwiseProduct(ez_x_pml) + (
+                Cb_ez_x.block(Ny_pml, z0, Nyb-1, Nz_pml).cwiseProduct(hy_diff_x)
             );
 
-            auto ez_y_pml = ez_y.block(0, 0, Ny-1, Nz_pml);
-            auto hx_diff_y = hx.block(1, z0, Ny-1, Nz_pml) - hx.block(0, z0, Ny-1, Nz_pml);
+            auto ez_y_pml = ez_y.block(Ny_pml, 0, Nyb-1, Nz_pml);
+            auto hx_diff_y = hx.block(Ny_pml+1, z0, Nyb-1, Nz_pml) - hx.block(Ny_pml, z0, Nyb-1, Nz_pml);
 
             ez_y_pml.noalias()  = Ca_ez_y.cwiseProduct(ez_y_pml) + (
-                Cb_ez_y.block(0, z0, Ny-1, Nz_pml).cwiseProduct(hx_diff_y)
+                Cb_ez_y.block(Ny_pml, z0, Nyb-1, Nz_pml).cwiseProduct(hx_diff_y)
             );
 
-            ez.block(0, z0, Ny, Nz_pml) = ez_x + ez_y;
+            ez.block(Ny_pml, z0, Nyb, Nz_pml) = ez_x_pml + ez_y_pml;
 
 
         }
@@ -1209,70 +1210,76 @@ void SolverFDTD::hfield_slice_update(int x)
         // update PML along z axis
     if (Nz_pml)
     {
+        int Nyb = Ny - 2 * Ny_pml;
         for (int s = 0; s < 2; s++)
         {   
             // hx split fields
-            x_offset = (x * Ny * Nz_pml);
+            x_offset = ((x + 1) * Ny * Nz_pml);
             MatrixFloatType hx_y   (fields_pml[2][s].hx_y   + x_offset, Ny, Nz_pml);
             MatrixFloatType hx_z   (fields_pml[2][s].hx_z   + x_offset, Ny, Nz_pml);
 
             // hy split fields
-            x_offset = (x * Nyp1 * Nz_pml) + ((1) * Nz_pml);
-            MatrixFloatType hy_z   (fields_pml[2][s].hy_z   + x_offset, Ny-1, Nz_pml);
-            MatrixFloatType hy_x   (fields_pml[2][s].hy_x   + x_offset, Ny-1, Nz_pml);
+            x_offset = (x * Nyp1 * Nz_pml) + Nz_pml;
+            MatrixFloatType hy_z   (fields_pml[2][s].hy_z   + x_offset, Ny, Nz_pml);
+            MatrixFloatType hy_x   (fields_pml[2][s].hy_x   + x_offset, Ny, Nz_pml);
 
             // hz split fields
             x_offset = (x * (Ny) * Nz_pml);
             MatrixFloatType hz_x   (fields_pml[2][s].hz_x   + x_offset, Ny, Nz_pml);
             MatrixFloatType hz_y   (fields_pml[2][s].hz_y   + x_offset, Ny, Nz_pml);
 
-            
-
             // ----------------- update hx -------------------------- //
             // first idx of PML (hy or hx)
             int z0 = (s == 0) ? 0 : (Nz - Nz_pml);
-            auto ez_diff_y = ez.block(1, z0, Ny, Nz_pml) - ez.block(0, z0, Ny, Nz_pml);
-            hx_y.noalias() = Da_hx_y.block(0, z0, Ny, Nz_pml).cwiseProduct(hx_y) + (
-                Db_hx_y.block(0, z0, Ny, Nz_pml).cwiseProduct(ez_diff_y)
-            );
+            auto hx_y_pml = hx_y.block(Ny_pml, z0, Nyb, Nz_pml);
+            auto ez_diff_y = ez.block(Ny_pml + 1, z0, Nyb, Nz_pml) - ez.block(Ny_pml, z0, Nyb, Nz_pml);
 
-            auto ey_diff_z = ey.block(0, z0+1, Ny, Nz_pml) - ey.block(0, z0, Ny, Nz_pml);
-            hx_z.noalias() = Da_hx_z.block(0, z0, Ny, Nz_pml).cwiseProduct(hx_z) + (
-                Db_hx_z.block(0, z0, Ny, Nz_pml).cwiseProduct(ey_diff_z)
+            hx_y_pml.noalias() = Da_hx_y.block(Ny_pml, z0, Nyb, Nz_pml).cwiseProduct(hx_y_pml) + (
+                Db_hx_y.block(Ny_pml, z0, Nyb, Nz_pml).cwiseProduct(ez_diff_y)
             );
             
+            auto hx_z_pml = hx_y.block(Ny_pml, z0, Nyb, Nz_pml);
+            auto ey_diff_z = ey.block(Ny_pml, z0+1, Nyb, Nz_pml) - ey.block(Ny_pml, z0, Nyb, Nz_pml);
+            hx_z_pml.noalias() = Da_hx_z.block(Ny_pml, z0, Nyb, Nz_pml).cwiseProduct(hx_z_pml) + (
+                Db_hx_z.block(Ny_pml, z0, Nyb, Nz_pml).cwiseProduct(ey_diff_z)
+            );
+            hx.block(Ny_pml, z0, Ny, Nz_pml) = hx_y_pml + hx_z_pml;
+            
             // ----------------- update hy -------------------------- //
-            auto ex_diff_z = ex.block(1, z0+1, Ny-1, Nz_pml) - ex.block(1, z0, Ny-1, Nz_pml);
-            hy_z.noalias() = Da_hy_z.block(0, z0, Ny-1, Nz_pml).cwiseProduct(hy_z) + (
-                Db_hy_z.block(0, z0, Ny-1, Nz_pml).cwiseProduct(ex_diff_z)
+            auto hy_z_pml = hy_z.block(Ny_pml, z0, Nyb-1, Nz_pml);
+            auto ex_diff_z = ex.block(Ny_pml+1, z0+1, Nyb-1, Nz_pml) - ex.block(Ny_pml+1, z0, Nyb-1, Nz_pml);
+
+            hy_z_pml.noalias() = Da_hy_z.block(Ny_pml, z0, Nyb-1, Nz_pml).cwiseProduct(hy_z) + (
+                Db_hy_z.block(Ny_pml, z0, Nyb-1, Nz_pml).cwiseProduct(ex_diff_z)
             );
 
-            auto ez_diff_x = ez.block(1, z0, Ny-1, Nz_pml) - ez_0.block(1, z0, Ny-1, Nz_pml);
-            hy_x.noalias() = Da_hy_x.block(0, z0, Ny-1, Nz_pml).cwiseProduct(hy_x) + (
-                Db_hy_x.block(0, z0, Ny, Nz_pml).cwiseProduct(ez_diff_x)
+            auto hy_x_pml = hy_x.block(Ny_pml, z0, Nyb-1, Nz_pml);
+            auto ez_diff_x = ez.block(Ny_pml + 1, z0, Nyb-1, Nz_pml) - ez_0.block(Ny_pml + 1, z0, Nyb-1, Nz_pml);
+
+            hy_x_pml.noalias() = Da_hy_x.block(Ny_pml, z0, Nyb-1, Nz_pml).cwiseProduct(hy_x) + (
+                Db_hy_x.block(Ny_pml, z0, Nyb-1, Nz_pml).cwiseProduct(ez_diff_x)
             );
+            hy.block(Ny_pml, z0, Nyb-1, Nz_pml) = hy_z_pml + hy_x_pml;
             
             // ----------------- update hz -------------------------- //
             // index for first hz along z in PML
             z0 = (s == 0) ? 1 : (Nz - Nz_pml);
-            auto hz_x_pml = hz_x.block(0, z0, Ny, Nz_pml);
-            auto ey_diff_x = ey.block(0, z0, Ny, Nz_pml) - ey_0.block(0, z0, Ny, Nz_pml);
+            auto hz_x_pml = hz_x.block(Ny_pml, z0, Nyb, Nz_pml);
+            auto ey_diff_x = ey.block(Ny_pml, z0, Nyb, Nz_pml) - ey_0.block(Ny_pml, z0, Nyb, Nz_pml);
 
-            hz_x_pml.noalias() = Da_hz_x.block(0, z0, Ny, Nz_pml).cwiseProduct(hz_x_pml) + (
-                Db_hz_x.block(0, z0, Ny, Nz_pml).cwiseProduct(ey_diff_x)
+            hz_x_pml.noalias() = Da_hz_x.block(Ny_pml, z0, Nyb, Nz_pml).cwiseProduct(hz_x_pml) + (
+                Db_hz_x.block(Ny_pml, z0, Nyb, Nz_pml).cwiseProduct(ey_diff_x)
             );
             
-            auto hz_y_pml = hz_y.block(0, z0, Ny, Nz_pml);
-            auto ex_diff_y = ex.block(1, z0, Ny, Nz_pml) - ex.block(0, z0, Ny, Nz_pml);
+            auto hz_y_pml = hz_y.block(Ny_pml, z0, Nyb, Nz_pml);
+            auto ex_diff_y = ex.block(Ny_pml+1, z0, Nyb, Nz_pml) - ex.block(Ny_pml, z0, Nyb, Nz_pml);
 
-            hz_y_pml.noalias() = Da_hz_y.block(0, z0, Ny, Nz_pml).cwiseProduct(hz_y_pml) + (
-                Db_hz_y.block(0, z0, Ny, Nz_pml).cwiseProduct(ex_diff_y)
+            hz_y_pml.noalias() = Da_hz_y.block(Ny_pml, z0, Nyb, Nz_pml).cwiseProduct(hz_y_pml) + (
+                Db_hz_y.block(Ny_pml, z0, Nyb, Nz_pml).cwiseProduct(ex_diff_y)
             );
 
             // combine split components
-            hx.block(0, z0, Ny, Nz_pml) = hx_y + hx_z;
-            hy.block(0, z0, Ny, Nz_pml) = hy_z + hy_x;
-            hz.block(0, z0, Ny, Nz_pml) = hz_x_pml + hz_y_pml;
+            hz.block(Ny_pml, z0, Ny, Nz_pml) = hz_x_pml + hz_y_pml;
 
         }
     } // end if (Nz_pml)
