@@ -1325,6 +1325,7 @@ class FDTD_Solver():
             e_idx = [slice(None) for i in range(3)]
             h_idx = [slice(None) for i in range(3)]
 
+            # TODO: account for dummy cell at end of x and y axis
             e_idx[axis_i] = slice(n_pml, 0, -1) if side[1] == "-" else slice(-n_pml-1, -1)
             h_idx[axis_i] = slice(n_pml-1, None, -1) if side[1] == "-" else slice(-n_pml, None)
 
@@ -1576,11 +1577,16 @@ class FDTD_Solver():
                 # update field shape along axis to be the pml width
                 f_shape = list(self.fshape[f_name[:2]])
                 f_shape[i] = self.n_pml[i]
+                # swap memory layout for z-pml to make memory cache more efficient
+                if axis == "z":
+                    f_shape = [f_shape[0], f_shape[2], f_shape[1]]
                 # add two field arrays for each side of the axis
                 fields_pml[axis][f_name] = [
                     np.zeros(tuple(f_shape), dtype=dtype_),
                     np.zeros(tuple(f_shape), dtype=dtype_)
                 ]
+
+
 
         probes = []
         # initialize sources. Sources act like probes, but the values are input to the 
