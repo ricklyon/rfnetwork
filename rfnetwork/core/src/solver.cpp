@@ -332,9 +332,10 @@ int SolverFDTD::solver_init_fields(
     fields.ey = get_field_array(PyDict_GetItemString(py_fields, "ey"), Nxp1, Ny, Nzp1);
     fields.ez = get_field_array(PyDict_GetItemString(py_fields, "ez"), Nxp1, Nyp1, Nz);
 
-    fields.hx = get_field_array(PyDict_GetItemString(py_fields, "hx"), Nxp1, Ny, Nz);
-    fields.hy = get_field_array(PyDict_GetItemString(py_fields, "hy"), Nx, Nyp1, Nz);
-    fields.hz = get_field_array(PyDict_GetItemString(py_fields, "hz"), Nx, Ny, Nzp1);
+    // includes padded cells at ends of x and y axis
+    fields.hx = get_field_array(PyDict_GetItemString(py_fields, "hx"), Nxp1, Nyp1, Nz);
+    fields.hy = get_field_array(PyDict_GetItemString(py_fields, "hy"), Nxp1, Nyp1, Nz);
+    fields.hz = get_field_array(PyDict_GetItemString(py_fields, "hz"), Nxp1, Nyp1, Nzp1);
 
     // PML Fields
 
@@ -719,9 +720,9 @@ void SolverFDTD::efield_slice_update(int x)
     std::vector<int> n_yb;
     n_yb.push_back(Ny_pml);
 
-    for (int y = Ny_pml; y < (Ny - 1 - Ny_pml); y += TILE_Y) 
+    for (int y = Ny_pml; y < (Ny - Ny_pml); y += TILE_Y) 
     {
-        n_yb.push_back(std::min(TILE_Y, (Ny - 1 - Ny_pml) - y));
+        n_yb.push_back(std::min(TILE_Y, (Ny - Ny_pml) - y));
     }
 
     n_yb.push_back(Ny_pml);
@@ -759,7 +760,7 @@ void SolverFDTD::efield_slice_update(int x)
     MatrixFloatType hz_1 (fields.hz + ((x + 1) * hz_NyNz), Ny, Nzp1);
 
 
-    // break y axis up into blocks, skip buffer cell at end
+    // break y axis up into blocks,
     int y = 0;
     for (int i = 0; i < n_yb.size(); i++) 
     {   
@@ -789,9 +790,9 @@ void SolverFDTD::efield_slice_update(int x)
 
 
         // is the block inside a y-pml section?
-        bool is_y_pml = ((Ny_pml > 0) && ((y == 0) || (y >= (Ny - Ny_pml))));
+        bool is_y_pml = ((y < Ny_pml) || (y >= (Ny - Ny_pml)));
         // is the block inside a x-pml section?
-        bool is_x_pml = ((x < Nx_pml) || (x >= (Nx - Nx_pml -1)));
+        bool is_x_pml = ((x < Nx_pml) || (x >= (Nx - Nx_pml)));
 
         int ex_offset;
         int ey_offset;
@@ -805,7 +806,8 @@ void SolverFDTD::efield_slice_update(int x)
             if (is_x_pml)
             {
                 s = (x < Nx_pml) ? 0 : 1;
-                int pml_x = (x < Nx_pml) ? x : x - (Nx - Nx_pml - 1);
+                // index relative to the start of the PML along x
+                int pml_x = (x < Nx_pml) ? x : x - (Nx - Nx_pml);
                 pml_idx = 0;
 
                 // ex split fields. PML fields contain n_pml components along the axis they are assigned to.
@@ -820,7 +822,6 @@ void SolverFDTD::efield_slice_update(int x)
             else // if (is_y_pml)
             {
                 s = (y < Ny_pml) ? 0 : 1;
-                int pml_y = (y < Ny_pml) ? y : y - (Ny - Ny_pml - 1);
                 pml_idx = 1;
 
                 // check that Nyb is the same as Nz_pml (aligned y blocks)
@@ -831,9 +832,9 @@ void SolverFDTD::efield_slice_update(int x)
 
                 // ex split fields. PML fields contain n_pml components along the axis they are assigned to.
                 // the edge components at y=0 are not included.
-                ex_offset = (x * (Ny_pml * Nzp1)) + ((pml_y) * Nzp1);
-                ey_offset = ((x + 1) * (Ny_pml * Nzp1)) + ((pml_y) * Nzp1);
-                ez_offset = ((x + 1) * (Ny_pml * Nz)) + ((pml_y) * Nz);
+                ex_offset = (x * (Ny_pml * Nzp1));
+                ey_offset = ((x + 1) * (Ny_pml * Nzp1));
+                ez_offset = ((x + 1) * (Ny_pml * Nz));
             }
 
             MatrixFloatType ex_y   (fields_pml[pml_idx][s].ex_y   + ex_offset, Nyb, Nzp1);
@@ -1007,9 +1008,9 @@ void SolverFDTD::hfield_slice_update(int x)
     std::vector<int> n_yb;
     n_yb.push_back(Ny_pml);
 
-    for (int y = Ny_pml; y < (Ny - 1 - Ny_pml); y += TILE_Y) 
+    for (int y = Ny_pml; y < (Ny - Ny_pml); y += TILE_Y) 
     {
-        n_yb.push_back(std::min(TILE_Y, (Ny - 1 - Ny_pml) - y));
+        n_yb.push_back(std::min(TILE_Y, (Ny - Ny_pml) - y));
     }
 
     n_yb.push_back(Ny_pml);
@@ -1073,9 +1074,9 @@ void SolverFDTD::hfield_slice_update(int x)
         auto ex_diff_z = ex.block(y+1, 1, Nyb, Nz) - ex.block(y+1, 0, Nyb, Nz);
 
         // is the block inside a y-pml section?
-        bool is_y_pml = ((Ny_pml > 0) && ((y == 0) || (y >= (Ny - Ny_pml))));
+        bool is_y_pml = ((y < Ny_pml) || (y >= (Ny - Ny_pml)));
         // is the block inside a x-pml section?
-        bool is_x_pml = ((x < Nx_pml) || (x >= (Nx - Nx_pml - 1)));
+        bool is_x_pml = ((x < Nx_pml) || (x >= (Nx - Nx_pml)));
         
         if (is_x_pml || is_y_pml)
         {
@@ -1090,7 +1091,7 @@ void SolverFDTD::hfield_slice_update(int x)
             {
                 s = (x < Nx_pml) ? 0 : 1;
                 pml_idx = 0;
-                int pml_x = (x < Nx_pml) ? x : x - (Nx - Nx_pml - 1);
+                int pml_x = (x < Nx_pml) ? x : x - (Nx - Nx_pml);
 
                 hx_offset = (pml_x * hx_NyNz) + ((y) * Nz);
                 hy_offset = (pml_x * hy_NyNz) + ((y+1) * Nz);
@@ -1101,7 +1102,6 @@ void SolverFDTD::hfield_slice_update(int x)
             {
                 s = (y < Ny_pml) ? 0 : 1;
                 pml_idx = 1;
-                int pml_y = (y < (Ny_pml)) ? y : y - (Ny - Ny_pml - 1);
 
                 // check that Nyb is the same as Nz_pml (aligned y blocks)
                 if (Ny_pml != Nyb)
@@ -1109,9 +1109,9 @@ void SolverFDTD::hfield_slice_update(int x)
                     throw std::runtime_error("Ny_pml must be aligned with y blocks.");
                 }
 
-                hx_offset = ((x + 1) * (Ny_pml * Nz)) + ((pml_y) * Nz);
-                hy_offset = (x * (Ny_pml * Nz)) + ((pml_y) * Nz);
-                hz_offset = (x * (Ny_pml * Nzp1)) + ((pml_y) * Nzp1);
+                hx_offset = ((x + 1) * (Ny_pml * Nz));
+                hy_offset = (x * (Ny_pml * Nz));
+                hz_offset = (x * (Ny_pml * Nzp1));
             }
 
             MatrixFloatType hx_y   (fields_pml[pml_idx][s].hx_y   + hx_offset, Nyb, Nz);
@@ -1142,18 +1142,20 @@ void SolverFDTD::hfield_slice_update(int x)
             );
 
             // ----------------- update hz -------------------------- //
-            hz_x.noalias() = Da_hz_x.block(y, 0, Nyb, Nzp1).cwiseProduct(hz_x) + (
-                Db_hz_x.block(y, 0, Nyb, Nzp1).cwiseProduct(ey_diff_x)
+            auto hz_x_pml = hz.block(y, 1, Nyb, Nzm1);
+            hz_x_pml.noalias() = Da_hz_x.block(y, 1, Nyb, Nzm1).cwiseProduct(hz_x_pml) + (
+                Db_hz_x.block(y, 1, Nyb, Nzp1).cwiseProduct(ey_diff_x)
             );
-
-            hz_y.noalias() = Da_hz_y.block(y, 0, Nyb, Nzp1).cwiseProduct(hz_y) + (
-                Db_hz_y.block(y, 0, Nyb, Nzp1).cwiseProduct(ex_diff_y)
+            
+            auto hz_y_pml = hz.block(y, 1, Nyb, Nzm1);
+            hz_y.noalias() = Da_hz_y.block(y, 1, Nyb, Nzm1).cwiseProduct(hz_y_pml) + (
+                Db_hz_y.block(y, 1, Nyb, Nzm1).cwiseProduct(ex_diff_y)
             );
 
             // combine split components
             hx.block(y, 0, Nyb, Nz) = hx_y + hx_z;
             hy.block(y, 0, Nyb, Nz) = hy_z + hy_x;
-            hz.block(y, 0, Nyb, Nzp1) = hz_x + hz_y;
+            hz.block(y, 1, Nyb, Nzm1) = hz_x_pml + hz_y_pml;
 
         } // end if (is_x_pml || is_y_pml)
         

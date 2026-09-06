@@ -1325,7 +1325,6 @@ class FDTD_Solver():
             e_idx = [slice(None) for i in range(3)]
             h_idx = [slice(None) for i in range(3)]
 
-            # TODO: account for dummy cell at end of x and y axis
             e_idx[axis_i] = slice(n_pml, 0, -1) if side[1] == "-" else slice(-n_pml-1, -1)
             h_idx[axis_i] = slice(n_pml-1, None, -1) if side[1] == "-" else slice(-n_pml, None)
 
@@ -1560,12 +1559,17 @@ class FDTD_Solver():
             Db_hz_y = self.Db["hz_y"] * dy_inv,
         )
 
-        # initialize field arrays
-        fields = {k: np.zeros(self.fshape[k], dtype=dtype_) for k in self.fshape.keys()}
+        # initialize field arrays, add extra components for hy and hz along x and y axis so each cell can be
+        # updated in the same way, avoids bounds checking on each time step.
+        fields = dict()
+        for k, f_shape in self.fshape.items():
+            xs, ys, zs = f_shape
+            if k in ("hy", "hz"):
+                xs += 1
+            if k in ("hx", "hz"):
+                ys += 1
 
-        # drop components on the edge of the x-axis
-        # for k in ("ey", "ez", "hx"):
-        #     fields[k] = fields[k][1:]
+            fields[k] = np.zeros((xs, ys, zs), dtype=dtype_)
 
         # initialize split fields in PML regions
         fields_pml = dict()
