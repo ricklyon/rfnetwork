@@ -701,17 +701,12 @@ void SolverFDTD::solver_controller(int Nt, int n_threads, int update_interval)
 **/
 void SolverFDTD::efield_slice_update(int x)
 {
-    // don't update last cell along x (dummy cell)
-    if (x >= (Nx - 1))
-    {
-        return;
-    }
-    
+
     int Nx_pml = N_pml[0];
     int Ny_pml = N_pml[1];
     int Nz_pml = N_pml[2];
 
-    int TILE_Y = 32;
+    int TILE_Y = 132;
     int x_offset;
 
     // width of bulk section of grid along z axis, excluding PML
@@ -749,15 +744,15 @@ void SolverFDTD::efield_slice_update(int x)
     MatrixFloatType Ca_ez_y (Cz.Ca_ez_y + x_offset, Ny, Nz);
 
     // h-fields
-    MatrixFloatType hx   (fields.hx   + ((x + 1) * hx_NyNz), Ny, Nz);
+    MatrixFloatType hx   (fields.hx   + ((x + 1) * hx_NyNz), Nyp1, Nz);
 
     MatrixFloatType hy   (fields.hy   + (x * hy_NyNz), Nyp1, Nz);
     // hy at next x cell
     MatrixFloatType hy_1 (fields.hy   + ((x + 1) * hy_NyNz), Nyp1, Nz);
 
-    MatrixFloatType hz   (fields.hz   + (x * hz_NyNz ), Ny, Nzp1);
+    MatrixFloatType hz   (fields.hz   + (x * hz_NyNz ), Nyp1, Nzp1);
     // hz at next x cell
-    MatrixFloatType hz_1 (fields.hz + ((x + 1) * hz_NyNz), Ny, Nzp1);
+    MatrixFloatType hz_1 (fields.hz + ((x + 1) * hz_NyNz), Nyp1, Nzp1);
 
 
     // break y axis up into blocks,
@@ -874,12 +869,12 @@ void SolverFDTD::efield_slice_update(int x)
 
             // ----------------- update ez -------------------------- //
             auto ez_x_pml = ez_x.block(0, 0, Nyb, Nz);
-            ez_x_pml.noalias()  = Ca_ez_x.block(0, 0, Nyb, Nz).cwiseProduct(ez_x_pml) + (
+            ez_x_pml.noalias()  = Ca_ez_x.block(y, 0, Nyb, Nz).cwiseProduct(ez_x_pml) + (
                 Cb_ez_x.block(y, 0, Nyb, Nz).cwiseProduct(hy_diff_x.block(0, 0, Nyb, Nz))
             );
             
             auto ez_y_pml = ez_y.block(0, 0, Nyb, Nz);
-            ez_y_pml.noalias() = Ca_ez_y.block(0, 0, Nyb, Nz).cwiseProduct(ez_y_pml) + (
+            ez_y_pml.noalias() = Ca_ez_y.block(y, 0, Nyb, Nz).cwiseProduct(ez_y_pml) + (
                 Cb_ez_y.block(y, 0, Nyb, Nz).cwiseProduct(hx_diff_y.block(0, 0, Nyb, Nz))
             );
 
@@ -999,7 +994,7 @@ void SolverFDTD::hfield_slice_update(int x)
     int Ny_pml = N_pml[1];
     int Nz_pml = N_pml[2];
 
-    int TILE_Y = 32;
+    int TILE_Y = 132;
     int x_offset;
 
     // width of bulk section of grid along z axis, excluding PML
@@ -1142,12 +1137,12 @@ void SolverFDTD::hfield_slice_update(int x)
             );
 
             // ----------------- update hz -------------------------- //
-            auto hz_x_pml = hz.block(y, 1, Nyb, Nzm1);
+            auto hz_x_pml = hz_x.block(0, 1, Nyb, Nzm1);
             hz_x_pml.noalias() = Da_hz_x.block(y, 1, Nyb, Nzm1).cwiseProduct(hz_x_pml) + (
                 Db_hz_x.block(y, 1, Nyb, Nzp1).cwiseProduct(ey_diff_x)
             );
             
-            auto hz_y_pml = hz.block(y, 1, Nyb, Nzm1);
+            auto hz_y_pml = hz_y.block(0, 1, Nyb, Nzm1);
             hz_y.noalias() = Da_hz_y.block(y, 1, Nyb, Nzm1).cwiseProduct(hz_y_pml) + (
                 Db_hz_y.block(y, 1, Nyb, Nzm1).cwiseProduct(ex_diff_y)
             );
