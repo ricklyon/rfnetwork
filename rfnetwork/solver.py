@@ -1561,16 +1561,14 @@ class FDTD_Solver():
         # initialize field arrays, add extra pad components for hy and hz along x and y axis so each cell can be
         # updated in the same way, avoids bounds checking on each time step.
         fields = dict()
-        for k, f_shape in self.fshape.items():
+        for f_name, f_shape in self.fshape.items():
             xs, ys, zs = f_shape
-            if k in ("hy", "hz"):
+            if f_name in ("hy", "hz"):
                 xs += 1
-            if k in ("hx", "hz"):
+            if f_name in ("hx", "hz"):
                 ys += 1
 
-            fields[k] = np.zeros((xs, ys, zs), dtype=dtype_)
-
-        print(fields["hx"].shape, Nx, Ny, Nz)
+            fields[f_name] = np.zeros((xs, ys, zs), dtype=dtype_)
 
         # initialize split fields in PML regions
         fields_pml = dict()
@@ -1578,16 +1576,19 @@ class FDTD_Solver():
 
         for i, axis in enumerate(["x", "y", "z"]):
             fields_pml[axis] = dict()
-            for f_name in f_split_names:
+            for sf_name in f_split_names:
+                # get the base field name from the split field name
+                f_name = sf_name[:2]
 
-                f_shape = list(self.fshape[f_name[:2]])
+                f_shape = list(self.fshape[f_name])
     
                 # add extra pad cell for hy and hz
-                if k in ("hy", "hz"):
-                    xs += 1
-                if k in ("hx", "hz"):
-                    ys += 1
                 xs, ys, zs = f_shape
+                if f_name in ("hy", "hz"):
+                    xs += 1
+                if f_name in ("hx", "hz"):
+                    ys += 1
+                f_shape = [xs, ys, zs]
 
                 # update field shape along axis to be the pml width
                 f_shape[i] = self.n_pml[i]
@@ -1597,7 +1598,7 @@ class FDTD_Solver():
                     f_shape = [f_shape[0], f_shape[2], f_shape[1]]
 
                 # add two field arrays for each side of the axis
-                fields_pml[axis][f_name] = [
+                fields_pml[axis][sf_name] = [
                     np.zeros(tuple(f_shape), dtype=dtype_),
                     np.zeros(tuple(f_shape), dtype=dtype_)
                 ]
