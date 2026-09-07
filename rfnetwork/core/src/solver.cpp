@@ -250,9 +250,10 @@ int SolverFDTD::solver_init_fields(
     ey_NyNz = (Ny) * (Nzp1);
     ez_NyNz = (Nyp1) * (Nz);
 
-    hx_NyNz = (Ny) * (Nz);
+    // extra pad on y axis for hx and hz
+    hx_NyNz = (Nyp1) * (Nz);
     hy_NyNz = (Nyp1) * (Nz);
-    hz_NyNz = (Ny) * (Nzp1);
+    hz_NyNz = (Nyp1) * (Nzp1);
 
 
     int NyNz = Ny * Nz;
@@ -332,7 +333,7 @@ int SolverFDTD::solver_init_fields(
     fields.ey = get_field_array(PyDict_GetItemString(py_fields, "ey"), Nxp1, Ny, Nzp1);
     fields.ez = get_field_array(PyDict_GetItemString(py_fields, "ez"), Nxp1, Nyp1, Nz);
 
-    // includes padded cells at ends of x and y axis
+    // includes padded cells at end of x and y axis
     fields.hx = get_field_array(PyDict_GetItemString(py_fields, "hx"), Nxp1, Nyp1, Nz);
     fields.hy = get_field_array(PyDict_GetItemString(py_fields, "hy"), Nxp1, Nyp1, Nz);
     fields.hz = get_field_array(PyDict_GetItemString(py_fields, "hz"), Nxp1, Nyp1, Nzp1);
@@ -389,12 +390,9 @@ int SolverFDTD::solver_init_monitors(PyObject * py_monitors, int Nt, int gpu)
     // int Ny[6] = {Ex.Ny, Ey.Ny, Ez.Ny, Hx.Ny, Hy.Ny, Hz.Ny};
     // int Nz[6] = {Ex.Nz, Ey.Nz, Ez.Nz, Hx.Nz, Hy.Nz, Hz.Nz};
 
-    // allocated array length for each field type
-    int Ny1 = (gpu) ? Ny : Ny+1;
-    int Nz1 = (gpu) ? Nz : Nz+1;
-
-    int f_Ny[6] = {Ny1, Ny, Ny1, Ny, Ny1, Ny};
-    int f_Nz[6] = {Nz1, Nz1, Nz, Nz, Nz, Nz1};
+    // includes pad cell at end of y axis for hx and hz
+    int f_Ny[6] = {Nyp1, Ny, Nyp1, Nyp1, Nyp1, Nyp1};
+    int f_Nz[6] = {Nzp1, Nzp1, Nz, Nz, Nz, Nzp1};
 
     PyObject* py_mon;
 
@@ -842,7 +840,7 @@ void SolverFDTD::efield_slice_update(int x)
             // ----------------- update ex -------------------------- // 
             auto ex_y_pml = ex_y.block(0, 1, Nyb, Nzm1);
             ex_y_pml.noalias() = Ca_ex_y.block(y, 1, Nyb, Nzm1).cwiseProduct(ex_y_pml) + (
-                Cb_ex_y.block(y, 1, Nyb, Nzm1).cwiseProduct(hz_diff_y.block(0, 1, Nyb, Nzm1))
+                Cb_ex_y.block(y, 1, Nyb, Nzm1).cwiseProduct(hz_diff_y.block(0, 0, Nyb, Nzm1))
             );
             
             auto ex_z_pml = ex_z.block(0, 1, Nyb, Nzm1);
@@ -861,7 +859,7 @@ void SolverFDTD::efield_slice_update(int x)
             
             auto ey_x_pml = ey_x.block(0, 1, Nyb, Nzm1);
             ey_x_pml.noalias() = Ca_ey_x.block(y, 1, Nyb, Nzm1).cwiseProduct(ey_x_pml) + (
-                Cb_ey_x.block(y, 1, Nyb, Nzm1).cwiseProduct(hz_diff_x.block(0, 1, Nyb, Nzm1))
+                Cb_ey_x.block(y, 1, Nyb, Nzm1).cwiseProduct(hz_diff_x.block(0, 0, Nyb, Nzm1))
             );
 
             ey.block(y, 1, Nyb, Nzm1) = ey_z_pml + ey_x_pml;
@@ -1012,7 +1010,7 @@ void SolverFDTD::hfield_slice_update(int x)
 
     // hx coefficients
     x_offset = (x+1) * hx_NyNz;
-    MatrixFloatType hx   (fields.hx   + x_offset, Ny, Nz);
+    MatrixFloatType hx   (fields.hx   + x_offset, Nyp1, Nz);
     MatrixFloatType Db_hx_y (Dx.Db_hx_y + x_offset, Ny, Nz);
     MatrixFloatType Db_hx_z (Dx.Db_hx_z + x_offset, Ny, Nz);
     MatrixFloatType Da_hx_y (Dx.Da_hx_y + x_offset, Ny, Nz);
@@ -1028,7 +1026,7 @@ void SolverFDTD::hfield_slice_update(int x)
 
     // hz coefficients
     x_offset = x * hz_NyNz;
-    MatrixFloatType hz   (fields.hz   + x_offset, Ny, Nzp1);
+    MatrixFloatType hz   (fields.hz   + x_offset, Nyp1, Nzp1);
     MatrixFloatType Db_hz_x (Dz.Db_hz_x + x_offset, Ny, Nzp1);
     MatrixFloatType Db_hz_y (Dz.Db_hz_y + x_offset, Ny, Nzp1);
     MatrixFloatType Da_hz_x (Dz.Da_hz_x + x_offset, Ny, Nzp1);

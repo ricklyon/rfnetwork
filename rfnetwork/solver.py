@@ -1501,20 +1501,17 @@ class FDTD_Solver():
         dy_h_inv = 1 / dy_h[None, :, None]
         dz_h_inv = 1 / dz_h[None, None, :]
 
-        # dx, dy, dz with an extra component for the last component at the edge of the grid that has no neighboring
-        # cell.
-        # This also ensures the fields remain at 0 at the end of the grid (PEC boundary)
-        # dx1_h_inv = np.concatenate([dx_h_inv, [[[0]]]], axis=0)
-        # dy1_h_inv = np.concatenate([dy_h_inv, [[[0]]]], axis=1)
-        # dz1_h_inv = np.concatenate([dz_h_inv, [[[0]]]], axis=2)
 
-        # cpu solver drops the coefficients at the edges of the grid, gpu does not so that all fields and 
-        # coefficents are the same shape. Equally sized arrays don't work as well for the CPU because an extra
-        # h-field component is needed past the end of the grid to avoid a special case for the edge components
-        end = None if gpu else -1
+        # ensure coefficents at end of y axis are zero
+        self.Ca["ex_y"][:, -1, :] = 0
+        self.Ca["ex_z"][:, -1, :] = 0
+        self.Cb["ex_y"][:, -1, :] = 0
+        self.Cb["ex_z"][:, -1, :] = 0
 
-        hs = 1 if gpu else 0
-
+        self.Ca["ez_x"][:, -1, :] = 0
+        self.Ca["ez_y"][:, -1, :] = 0
+        self.Cb["ez_x"][:, -1, :] = 0
+        self.Cb["ez_y"][:, -1, :] = 0
 
         # The grid in the C++ solver is parallelized along x, each x cell is defined as the Ex, Hz, Hy components, and
         # the Ey, Ez, and Hx components at the right end of the cell. The Ey, Ez, and Hx components at the left end of
@@ -1559,6 +1556,8 @@ class FDTD_Solver():
             Db_hz_y = self.Db["hz_y"] * dy_inv,
         )
 
+
+
         # initialize field arrays, add extra components for hy and hz along x and y axis so each cell can be
         # updated in the same way, avoids bounds checking on each time step.
         fields = dict()
@@ -1570,6 +1569,8 @@ class FDTD_Solver():
                 ys += 1
 
             fields[k] = np.zeros((xs, ys, zs), dtype=dtype_)
+
+        print(fields["hx"].shape, Nx, Ny, Nz)
 
         # initialize split fields in PML regions
         fields_pml = dict()
@@ -1584,6 +1585,9 @@ class FDTD_Solver():
                 # swap memory layout for z-pml to make memory cache more efficient
                 if axis == "z":
                     f_shape = [f_shape[0], f_shape[2], f_shape[1]]
+
+                # TODO: add buffer cells on h fields
+
                 # add two field arrays for each side of the axis
                 fields_pml[axis][f_name] = [
                     np.zeros(tuple(f_shape), dtype=dtype_),
@@ -1643,7 +1647,8 @@ class FDTD_Solver():
 
             # allocated array length for each field type in the solver, all e-field components are included,
             # except at x=0. H-field components have an extra component at the ends of the grid along y and z.
-            f_Ny = [self.Ny+1, self.Ny, self.Ny+1, self.Ny, self.Ny+1, self.Ny]
+            # includes pad cell at end of y axis for hx and hy
+            f_Ny = [self.Ny+1, self.Ny, self.Ny+1, self.Ny+1, self.Ny+1, self.Ny+1]
             f_Nz = [self.Nz+1, self.Nz+1, self.Nz, self.Nz, self.Nz, self.Nz+1]
 
             if m["axis"] == 0:
@@ -1712,6 +1717,15 @@ class FDTD_Solver():
             if m["axis"] in [1, 2] and m["field"] in ["hx", "ey", "ez"]:
                 m_val = np.pad(m_val, ((0, 0), (1, 0), (0, 0)))
 
+            # remove pad cell at end of y axis for hx and hz monitors
+            if m["field"] in ("hx", "hz"):
+                if m["axis"] == 0:
+                    # dims are time, y, z
+                    m_val = m_val[:, :-1]
+                elif m["axis"] == 2:
+                    # dims are time, x, y
+                    m_val = m_val[:, :, :-1]
+
             if gpu:
                 # gpu grid is Nx, Ny, Nz for all components. Add extra row columns for components that start at
                 # the edge of the grid
@@ -1758,6 +1772,8 @@ class FDTD_Solver():
             self.probes[k]["values"] = probes[i + probe_i]["values"]
 
         self._solved = True
+
+        return fields
 
 
     def add_field_monitor(
