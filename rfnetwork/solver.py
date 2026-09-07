@@ -1558,7 +1558,7 @@ class FDTD_Solver():
 
 
 
-        # initialize field arrays, add extra components for hy and hz along x and y axis so each cell can be
+        # initialize field arrays, add extra pad components for hy and hz along x and y axis so each cell can be
         # updated in the same way, avoids bounds checking on each time step.
         fields = dict()
         for k, f_shape in self.fshape.items():
@@ -1579,14 +1579,22 @@ class FDTD_Solver():
         for i, axis in enumerate(["x", "y", "z"]):
             fields_pml[axis] = dict()
             for f_name in f_split_names:
-                # update field shape along axis to be the pml width
+
                 f_shape = list(self.fshape[f_name[:2]])
+    
+                # add extra pad cell for hy and hz
+                if k in ("hy", "hz"):
+                    xs += 1
+                if k in ("hx", "hz"):
+                    ys += 1
+                xs, ys, zs = f_shape
+
+                # update field shape along axis to be the pml width
                 f_shape[i] = self.n_pml[i]
+
                 # swap memory layout for z-pml to make memory cache more efficient
                 if axis == "z":
                     f_shape = [f_shape[0], f_shape[2], f_shape[1]]
-
-                # TODO: add buffer cells on h fields
 
                 # add two field arrays for each side of the axis
                 fields_pml[axis][f_name] = [
