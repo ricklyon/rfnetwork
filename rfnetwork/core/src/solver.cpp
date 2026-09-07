@@ -1194,9 +1194,9 @@ void SolverFDTD::hfield_slice_update(int x)
             // transpose to use the matrices in normal order without modifying the memory layout
 
             // hx split fields
-            x_offset = ((x + 1) * Ny * Nz_pml);
-            MatrixFloatType hx_y   (fields_pml[2][s].hx_y   + x_offset, Nz_pml, Ny);
-            MatrixFloatType hx_z   (fields_pml[2][s].hx_z   + x_offset, Nz_pml, Ny);
+            x_offset = ((x + 1) * Nyp1 * Nz_pml);
+            MatrixFloatType hx_y   (fields_pml[2][s].hx_y   + x_offset, Nz_pml, Nyp1);
+            MatrixFloatType hx_z   (fields_pml[2][s].hx_z   + x_offset, Nz_pml, Nyp1);
 
             // hy split fields
             x_offset = (x * Nyp1 * Nz_pml);
