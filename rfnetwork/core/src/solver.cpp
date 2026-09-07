@@ -255,6 +255,10 @@ int SolverFDTD::solver_init_fields(
     hy_NyNz = (Nyp1) * (Nz);
     hz_NyNz = (Nyp1) * (Nzp1);
 
+    // coefficients do not have extra pad
+    Dx_NyNz = (Ny * Nz);
+    Dy_NyNz = (Nyp1) * (Nz);
+    Dz_NyNz = (Ny) * (Nzp1);
 
     int NyNz = Ny * Nz;
 
@@ -287,10 +291,10 @@ int SolverFDTD::solver_init_fields(
     Cy.Ca_ey_z = get_field_array(PyDict_GetItemString(coefficients, "Ca_ey_z"), Nxp1, Ny, Nzp1);
     Cy.Ca_ey_x = get_field_array(PyDict_GetItemString(coefficients, "Ca_ey_x"), Nxp1, Ny, Nzp1);
     // ensure coefficients at the end of the x-axis are zero to create a PEC boundary (skip dummy cell)
-    memset(Cy.Cb_ey_z + ((Nx - 1) * ey_NyNz), 0, ey_NyNz * sizeof(float));
-    memset(Cy.Cb_ey_x + ((Nx - 1) * ey_NyNz), 0, ey_NyNz * sizeof(float));
-    memset(Cy.Ca_ey_z + ((Nx - 1) * ey_NyNz), 0, ey_NyNz * sizeof(float));
-    memset(Cy.Ca_ey_x + ((Nx - 1) * ey_NyNz), 0, ey_NyNz * sizeof(float));
+    memset(Cy.Cb_ey_z + ((Nx) * ey_NyNz), 0, ey_NyNz * sizeof(float));
+    memset(Cy.Cb_ey_x + ((Nx) * ey_NyNz), 0, ey_NyNz * sizeof(float));
+    memset(Cy.Ca_ey_z + ((Nx) * ey_NyNz), 0, ey_NyNz * sizeof(float));
+    memset(Cy.Ca_ey_x + ((Nx) * ey_NyNz), 0, ey_NyNz * sizeof(float));
 
     // Cz
     Cz.Cb_ez_x = get_field_array(PyDict_GetItemString(coefficients, "Cb_ez_x"), Nxp1, Nyp1, Nz);
@@ -298,21 +302,16 @@ int SolverFDTD::solver_init_fields(
     Cz.Ca_ez_x = get_field_array(PyDict_GetItemString(coefficients, "Ca_ez_x"), Nxp1, Nyp1, Nz);
     Cz.Ca_ez_y = get_field_array(PyDict_GetItemString(coefficients, "Ca_ez_y"), Nxp1, Nyp1, Nz);
     // ensure coefficients at the end of the x-axis are zero to create a PEC boundary
-    memset(Cz.Cb_ez_x + ((Nx - 1) * ez_NyNz), 0, ez_NyNz * sizeof(float));
-    memset(Cz.Cb_ez_y + ((Nx - 1) * ez_NyNz), 0, ez_NyNz * sizeof(float));
-    memset(Cz.Ca_ez_x + ((Nx - 1) * ez_NyNz), 0, ez_NyNz * sizeof(float));
-    memset(Cz.Ca_ez_y + ((Nx - 1) * ez_NyNz), 0, ez_NyNz * sizeof(float));
+    memset(Cz.Cb_ez_x + ((Nx) * ez_NyNz), 0, ez_NyNz * sizeof(float));
+    memset(Cz.Cb_ez_y + ((Nx) * ez_NyNz), 0, ez_NyNz * sizeof(float));
+    memset(Cz.Ca_ez_x + ((Nx) * ez_NyNz), 0, ez_NyNz * sizeof(float));
+    memset(Cz.Ca_ez_y + ((Nx) * ez_NyNz), 0, ez_NyNz * sizeof(float));
 
     // Dx
     Dx.Db_hx_y = get_field_array(PyDict_GetItemString(coefficients, "Db_hx_y"), Nxp1, Ny, Nz);
     Dx.Db_hx_z = get_field_array(PyDict_GetItemString(coefficients, "Db_hx_z"), Nxp1, Ny, Nz);
     Dx.Da_hx_y = get_field_array(PyDict_GetItemString(coefficients, "Da_hx_y"), Nxp1, Ny, Nz);
     Dx.Da_hx_z = get_field_array(PyDict_GetItemString(coefficients, "Da_hx_z"), Nxp1, Ny, Nz);
-    // ensure coefficients at the end of the x-axis are zero to create a PEC boundary
-    memset(Dx.Db_hx_y + ((Nx - 1) * hx_NyNz), 0, hx_NyNz * sizeof(float));
-    memset(Dx.Db_hx_z + ((Nx - 1) * hx_NyNz), 0, hx_NyNz * sizeof(float));
-    memset(Dx.Da_hx_y + ((Nx - 1) * hx_NyNz), 0, hx_NyNz * sizeof(float));
-    memset(Dx.Da_hx_z + ((Nx - 1) * hx_NyNz), 0, hx_NyNz * sizeof(float));
 
     // Dy
     Dy.Db_hy_z = get_field_array(PyDict_GetItemString(coefficients, "Db_hy_z"), Nx, Nyp1, Nz);
@@ -570,10 +569,9 @@ int SolverFDTD::solver_run(int Nt, int n_th, int update_interval)
     }
 
     // number of x slices computed by each thread
-    // skip last cells (used only as all zero dummy cells)
-    int n_batch = (Nx - 1) / n_threads;
+    int n_batch = (Nx) / n_threads;
     // remainder of batch size
-    int r_batch = (Nx - 1) % n_threads;
+    int r_batch = (Nx) % n_threads;
 
     int x_start_th = 0;
     int x_stop_th = 0;
@@ -1011,6 +1009,7 @@ void SolverFDTD::hfield_slice_update(int x)
     // hx coefficients
     x_offset = (x+1) * hx_NyNz;
     MatrixFloatType hx   (fields.hx   + x_offset, Nyp1, Nz);
+    x_offset = (x+1) * Dx_NyNz;
     MatrixFloatType Db_hx_y (Dx.Db_hx_y + x_offset, Ny, Nz);
     MatrixFloatType Db_hx_z (Dx.Db_hx_z + x_offset, Ny, Nz);
     MatrixFloatType Da_hx_y (Dx.Da_hx_y + x_offset, Ny, Nz);
@@ -1019,6 +1018,7 @@ void SolverFDTD::hfield_slice_update(int x)
     // hy coefficients
     x_offset = x * hy_NyNz + ((1) * Nz);
     MatrixFloatType hy   (fields.hy   + x_offset, Ny, Nz);
+    x_offset = x * Dy_NyNz + ((1) * Nz);
     MatrixFloatType Db_hy_z (Dy.Db_hy_z + x_offset, Ny, Nz);
     MatrixFloatType Db_hy_x (Dy.Db_hy_x + x_offset, Ny, Nz);
     MatrixFloatType Da_hy_z (Dy.Da_hy_z + x_offset, Ny, Nz);
@@ -1027,6 +1027,7 @@ void SolverFDTD::hfield_slice_update(int x)
     // hz coefficients
     x_offset = x * hz_NyNz;
     MatrixFloatType hz   (fields.hz   + x_offset, Nyp1, Nzp1);
+    x_offset = x * Dz_NyNz;
     MatrixFloatType Db_hz_x (Dz.Db_hz_x + x_offset, Ny, Nzp1);
     MatrixFloatType Db_hz_y (Dz.Db_hz_y + x_offset, Ny, Nzp1);
     MatrixFloatType Da_hz_x (Dz.Da_hz_x + x_offset, Ny, Nzp1);
@@ -1141,7 +1142,7 @@ void SolverFDTD::hfield_slice_update(int x)
             );
             
             auto hz_y_pml = hz_y.block(0, 1, Nyb, Nzm1);
-            hz_y.noalias() = Da_hz_y.block(y, 1, Nyb, Nzm1).cwiseProduct(hz_y_pml) + (
+            hz_y_pml.noalias() = Da_hz_y.block(y, 1, Nyb, Nzm1).cwiseProduct(hz_y_pml) + (
                 Db_hz_y.block(y, 1, Nyb, Nzm1).cwiseProduct(ex_diff_y)
             );
 

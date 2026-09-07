@@ -191,6 +191,12 @@ private:
     int hy_NyNz;
     int hz_NyNz;
 
+    // size of coefficients for h fields, unlike the e-field coefficients, these differ because of the
+    // extra pad cells on the the h-fields.
+    int Dx_NyNz;
+    int Dy_NyNz;
+    int Dz_NyNz;
+
     // mbuffer_t m_pool{NULL, NULL, 0};
 
     float * mbuffer_allocate(uint64_t size);
