@@ -702,7 +702,7 @@ void SolverFDTD::efield_slice_update(int x)
     int Ny_pml = N_pml[1];
     int Nz_pml = N_pml[2];
 
-    int TILE_Y = 132;
+    int TILE_Y = 32;
     int x_offset;
 
     // width of bulk section of grid along z axis, excluding PML
@@ -934,22 +934,26 @@ void SolverFDTD::efield_slice_update(int x)
             // first edge idx of PML (ex or ey)
             int z0 = (s == 0) ? 1 : (Nz - Nz_pml);
 
+            // the last update along y is the first cell in the y-PML where the coefficients are zero (first edge of 
+            // PML has no attenuation.) This keeps things consistent with the bulk section updates that always update
+            // the ex on the positive y-axis end of the cell. 
+
             // difference terms for ex
-            auto hz_diff_y = hz.block(Ny_pml+1, z0, Nyb-1, Nz_pml) - hz.block(Ny_pml, z0, Nyb-1, Nz_pml);
-            auto hy_diff_z = hy.block(Ny_pml+1, z0, Nyb-1, Nz_pml) - hy.block(Ny_pml+1, z0-1, Nyb-1, Nz_pml);
+            auto hz_diff_y = hz.block(Ny_pml+1, z0, Nyb, Nz_pml) - hz.block(Ny_pml, z0, Nyb, Nz_pml);
+            auto hy_diff_z = hy.block(Ny_pml+1, z0, Nyb, Nz_pml) - hy.block(Ny_pml+1, z0-1, Nyb, Nz_pml);
 
-            auto ex_y_pml = ex_y.transpose().block(Ny_pml+1, 0, Nyb-1, Nz_pml);
-            auto ex_z_pml = ex_z.transpose().block(Ny_pml+1, 0, Nyb-1, Nz_pml);
+            auto ex_y_pml = ex_y.transpose().block(Ny_pml+1, 0, Nyb, Nz_pml);
+            auto ex_z_pml = ex_z.transpose().block(Ny_pml+1, 0, Nyb, Nz_pml);
 
-            ex_y_pml.noalias() = Ca_ex_y.block(Ny_pml, z0, Nyb-1, Nz_pml).cwiseProduct(ex_y_pml) + (
-                Cb_ex_y.block(Ny_pml, z0, Nyb-1, Nz_pml).cwiseProduct(hz_diff_y)
+            ex_y_pml.noalias() = Ca_ex_y.block(Ny_pml, z0, Nyb, Nz_pml).cwiseProduct(ex_y_pml) + (
+                Cb_ex_y.block(Ny_pml, z0, Nyb, Nz_pml).cwiseProduct(hz_diff_y)
             );
             
-            ex_z_pml.noalias() = Ca_ex_z.block(Ny_pml, z0, Nyb-1, Nz_pml).cwiseProduct(ex_z_pml ) + (
-                Cb_ex_z.block(Ny_pml, z0, Nyb-1, Nz_pml).cwiseProduct(hy_diff_z)
+            ex_z_pml.noalias() = Ca_ex_z.block(Ny_pml, z0, Nyb, Nz_pml).cwiseProduct(ex_z_pml ) + (
+                Cb_ex_z.block(Ny_pml, z0, Nyb, Nz_pml).cwiseProduct(hy_diff_z)
             );
 
-            ex.block(Ny_pml, z0, Nyb-1, Nz_pml) = ex_y_pml + ex_z_pml;
+            ex.block(Ny_pml, z0, Nyb, Nz_pml) = ex_y_pml + ex_z_pml;
 
 
             // ----------------- update ey -------------------------- //
@@ -990,7 +994,7 @@ void SolverFDTD::hfield_slice_update(int x)
     int Ny_pml = N_pml[1];
     int Nz_pml = N_pml[2];
 
-    int TILE_Y = 132;
+    int TILE_Y = 32;
     int x_offset;
 
     // width of bulk section of grid along z axis, excluding PML
@@ -1175,7 +1179,7 @@ void SolverFDTD::hfield_slice_update(int x)
             );
 
             // ----------------- update hz -------------------------- //
-            // extends the full axis along z since it does not contribute to z-pml
+            // extends the full axis along z since hz does not contribute to z-pml
             hzb.noalias() = Da_hz_x.block(y, 1, Nyb, Nz-1).cwiseProduct(hzb) + (
                 Db_hz_x.block(y, 1, Nyb, Nz-1).cwiseProduct(ey_diff_x.block(0, 0, Nyb, Nz-1)) + 
                 Db_hz_y.block(y, 1, Nyb, Nz-1).cwiseProduct(ex_diff_y.block(0, 0, Nyb, Nz-1))
@@ -1193,6 +1197,9 @@ void SolverFDTD::hfield_slice_update(int x)
             // y and z axis memory is swapped to make strides more efficient (continuous memory
             // along the larger y axis)
             // transpose to use the matrices in normal order without modifying the memory layout
+
+            // start z-PML updates inside of the y-pml regions (y-pml updates extend down the full length of
+            // the y axis.)
 
             // hx split fields
             x_offset = ((x + 1) * Nyp1 * Nz_pml);
@@ -1225,21 +1232,29 @@ void SolverFDTD::hfield_slice_update(int x)
             hx.block(Ny_pml, z0, Nyb, Nz_pml) = hx_y_pml + hx_z_pml;
             
             // ----------------- update hy -------------------------- //
+
+            // the last update along y is the first cell in the y-PML where the coefficients are zero (first edge of 
+            // PML has no attenuation.) This keeps things consistent with the bulk section updates that always update
+            // the ex on the positive y-axis end of the cell. 
+
             // difference terms for hy
-            auto ex_diff_z = ex.block(Ny_pml+1, z0+1, Nyb-1, Nz_pml) - ex.block(Ny_pml+1, z0, Nyb-1, Nz_pml);
-            auto ez_diff_x = ez.block(Ny_pml+1, z0, Nyb-1, Nz_pml) - ez_0.block(Ny_pml+1, z0, Nyb-1, Nz_pml);
+            auto ex_diff_z = ex.block(Ny_pml+1, z0+1, Nyb, Nz_pml) - ex.block(Ny_pml+1, z0, Nyb, Nz_pml);
+            auto ez_diff_x = ez.block(Ny_pml+1, z0, Nyb, Nz_pml) - ez_0.block(Ny_pml+1, z0, Nyb, Nz_pml);
 
-            auto hy_z_pml = hy_z.transpose().block(Ny_pml+1, 0, Nyb-1, Nz_pml);
-            auto hy_x_pml = hy_x.transpose().block(Ny_pml+1, 0, Nyb-1, Nz_pml);
+            auto hy_z_pml = hy_z.transpose().block(Ny_pml+1, 0, Nyb, Nz_pml);
+            auto hy_x_pml = hy_x.transpose().block(Ny_pml+1, 0, Nyb, Nz_pml);
             
-            hy_z_pml.noalias() = Da_hy_z.block(Ny_pml, z0, Nyb-1, Nz_pml).cwiseProduct(hy_z_pml) + (
-                Db_hy_z.block(Ny_pml, z0, Nyb-1, Nz_pml).cwiseProduct(ex_diff_z)
+            hy_z_pml.noalias() = Da_hy_z.block(Ny_pml, z0, Nyb, Nz_pml).cwiseProduct(hy_z_pml) + (
+                Db_hy_z.block(Ny_pml, z0, Nyb, Nz_pml).cwiseProduct(ex_diff_z)
             );
 
-            hy_x_pml.noalias() = Da_hy_x.block(Ny_pml, z0, Nyb-1, Nz_pml).cwiseProduct(hy_x_pml) + (
-                Db_hy_x.block(Ny_pml, z0, Nyb-1, Nz_pml).cwiseProduct(ez_diff_x)
+            hy_x_pml.noalias() = Da_hy_x.block(Ny_pml, z0, Nyb, Nz_pml).cwiseProduct(hy_x_pml) + (
+                Db_hy_x.block(Ny_pml, z0, Nyb, Nz_pml).cwiseProduct(ez_diff_x)
             );
-            hy.block(Ny_pml, z0, Nyb-1, Nz_pml) = hy_z_pml + hy_x_pml;
+            hy.block(Ny_pml, z0, Nyb, Nz_pml) = hy_z_pml + hy_x_pml;
+
+            // no hz update since it is parallel to the PML direction and has no split coefficients assigned.
+            // hz is updated in the bulk section along the full length of the z axis.
 
         }
     } // end if (Nz_pml)
