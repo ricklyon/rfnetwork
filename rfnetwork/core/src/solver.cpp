@@ -290,22 +290,12 @@ int SolverFDTD::solver_init_fields(
     Cy.Cb_ey_x = get_field_array(PyDict_GetItemString(coefficients, "Cb_ey_x"), Nxp1, Ny, Nzp1);
     Cy.Ca_ey_z = get_field_array(PyDict_GetItemString(coefficients, "Ca_ey_z"), Nxp1, Ny, Nzp1);
     Cy.Ca_ey_x = get_field_array(PyDict_GetItemString(coefficients, "Ca_ey_x"), Nxp1, Ny, Nzp1);
-    // ensure coefficients at the end of the x-axis are zero to create a PEC boundary (skip dummy cell)
-    memset(Cy.Cb_ey_z + ((Nx) * ey_NyNz), 0, ey_NyNz * sizeof(float));
-    memset(Cy.Cb_ey_x + ((Nx) * ey_NyNz), 0, ey_NyNz * sizeof(float));
-    memset(Cy.Ca_ey_z + ((Nx) * ey_NyNz), 0, ey_NyNz * sizeof(float));
-    memset(Cy.Ca_ey_x + ((Nx) * ey_NyNz), 0, ey_NyNz * sizeof(float));
 
     // Cz
     Cz.Cb_ez_x = get_field_array(PyDict_GetItemString(coefficients, "Cb_ez_x"), Nxp1, Nyp1, Nz);
     Cz.Cb_ez_y = get_field_array(PyDict_GetItemString(coefficients, "Cb_ez_y"), Nxp1, Nyp1, Nz);
     Cz.Ca_ez_x = get_field_array(PyDict_GetItemString(coefficients, "Ca_ez_x"), Nxp1, Nyp1, Nz);
     Cz.Ca_ez_y = get_field_array(PyDict_GetItemString(coefficients, "Ca_ez_y"), Nxp1, Nyp1, Nz);
-    // ensure coefficients at the end of the x-axis are zero to create a PEC boundary
-    memset(Cz.Cb_ez_x + ((Nx) * ez_NyNz), 0, ez_NyNz * sizeof(float));
-    memset(Cz.Cb_ez_y + ((Nx) * ez_NyNz), 0, ez_NyNz * sizeof(float));
-    memset(Cz.Ca_ez_x + ((Nx) * ez_NyNz), 0, ez_NyNz * sizeof(float));
-    memset(Cz.Ca_ez_y + ((Nx) * ez_NyNz), 0, ez_NyNz * sizeof(float));
 
     // Dx
     Dx.Db_hx_y = get_field_array(PyDict_GetItemString(coefficients, "Db_hx_y"), Nxp1, Ny, Nz);
@@ -791,42 +781,20 @@ void SolverFDTD::efield_slice_update(int x)
         int s;
         int pml_idx;
 
-        if (is_x_pml || is_y_pml)
+        if (is_x_pml)
         {
             // update x-PML that spans the entire slice
-            if (is_x_pml)
-            {
-                s = (x < Nx_pml) ? 0 : 1;
-                // index relative to the start of the PML along x
-                int pml_x = (x < Nx_pml) ? x : x - (Nx - Nx_pml);
-                pml_idx = 0;
 
-                // ex split fields. PML fields contain n_pml components along the axis they are assigned to.
-                // the edge components at the left edge of the grid are not included
-                ex_offset = (pml_x * ex_NyNz) + ((y + 1) * Nzp1);
-                ey_offset = (pml_x * ey_NyNz) + ((y) * Nzp1);
-                ez_offset = (pml_x * ez_NyNz) + ((y + 1) * Nz);
+            s = (x < Nx_pml) ? 0 : 1;
+            // index relative to the start of the PML along x
+            int pml_x = (x < Nx_pml) ? x : x - (Nx - Nx_pml);
+            pml_idx = 0;
 
-            }
-            
-            // y-PML that spans the entire slice
-            else // if (is_y_pml)
-            {
-                s = (y < Ny_pml) ? 0 : 1;
-                pml_idx = 1;
-
-                // check that Nyb is the same as Nz_pml (aligned y blocks)
-                if (Ny_pml != Nyb)
-                {
-                    throw std::runtime_error("Ny_pml must be aligned with y blocks.");
-                }
-
-                // ex split fields. PML fields contain n_pml components along the axis they are assigned to.
-                // the edge components at y=0 are not included.
-                ex_offset = (x * (Ny_pml * Nzp1));
-                ey_offset = ((x + 1) * (Ny_pml * Nzp1));
-                ez_offset = ((x + 1) * (Ny_pml * Nz));
-            }
+            // ex split fields. PML fields contain n_pml components along the axis they are assigned to.
+            // the edge components at the left edge of the grid are not included
+            ex_offset = (pml_x * ex_NyNz) + ((y + 1) * Nzp1);
+            ey_offset = (pml_x * ey_NyNz) + ((y) * Nzp1);
+            ez_offset = (pml_x * ez_NyNz) + ((y + 1) * Nz);
 
             MatrixFloatType ex_y   (fields_pml[pml_idx][s].ex_y   + ex_offset, Nyb, Nzp1);
             MatrixFloatType ex_z   (fields_pml[pml_idx][s].ex_z   + ex_offset, Nyb, Nzp1);
@@ -877,6 +845,75 @@ void SolverFDTD::efield_slice_update(int x)
             ez.block(y, 0, Nyb, Nz) = ez_x_pml + ez_y_pml;
 
         } // end if (is_x_pml || is_y_pml)
+
+        // y-PML that spans the entire slice
+        else if (is_y_pml)
+        {
+            s = (y < Ny_pml) ? 0 : 1;
+            pml_idx = 1;
+
+            // check that Nyb is the same as Nz_pml (aligned y blocks)
+            if (Ny_pml != Nyb)
+            {
+                throw std::runtime_error("Ny_pml must be aligned with y blocks.");
+            }
+
+            // ex split fields. PML fields contain n_pml components along the axis they are assigned to.
+            // the edge components at y=0 are not included.
+            ex_offset = (x * (Ny_pml * Nzp1));
+            ey_offset = ((x + 1) * (Ny_pml * Nzp1));
+            ez_offset = ((x + 1) * (Ny_pml * Nz));
+
+
+            MatrixFloatType ex_y   (fields_pml[pml_idx][s].ex_y   + ex_offset, Nyb, Nzp1);
+            MatrixFloatType ex_z   (fields_pml[pml_idx][s].ex_z   + ex_offset, Nyb, Nzp1);
+            MatrixFloatType ey_z   (fields_pml[pml_idx][s].ey_z   + ey_offset, Nyb, Nzp1);
+            MatrixFloatType ey_x   (fields_pml[pml_idx][s].ey_x   + ey_offset, Nyb, Nzp1);
+            MatrixFloatType ez_x  (fields_pml[pml_idx][s].ez_x   + ez_offset, Nyb, Nz);
+            MatrixFloatType ez_y  (fields_pml[pml_idx][s].ez_y   + ez_offset, Nyb, Nz);
+
+            // ----------------- update ex -------------------------- // 
+            auto ex_y_pml = ex_y.block(0, 1, Nyb, Nzm1);
+            ex_y_pml.noalias() = Ca_ex_y.block(y, 1, Nyb, Nzm1).cwiseProduct(ex_y_pml) + (
+                Cb_ex_y.block(y, 1, Nyb, Nzm1).cwiseProduct(hz_diff_y.block(0, 0, Nyb, Nzm1))
+            );
+            
+            auto ex_z_pml = ex_z.block(0, 1, Nyb, Nzm1);
+            ex_z_pml.noalias() = Ca_ex_z.block(y, 1, Nyb, Nzm1).cwiseProduct(ex_z_pml ) + (
+                Cb_ex_z.block(y, 1, Nyb, Nzm1).cwiseProduct(hy_diff_z.block(0, 0, Nyb, Nzm1))
+            );
+
+            ex.block(y, 1, Nyb, Nzm1) = ex_z_pml + ex_y_pml;
+
+
+            // ----------------- update ey -------------------------- //
+            auto ey_z_pml = ey_z.block(0, 1, Nyb, Nzm1);
+            ey_z_pml.noalias() = Ca_ey_z.block(y, 1, Nyb, Nzm1).cwiseProduct(ey_z_pml) + (
+                Cb_ey_z.block(y, 1, Nyb, Nzm1).cwiseProduct(hx_diff_z.block(0, 0, Nyb, Nzm1))
+            );
+            
+            auto ey_x_pml = ey_x.block(0, 1, Nyb, Nzm1);
+            ey_x_pml.noalias() = Ca_ey_x.block(y, 1, Nyb, Nzm1).cwiseProduct(ey_x_pml) + (
+                Cb_ey_x.block(y, 1, Nyb, Nzm1).cwiseProduct(hz_diff_x.block(0, 0, Nyb, Nzm1))
+            );
+
+            ey.block(y, 1, Nyb, Nzm1) = ey_z_pml + ey_x_pml;
+
+
+            // ----------------- update ez -------------------------- //
+            auto ez_x_pml = ez_x.block(0, 0, Nyb, Nz);
+            ez_x_pml.noalias()  = Ca_ez_x.block(y, 0, Nyb, Nz).cwiseProduct(ez_x_pml) + (
+                Cb_ez_x.block(y, 0, Nyb, Nz).cwiseProduct(hy_diff_x.block(0, 0, Nyb, Nz))
+            );
+            
+            auto ez_y_pml = ez_y.block(0, 0, Nyb, Nz);
+            ez_y_pml.noalias() = Ca_ez_y.block(y, 0, Nyb, Nz).cwiseProduct(ez_y_pml) + (
+                Cb_ez_y.block(y, 0, Nyb, Nz).cwiseProduct(hx_diff_y.block(0, 0, Nyb, Nz))
+            );
+
+            ez.block(y, 0, Nyb, Nz) = ez_x_pml + ez_y_pml;
+
+        }
         
         // update bulk section 
         else

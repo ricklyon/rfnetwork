@@ -1502,7 +1502,7 @@ class FDTD_Solver():
         dz_h_inv = 1 / dz_h[None, None, :]
 
 
-        # ensure coefficents at end of y axis are zero
+        # ensure coefficents at end of y axis are zero to enforce PEC boundary
         self.Ca["ex_y"][:, -1, :] = 0
         self.Ca["ex_z"][:, -1, :] = 0
         self.Cb["ex_y"][:, -1, :] = 0
@@ -1512,6 +1512,17 @@ class FDTD_Solver():
         self.Ca["ez_y"][:, -1, :] = 0
         self.Cb["ez_x"][:, -1, :] = 0
         self.Cb["ez_y"][:, -1, :] = 0
+
+        # ensure coefficients at end of x axis are zero to enforce PEC bounary
+        self.Ca["ey_z"][-1] = 0
+        self.Ca["ey_x"][-1] = 0
+        self.Cb["ez_x"][-1] = 0
+        self.Cb["ez_y"][-1] = 0
+
+        self.Ca["ez_x"][-1] = 0
+        self.Ca["ez_y"][-1] = 0
+        self.Cb["ez_x"][-1] = 0
+        self.Cb["ez_y"][-1] = 0
 
         # The grid in the C++ solver is parallelized along x, each x cell is defined as the Ex, Hz, Hy components, and
         # the Ey, Ez, and Hx components at the right end of the cell. The Ey, Ez, and Hx components at the left end of
