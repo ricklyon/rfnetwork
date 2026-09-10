@@ -112,11 +112,11 @@ s.solve(n_threads=4)
 # ------------------------
 # This plot shows realized gain
 
-phi_cut = rfn.conv.db10_lin(
+phi_cut = rfn.conv.db20_lin(
     s.get_farfield_gain(phi=np.arange(-180, 182, 2), theta=90).sel(polarization="thetapol")
 )
 
-theta_cut = rfn.conv.db10_lin(
+theta_cut = rfn.conv.db20_lin(
     s.get_farfield_gain(theta=np.arange(-180, 181, 2), phi=0).sel(polarization="thetapol")
 )
 

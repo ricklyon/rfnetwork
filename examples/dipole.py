@@ -131,7 +131,7 @@ s.solve(n_threads=4)
 ff_swept_gain = s.get_farfield_gain(theta=90, phi=[0]).sel(polarization="thetapol")
 
 fig, ax = plt.subplots(1, 1)
-ax.plot(ff_swept_gain.coords["frequency"]  / 1e9, rfn.conv.db10_lin(ff_swept_gain).squeeze(), marker=".")
+ax.plot(ff_swept_gain.coords["frequency"]  / 1e9, rfn.conv.db20_lin(ff_swept_gain).squeeze(), marker=".")
 
 ax.set_xlabel("Frequency [GHz]")
 ax.set_ylabel("Gain [dBi]")
@@ -148,7 +148,7 @@ mplm.line_marker(x=10)
 
 import time
 stime = time.time()
-pp_gain = rfn.conv.db10_lin(
+pp_gain = rfn.conv.db20_lin(
     s.get_farfield_gain(theta=np.arange(-180, 181, 1), phi=[0]).sel(polarization="thetapol")
 )
 # print(time.time() - stime)

@@ -106,7 +106,7 @@ class TestDipoleProf(unittest.TestCase):
             avg_time = total_time / iterations
             print(f"Cells: {s.Nx * s.Ny * s.Nz / 1e3}k. Time Steps: {len(s.time)}. {dev} Time: {avg_time:.2f}s")
 
-            return rfn.conv.db10_lin(
+            return rfn.conv.db20_lin(
                 s.get_farfield_gain(theta=np.arange(20, 161, 1), phi=[0, 90]).sel(polarization="thetapol")
             )
 
@@ -130,7 +130,7 @@ class TestDipoleProf(unittest.TestCase):
         np.testing.assert_array_almost_equal(gain_cpu, gain_ref, decimal=2)
         np.testing.assert_array_almost_equal(gain_gpu, gain_ref, decimal=2)
 
-        # pp_gain = rfn.conv.db10_lin(
+        # pp_gain = rfn.conv.db20_lin(
         #     s.get_farfield_gain(theta=np.arange(-180, 181, 1), phi=[0]).sel(polarization="thetapol")
         # )
 

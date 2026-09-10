@@ -26,6 +26,7 @@ __all__ = (
     "Open",
     "Load",
     "Attenuator",
+    "Balun",
     "IdealPhaseShifter",
     "PiAttenuator",
     "LumpedElementFilter"
@@ -285,7 +286,24 @@ class GainBlock(Component):
         s21 = conv.lin_db20(self.state["value"])
         sp_f = np.array([[1e-6, s21 / 100], [s21, 1e-6]], dtype="complex128")
         return np.broadcast_to(sp_f, (len(frequency), 2, 2))
-    
+
+
+class Balun(Component):
+    """
+    Ideal 50ohm Balun. Port 1 is unbalanced. Port 2 and 3 are differential. 
+    """
+    def __init__(self):
+        """
+        Parameters:
+        ----------
+        gain_db (float):
+            gain in dB
+        """
+        super().__init__(n_ports=3)
+
+    def evaluate_sdata(self, frequency: np.ndarray):
+        sp = (1 / np.sqrt(2)) * np.array([[0, 1, -1], [1, 0, 0], [-1, 0, 0]], dtype="complex128")
+        return np.broadcast_to(sp, (len(frequency), 3, 3))
 
 class LC_Series(Network):
     """
