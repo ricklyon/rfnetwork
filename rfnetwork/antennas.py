@@ -1,5 +1,50 @@
 from np_struct import ldarray
 import numpy as np
+from rfnetwork import const, conv
+
+
+def translate(pattern: ldarray, position: np.ndarray) -> ldarray:
+    """
+    Move the phase center of a pattern to a new location.
+
+    Parameters
+    ----------
+    pattern : ldarray
+        Pattern in spherical coordinates. Must have a frequency coordinate in Hz.
+    positions : ldarray
+        Element positions in meters. Positions can have more than one dimension if provided as a ldarray.
+    """
+
+    # convert pattern coordinates to uvw
+    ptn_keys = pattern.coords.keys()
+
+    if "phi" in ptn_keys and "theta" in ptn_keys:
+        uvw = uvw_phitheta(pattern.phi, pattern.theta)
+    elif "az" in ptn_keys and "el" in ptn_keys:
+        uvw = uvw_azel(pattern.az, pattern.el)
+    elif "u" in ptn_keys and "v" in ptn_keys:
+        uvw = uvw_uv(pattern.u, pattern.v)
+    else:
+        raise NotImplementedError("Coordinate frame not supported")
+
+    # replace uwv dimension with xyz 
+    uvw = ldarray(
+        uvw, coords=dict(axis=("x", "y", "z"), **uvw[0].coords)
+    )
+
+    # cast as ldarray if not already
+    if not isinstance(position, ldarray):
+        position = ldarray(position, coords=dict(axis=("x", "y", "z")))
+
+    # dot product (r` r)
+    r_dot = np.sum(uvw * position, axis="axis")
+
+    # multiply by the wave number k
+    lam = ldarray(const.c0 / pattern.frequency, coords=dict(frequency=pattern.frequency))
+    k = 2 * np.pi / lam
+
+    return pattern * np.exp(1j * k * r_dot)
+
 
 def uvw_phitheta(phi: np.ndarray, theta: np.ndarray, deg: bool = True):
     """
@@ -173,6 +218,29 @@ def azel_uvw(u: np.ndarray, v: np.ndarray, w: np.ndarray):
 
     coords = dict(u=u, v=v, w=w)
     return ldarray(az, coords=coords), ldarray(el, coords=coords)
+
+def uvw_uv(u: np.ndarray, v: np.ndarray):
+    """
+    Convert u, v to u, v, w defined in the upper hemisphere.
+
+    Parameters
+    ----------
+    u : np.ndarray
+        u coordinate
+    v : np.ndarray
+        v coordinate
+
+    Returns
+    -------
+    u : ldarray
+        u coordinate
+    v : ldarray
+        v coordinate
+    w : ldarray
+        w coordinate
+    """
+    phi, theta = phitheta_uv(u, v)
+    return uvw_phitheta(phi, theta)
 
 def pattern_phitheta2uv(pattern: ldarray, u: np.ndarray, v: np.ndarray):
     """
