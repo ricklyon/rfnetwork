@@ -961,6 +961,11 @@ void SolverFDTD::efield_slice_update(int x)
         {   
             int sNz_pml = N_pml[2][s];
 
+            if (sNz_pml < 1)
+            {
+                continue;
+            }
+
             // y and z axis memory is swapped to make strides more efficient (continuous memory
             // along the larger y axis)
             // transpose to use the matrices in normal order without modifying the memory layout
@@ -1243,6 +1248,11 @@ void SolverFDTD::hfield_slice_update(int x)
         for (int s = 0; s < 2; s++)
         {   
             int sNz_pml = N_pml[2][s];
+
+            if (sNz_pml < 1)
+            {
+                continue;
+            }
 
             // y and z axis memory is swapped to make strides more efficient (continuous memory
             // along the larger y axis)
