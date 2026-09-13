@@ -144,6 +144,9 @@ private:
     Coeff_Hz Dz;
 
     Fields_PML fields_pml[3][2];
+    // number of pml cells
+    int N_pml[3][2];
+
     Fields fields;
 
     Monitor monitors[MAX_MONITORS];
@@ -174,8 +177,7 @@ private:
     int Ny;
     int Nz;
 
-    // number of pml cells
-    int N_pml[3];
+
 
     int Nyp1;
     int Nzp1;

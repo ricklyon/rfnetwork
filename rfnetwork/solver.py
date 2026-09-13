@@ -37,9 +37,7 @@ class FDTD_Solver():
         self.lumped_elements = dict()
         self.images = dict()
 
-        self.pml_boundaries = set()
-        # pml width on each axis
-        self.n_pml = [0, 0, 0]
+        self.pml_boundaries = dict()
 
         self.monitors = dict()
         self.farfield = dict()
@@ -401,16 +399,24 @@ class FDTD_Solver():
             style={**style, "cmap":cmap} # add cmap to style so it's passed to add_mesh
         )
 
-    def add_PML(self, *sides: str, n_pml: float = 10):
+    def add_PML(self, *sides: str, n_pml: float = 5, sigma_max: float = 0.8, m: int = 3):
         """
-        Assign a PML boundary to sides of the solve box.
+        Assign a PML boundary to sides of the solve box. Call multiple times to assign different
+        PML settings to each side.
 
         Parameters
         ----------
         sides : list, str
             Valid values are ("x+", "x-", "y+", "y-", "z+", "z-",)
-        n_pml : int, default: 10
+        n_pml : int, default: 5
             number of PML cells.
+        sigma_max : float, default: 0.8
+            Amount to scale the maximum sigma value by. Actual assigned maximum sigma in the PML is:
+            `sigma_max * (m + 1) / (eta0 * d_border)`, where `d_border` is the width of the cell on the edge
+            of the grid.
+        m: int, default: 3
+            PML profile order
+
         """
         self.invalidate_mesh()
 
@@ -418,11 +424,10 @@ class FDTD_Solver():
         if any([s not in valid_sides for s in sides]):
             raise ValueError(f"PML side not recognized. Expecting one of {valid_sides}")
 
-        self.pml_boundaries.update(sides)
-
         axis_map = dict(x=0, y=1, z=2)
         for s in sides:
-            self.n_pml[axis_map[s[0]]] = int(n_pml)
+            # update the PML setting dictionary
+            self.pml_boundaries[s] = dict(sigma_max = sigma_max, m = m, n_pml=n_pml)
 
 
     def pos_to_idx(self, position: tuple, mode: str = "edge"):
@@ -1292,18 +1297,20 @@ class FDTD_Solver():
 
         """
 
-        for side in self.pml_boundaries:
+        for side, settings in self.pml_boundaries.items():
             axis = side[0]
             axis_i = dict(x=0, y=1, z=2)[axis]
-            m_pml = 3 # sigma profile order
-            n_pml = self.n_pml[axis_i]
+
+            m_pml = settings["m"]
+            sigma_max_scale = settings.get("sigma_max", 0.8)
+            n_pml = settings["n_pml"]
 
             dt = self.dt
             dcells = self.d_cells[axis_i]
             d_border = conv.m_in(dcells[-1]) if side[1] == "+" else conv.m_in(dcells[0])
             eta0 = np.sqrt(u0 / e0)
             # now define the values of sigma and sigma_m from the profiles
-            sigma_max = 0.8 * (m_pml + 1) / (eta0 * d_border)
+            sigma_max = sigma_max_scale * (m_pml + 1) / (eta0 * d_border)
         
             # define sigma profile in the PML region on the right side of the grid.
             i_pml_axis = np.arange(0, n_pml)
@@ -1574,12 +1581,21 @@ class FDTD_Solver():
         fields = dict()
         for f_name, f_shape in self.fshape.items():
             xs, ys, zs = f_shape
+            # add extra pad cell for hy and hz
             if f_name in ("hy", "hz"):
                 xs += 1
             if f_name in ("hx", "hz"):
                 ys += 1
 
             fields[f_name] = np.zeros((xs, ys, zs), dtype=dtype_)
+
+        # build list of pml cell widths, two values for each axis for each end of the solve box
+        n_pml = [[0, 0], [0, 0], [0, 0]]
+
+        for i, axis in enumerate(["x", "y", "z"]):
+            for j, side in enumerate(("-", "+")):
+                if (axis + side) in self.pml_boundaries.keys():
+                    n_pml[i][j] = self.pml_boundaries[axis + side]["n_pml"]
 
         # initialize split fields in PML regions
         fields_pml = dict()
@@ -1599,22 +1615,19 @@ class FDTD_Solver():
                     xs += 1
                 if f_name in ("hx", "hz"):
                     ys += 1
-                f_shape = [xs, ys, zs]
 
                 # update field shape along axis to be the pml width
-                f_shape[i] = self.n_pml[i]
+                fields_pml[axis][sf_name] = []
+                for j, side in enumerate(("-", "+")):
+                    f_shape = [xs, ys, zs]
+            
+                    f_shape[i] = n_pml[i][j]
 
-                # swap memory layout for z-pml to make memory cache more efficient
-                if axis == "z":
-                    f_shape = [f_shape[0], f_shape[2], f_shape[1]]
+                    # swap memory layout for z-pml to make memory cache more efficient
+                    if axis == "z":
+                        f_shape = [f_shape[0], f_shape[2], f_shape[1]]
 
-                # add two field arrays for each side of the axis
-                fields_pml[axis][sf_name] = [
-                    np.zeros(tuple(f_shape), dtype=dtype_),
-                    np.zeros(tuple(f_shape), dtype=dtype_)
-                ]
-
-
+                    fields_pml[axis][sf_name] += [np.zeros(tuple(f_shape), dtype=dtype_)]
 
         probes = []
         # initialize sources. Sources act like probes, but the values are input to the 
@@ -1634,7 +1647,7 @@ class FDTD_Solver():
             # convert slice indices to a list of values
             idx_list = [list(np.arange(v.start, v.stop)) if isinstance(v, slice) else [v] for v in idx]
 
-            # create a list of sources for each ez component, with the integer index and scalar waveform data
+            # create a list of sources for each component, with the integer index and scalar waveform data
             Vs_a_flt = Vs_a.flatten()
             for j, idx_j in enumerate(itertools.product(*idx_list)):
                 probes.append(
@@ -1722,7 +1735,7 @@ class FDTD_Solver():
         else:
             solver_func = core.core_func.solver_run
 
-        ret_val = solver_func(fields, fields_pml, coefficients, probes, monitors, Nx, Ny, Nz, Nt, self.n_pml, n_threads, update_interval)
+        ret_val = solver_func(fields, fields_pml, coefficients, probes, monitors, Nx, Ny, Nz, Nt, n_pml, n_threads, update_interval)
         print(ret_val)
 
         if show_progress:
@@ -1915,20 +1928,22 @@ class FDTD_Solver():
             sf0_s, sf1_s = [a for a in ("x", "y", "z") if a != axis_s]
             
             # for each face on either side of the far-field box
-            for j, side in enumerate(["n", "p"]):
+            for j, side in enumerate(["-", "+"]):
                 skipped = False
-                pml_name = axis_s + ("-" if side == "n" else "+")
+                pml_name = axis_s + side
+
                 # if face has no PML boundary, the boundary condition is PEC, place surface on boundary edge
-                if pml_name not in self.pml_boundaries:
+                if pml_name not in self.pml_boundaries.keys():
                     # flag this side of the grid to prevent a field monitor from being attached.
                     skipped = True
                     ff_idx[axis, j] = 0 if j == 0 else len(self.g_edges[axis]) - 1
                 else:
+                    n_pml = self.pml_boundaries[pml_name]["n_pml"]
                     # set the position of farfield integration surface by index value in the grid
-                    if side == "n":
-                        ff_idx[axis, j] = self.n_pml[axis] + padding
+                    if side == "-":
+                        ff_idx[axis, j] = n_pml + padding
                     else:
-                        ff_idx[axis, j] = len(self.g_edges[axis]) - self.n_pml[axis] - 1 - padding
+                        ff_idx[axis, j] = len(self.g_edges[axis]) - n_pml - 1 - padding
 
                 # integration face position, inches
                 surf_idx = ff_idx[axis, j] 
@@ -1947,21 +1962,21 @@ class FDTD_Solver():
                     f_s = ("x", "y", "z")[f]
                     # add e-field monitor
                     self.add_field_monitor(
-                        f"ff_e{f_s}_{side}{axis_s}", f"e{f_s}", axis_s, index=surf_idx, frequency=frequency
+                        f"ff_e{f_s}_{axis_s}{side}", f"e{f_s}", axis_s, index=surf_idx, frequency=frequency
                     )
 
                     # add h-field monitor 
                     self.add_field_monitor(
-                        f"ff_h{f_s}1_{side}{axis_s}", f"h{f_s}", axis_s, index=surf_idx, frequency=frequency
+                        f"ff_h{f_s}1_{axis_s}{side}", f"h{f_s}", axis_s, index=surf_idx, frequency=frequency
                     )
                     # add monitor on other side of edge so H fields can be averaged
                     if j == 0 :
                         self.add_field_monitor(
-                            f"ff_h{f_s}2_{side}{axis_s}", f"h{f_s}", axis_s, index=surf_idx-1, frequency=frequency
+                            f"ff_h{f_s}2_{axis_s}{side}", f"h{f_s}", axis_s, index=surf_idx-1, frequency=frequency
                         )
                     else:
                         self.add_field_monitor(
-                            f"ff_h{f_s}2_{side}{axis_s}", f"h{f_s}", axis_s, index=surf_idx+1, frequency=frequency
+                            f"ff_h{f_s}2_{axis_s}{side}", f"h{f_s}", axis_s, index=surf_idx+1, frequency=frequency
                         )
 
         for axis in range(3):
