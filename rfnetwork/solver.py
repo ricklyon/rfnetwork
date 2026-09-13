@@ -3037,7 +3037,7 @@ class FDTD_Solver():
             ds_grid[axis] = np.array(ds, dtype=np.complex64, order="C")
 
             # for each face on either side of the far-field box
-            for j, side in enumerate(["n", "p"]):
+            for j, side in enumerate(["-", "+"]):
                 # surface position, meters
                 surf_pos[axis][j] = self.farfield["surf_pos"][axis, j]
 
@@ -3053,13 +3053,13 @@ class FDTD_Solver():
                     f_s = ("x", "y", "z")[f]
 
                     # near-field monitor names
-                    emon = f"ff_e{f_s}_{side}{axis_s}"
-                    hmon1 = f"ff_h{f_s}1_{side}{axis_s}"
-                    hmon2 = f"ff_h{f_s}2_{side}{axis_s}"
+                    emon = f"ff_e{f_s}_{axis_s}{side}"
+                    hmon1 = f"ff_h{f_s}1_{axis_s}{side}"
+                    hmon2 = f"ff_h{f_s}2_{axis_s}{side}"
 
                     # skip faces that are on solve box boundaries
                     if emon not in self.monitors.keys():
-                        print(f"Skipped far-field side {axis_s}, {side}")
+                        print(f"Skipped far-field side {axis_s}{side}")
                         continue
                     
                     # get near-field data

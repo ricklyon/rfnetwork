@@ -40,7 +40,7 @@ typedef Eigen::Stride<Eigen::Dynamic, Eigen::Dynamic> StrideType;
 #define HY 4
 #define HZ 5
 
-#define TILE_Y 64
+#define TILE_Y 32
 
 
 // long long get_milliseconds()
