@@ -1239,7 +1239,7 @@ void SolverFDTD::hfield_slice_update(int x)
         } // end bulk section
     } // end y loop
 
-        // update PML along z axis
+    // update PML along z axis
     if ((Nz0_pml + Nz1_pml) > 0)
     {
 
