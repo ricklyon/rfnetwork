@@ -45,6 +45,16 @@ def translate(pattern: ldarray, position: np.ndarray) -> ldarray:
 
     return pattern * np.exp(1j * k * r_dot)
 
+def _create_meshgrid(*args):
+    """ 
+    create meshgrid from 1D vectors, pass through if args are already a matrix with more 
+    than one dimension.
+    """
+    if np.all(np.array([a.ndim for a in args]) == 1):
+        m_shape = tuple([a.shape[0] for a in args])
+        return tuple([np.broadcast_to(a, m_shape) for a in np.ix_(*args)])
+    else:
+        return args
 
 def uvw_phitheta(phi: np.ndarray, theta: np.ndarray, deg: bool = True):
     """
@@ -66,7 +76,7 @@ def uvw_phitheta(phi: np.ndarray, theta: np.ndarray, deg: bool = True):
     """
     phi, theta = np.atleast_1d(phi), np.atleast_1d(theta)
     # form into a meshgrid
-    phi_m, theta_m = np.meshgrid(phi, theta, indexing="ij")
+    phi_m, theta_m = _create_meshgrid(phi, theta)
 
     if deg:
         phi_m, theta_m = np.deg2rad(phi_m), np.deg2rad(theta_m)
@@ -102,7 +112,7 @@ def phitheta_uvw(u: np.ndarray, v: np.ndarray, w: np.ndarray, deg: bool = True):
     """
     u, v, w = np.atleast_1d(u), np.atleast_1d(v), np.atleast_1d(w)
     # form into a meshgrid
-    u_m, v_m = np.meshgrid(u, v, indexing="ij")
+    u_m, v_m = _create_meshgrid(u, v)
 
     with np.errstate(all='ignore'):
         phi = np.arctan2(v_m, u_m)
@@ -112,8 +122,11 @@ def phitheta_uvw(u: np.ndarray, v: np.ndarray, w: np.ndarray, deg: bool = True):
         phi, theta = np.rad2deg(phi), np.rad2deg(theta)
 
     # return phi, theta as labeled arrays, with u coordinates in the rows and v coordinates in the columns
-    coords = dict(u=u, v=v, w=w)
-    return ldarray(phi, coords=coords), ldarray(theta, coords=coords)
+    if isinstance(phi, ldarray) and isinstance(theta, ldarray):
+        return phi, theta
+    else:
+        coords = dict(u=u, v=v, w=w)
+        return ldarray(phi, coords=coords), ldarray(theta, coords=coords)
 
 
 def phitheta_uv(u: np.ndarray, v: np.ndarray, deg: bool = True):
@@ -136,7 +149,7 @@ def phitheta_uv(u: np.ndarray, v: np.ndarray, deg: bool = True):
     """
     u, v = np.atleast_1d(u), np.atleast_1d(v)
     # form into a meshgrid
-    u_m, v_m = np.meshgrid(u, v, indexing="ij")
+    u_m, v_m = _create_meshgrid(u, v)
 
     with np.errstate(all='ignore'):
         phi = np.arctan2(v_m, u_m)
@@ -146,9 +159,11 @@ def phitheta_uv(u: np.ndarray, v: np.ndarray, deg: bool = True):
         phi, theta = np.rad2deg(phi), np.rad2deg(theta)
 
     # return phi, theta as labeled arrays, with u coordinates in the rows and v coordinates in the columns
-    coords = dict(u=u, v=v)
-    return ldarray(phi, coords=coords), ldarray(theta, coords=coords)
-
+    if isinstance(phi, ldarray) and isinstance(theta, ldarray):
+        return phi, theta
+    else:
+        coords = dict(u=u, v=v)
+        return ldarray(phi, coords=coords), ldarray(theta, coords=coords)
 
 def uvw_azel(az: np.ndarray, el: np.ndarray):
     """
@@ -172,7 +187,7 @@ def uvw_azel(az: np.ndarray, el: np.ndarray):
     """
     az, el = np.atleast_1d(az), np.atleast_1d(el)
     # form into a meshgrid
-    az_m, el_m = np.meshgrid(az, el, indexing="ij")
+    az_m, el_m = _create_meshgrid(az, el)
 
     # convert to degrees
     az_m, el_m = np.deg2rad(az_m), np.deg2rad(el_m)
@@ -207,7 +222,7 @@ def azel_uvw(u: np.ndarray, v: np.ndarray, w: np.ndarray):
     """
     u, v, w = np.atleast_1d(u), np.atleast_1d(v), np.atleast_1d(w)
     # form into a meshgrid
-    u_m, v_m, w_m = np.meshgrid(u, v, w, indexing="ij")
+    u_m, v_m, w_m = _create_meshgrid(u, v, w)
 
     with np.errstate(all='ignore'):
         el = np.arcsin(v_m)
@@ -241,6 +256,15 @@ def uvw_uv(u: np.ndarray, v: np.ndarray):
     """
     phi, theta = phitheta_uv(u, v)
     return uvw_phitheta(phi, theta)
+
+def pattern_phitheta2azel(pattern: ldarray, az: np.ndarray, el: np.ndarray):
+    """
+    Convert a far-field pattern from phi, theta coordinates [degrees] to u, v coordinates.
+    """
+    u, v, w = uvw_azel(az, el)
+    phi_i, theta_i = phitheta_uvw(u=u, v=v, w=w)
+    coords = dict(theta=theta_i, phi=phi_i)
+    return pattern.interpolate(theta=theta_i, phi=phi_i)
 
 def pattern_phitheta2uv(pattern: ldarray, u: np.ndarray, v: np.ndarray):
     """
