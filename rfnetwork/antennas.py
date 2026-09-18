@@ -231,8 +231,11 @@ def azel_uvw(u: np.ndarray, v: np.ndarray, w: np.ndarray):
     # convert to degrees
     az, el = np.rad2deg(az), np.rad2deg(el)
 
-    coords = dict(u=u, v=v, w=w)
-    return ldarray(az, coords=coords), ldarray(el, coords=coords)
+    if isinstance(az, ldarray) and isinstance(el, ldarray):
+        return az, el
+    else:
+        coords = dict(u=u, v=v, w=w)
+        return  ldarray(az, coords=coords), ldarray(el, coords=coords)
 
 def uvw_uv(u: np.ndarray, v: np.ndarray):
     """
@@ -255,7 +258,10 @@ def uvw_uv(u: np.ndarray, v: np.ndarray):
         w coordinate
     """
     phi, theta = phitheta_uv(u, v)
-    return uvw_phitheta(phi, theta)
+    u_new, v_new, w_new = uvw_phitheta(phi, theta)
+
+    coords = dict(u=u, v=v)
+    return ldarray(u_new, coords=coords), ldarray(v_new, coords=coords), ldarray(w_new, coords=coords)
 
 def pattern_phitheta2azel(pattern: ldarray, az: np.ndarray, el: np.ndarray):
     """
@@ -263,8 +269,14 @@ def pattern_phitheta2azel(pattern: ldarray, az: np.ndarray, el: np.ndarray):
     """
     u, v, w = uvw_azel(az, el)
     phi_i, theta_i = phitheta_uvw(u=u, v=v, w=w)
-    coords = dict(theta=theta_i, phi=phi_i)
     return pattern.interpolate(theta=theta_i, phi=phi_i)
+
+def pattern_uv2azel(pattern: ldarray, az: np.ndarray, el: np.ndarray):
+    """
+    Convert a far-field pattern from phi, theta coordinates [degrees] to u, v coordinates.
+    """
+    u, v, w = uvw_azel(az, el)
+    return pattern.interpolate(u=u, v=v)
 
 def pattern_phitheta2uv(pattern: ldarray, u: np.ndarray, v: np.ndarray):
     """
