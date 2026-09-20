@@ -356,6 +356,7 @@ static PyObject* solver_run(PyObject* self, PyObject* args) {
     PyObject *coefficients;
     PyObject *probes;
     PyObject *monitors;
+    PyObject *corrections;
     PyObject *N_pml;
     
     int Nx;
@@ -368,7 +369,7 @@ static PyObject* solver_run(PyObject* self, PyObject* args) {
 
     // Parse arguments: expecting a single Python object
     if (!PyArg_ParseTuple(
-        args, "OOOOOIIIIOII", &fields, &fields_pml, &coefficients, &probes, &monitors, &Nx, &Ny, &Nz, &Nt, &N_pml, &n_threads, &update_interval
+        args, "OOOOOOIIIIOII", &fields, &fields_pml, &coefficients, &probes, &monitors, &corrections, &Nx, &Ny, &Nz, &Nt, &N_pml, &n_threads, &update_interval
     )) {
         return PyLong_FromLong(1);
     }
@@ -398,6 +399,12 @@ static PyObject* solver_run(PyObject* self, PyObject* args) {
         return PyLong_FromLong(1);
     }
 
+    if (!PyList_Check(corrections)) {
+        PyErr_SetString(PyExc_TypeError, "Expected a corrections list");
+        return PyLong_FromLong(1);
+    }
+
+
     if (!PyList_Check(N_pml)) {
         PyErr_SetString(PyExc_TypeError, "Expected a N_pml list");
         return PyLong_FromLong(1);
@@ -410,6 +417,7 @@ static PyObject* solver_run(PyObject* self, PyObject* args) {
         s.solver_init_fields(fields, fields_pml, coefficients, Nx, Ny, Nz, N_pml, 0);
         s.solver_init_monitors(monitors, Nt, 0);
         s.solver_init_probes(probes, Nt);
+        s.solver_init_corrections(corrections);
 
         s.solver_run(Nt, n_threads, update_interval);
     }

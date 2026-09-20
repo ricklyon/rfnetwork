@@ -15,7 +15,7 @@ typedef _object PyObject;
 #define MAX_MONITORS 50
 #define MAX_PROBES 5000
 #define MAX_THREADS 20
-
+#define MAX_CORRECTIONS 5000
 
 struct mbuffer_t
 {
@@ -96,6 +96,14 @@ struct Fields {
     float * hz;
 };
 
+struct FieldCorrection {
+    float * coeff;
+    int flat_idx;
+    int idx[3];
+    int field;
+};
+
+
 struct Monitor {
     char * values;
     std::complex<float> * dtft_phase;
@@ -154,6 +162,9 @@ private:
 
     Probe probes[MAX_PROBES];
     int n_probes;
+
+    FieldCorrection corrections[MAX_CORRECTIONS];
+    int n_corrections;
 
     std::thread threads[MAX_THREADS];
     ThreadData thread_data[MAX_THREADS + 2];
@@ -215,6 +226,8 @@ public:
         PyObject * fields, PyObject * fields_pml, PyObject * coefficients, int Nx, int Ny, int Nz, PyObject * N_pml, int gpu
     );
     int solver_init_monitors(PyObject * py_monitors, int Nt, int gpu);
+    int solver_init_corrections(PyObject * py_corrections);
+
     int solver_init_probes(PyObject * py_probes, int Nt);
 
     int solver_run(int Nt, int n_threads, int update_interval);

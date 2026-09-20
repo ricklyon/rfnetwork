@@ -1576,8 +1576,6 @@ class FDTD_Solver():
             Db_hz_y = self.Db["hz_y"] * dy_inv,
         )
 
-
-
         # initialize field arrays, add extra pad components for hy and hz along x and y axis so each cell can be
         # updated in the same way, avoids bounds checking on each time step.
         fields = dict()
@@ -1673,29 +1671,65 @@ class FDTD_Solver():
             )
 
         # initialize edge correction coefficients
-        edge_correction_coeff = []
+        # keep track of all indices to check which corrections are for the same component
+        # indices are flattened.
+        corrections = dict(hx={}, hy={}, hz={})
         for v in self.edge_corrections:
 
-            field, index, correction_factors  = v["field"], v["index"], v["correction_factors"]
+            sp_field, index, corrections_i  = v["field"], v["index"], v["corrections"]
+
+            # get field name from split field name, and the direction of the e-field difference
+            field = sp_field[:2]
+            faxis = ("x", "y", "z").index(field[1]) 
+            # e-field difference axis
+            daxis1 = (faxis + 1) % 3
+            daxis2 = (faxis + 2) % 3
+
+            # axis of correction fields
+            corr_axis = ("x", "y", "z").index(sp_field[-1])
+
+            # convert to field strings
+            faxis_name, daxis1_name, daxis2_name = [("x", "y", "z")[i] for i in [faxis, daxis1, daxis2]]
+
+            fshape = fields[field].shape
+
+            # Db coefficients on first and second difference direction
+            coeff_sp1 = coefficients[f"Db_h{faxis_name}_{daxis1_name}"]
+            coeff_sp2 = coefficients[f"Db_h{faxis_name}_{daxis2_name}"]
 
             # convert index slices to range of indices
             index_list = [list(np.arange(v.start, v.stop)) if isinstance(v, slice) else [v] for v in index]
 
             # iterate over each field component in idx 
             for idx in itertools.product(*index_list):
-                
-                # a, b1, b2 coefficients
-                coeff = [coefficients["Da_" + field][idx]] + [
-                    coefficients["Db_" + field][idx] * c for c in correction_factors
-                ]
 
-                edge_correction_coeff.append(
-                    dict(
-                        value=np.array(coeff, dtype=dtype_, order="C"), 
-                        field=int(list(self.fshape.keys()).index(field[:2])),
-                        idx=[int(id) for id in idx_j],
+                # flattened index
+                flat_idx = int(idx[0] * np.prod(fshape[1:]) + idx[1] * np.prod(fshape[2]) + idx[2])
+
+                # is there a correction for this component already
+                if flat_idx in corrections[field].keys():
+                    coeff = corrections[field][flat_idx]["values"]
+                else:
+                    # a, b1, b2 coefficients
+                    coeff_vals  = [coefficients["Da_" + sp_field][idx]] + [coeff_sp1[idx]] * 2 + [coeff_sp2[idx]] * 2
+
+                    corrections[field][flat_idx] = dict(
+                        values=np.array(coeff_vals, dtype=dtype_, order="C"), 
+                        field=dict(hx=3, hy=4, hz=5)[field],
+                        idx=[int(id) for id in idx],
+                        flat_idx=int(flat_idx),
                     )
-                )
+
+                    coeff = corrections[field][flat_idx]["values"]
+
+                # update the coefficients with the corrections
+                corr_idx = 1 if daxis1 == corr_axis else 3
+                coeff[corr_idx: corr_idx + 2] *= corrections_i
+
+        # combine corrections into a single list
+        corrections_list = []
+        for f in ("hx", "hy", "hz"):
+            corrections_list += list(corrections[f].values())
 
         # initialize field monitors
         monitors = []
@@ -1762,7 +1796,7 @@ class FDTD_Solver():
         else:
             solver_func = core.core_func.solver_run
 
-        ret_val = solver_func(fields, fields_pml, coefficients, probes, monitors, Nx, Ny, Nz, Nt, n_pml, n_threads, update_interval)
+        ret_val = solver_func(fields, fields_pml, coefficients, probes, monitors, corrections_list, Nx, Ny, Nz, Nt, n_pml, n_threads, update_interval)
         print(ret_val)
 
         if show_progress:

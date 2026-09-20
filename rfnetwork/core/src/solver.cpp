@@ -40,7 +40,7 @@ typedef Eigen::Stride<Eigen::Dynamic, Eigen::Dynamic> StrideType;
 #define HY 4
 #define HZ 5
 
-#define TILE_Y 32
+#define TILE_Y 128
 
 
 // long long get_milliseconds()
@@ -368,6 +368,34 @@ int SolverFDTD::solver_init_fields(
     return 0;
 }
 
+int SolverFDTD::solver_init_corrections(PyObject * py_corrections)
+{
+    // initialize h-field edge corrections
+    n_corrections = (int) PyList_Size(py_corrections);
+
+    PyObject* py_corr;
+
+    for (int m = 0; m < n_corrections; m++)
+    {   
+        py_corr = PyList_GetItem(py_corrections, m);
+
+        corrections[m].flat_idx = PyLong_AsLong(PyDict_GetItemString(py_corr, "flat_idx"));
+        corrections[m].coeff = get_source_array(py_corr, 5);
+        corrections[m].field = PyLong_AsLong(PyDict_GetItemString(py_corr, "field"));
+
+        // get grid index for the h-component
+        PyObject* py_idx = PyDict_GetItemString(py_corr, "idx");
+        
+        for (int i = 0; i < 3; i++)
+        {
+            corrections[m].idx[i] = (int) PyLong_AsLong(PyList_GetItem(py_idx, i));
+        }
+
+    }
+
+    return 0;
+}
+
 int SolverFDTD::solver_init_monitors(PyObject * py_monitors, int Nt, int gpu)
 {
     // initialize field monitors
@@ -660,6 +688,45 @@ void SolverFDTD::solver_controller(int Nt, int n_threads, int update_interval)
             cv_th.notify_all();
             cv.wait(lock, [n_threads, this] { return h_updates.load() == n_threads; });
         }
+
+        // re-run component updates that have corrections assigned
+        // FieldCorrection* corr;
+        // int x, y, z;
+
+        // for (int i = 0; i < n_corrections; i++)
+        // {   
+        //     corr = &(corrections[i]);
+        //     x = corr.idx[0];
+        //     y = corr.idx[1];
+        //     z = corr.idx[2];
+
+        //     if ((corr->field) == 3) // hx update
+        //     {
+        //         fields.ez[x * ez_NyNz + y * Nz + z]
+        //         fields.hx[corr->flat_idx] -= (corr->coeff)[1] * fields.hx[corr->flat_idx] + 
+        //     }
+
+
+        //     // // ----------------- update hx -------------------------- //
+        //     // hxb.noalias() = Da_hx_y.block(y, Nz0_pml, Nyb, Nzb).cwiseProduct(hxb) + (
+        //     //     Db_hx_y.block(y, Nz0_pml, Nyb, Nzb).cwiseProduct(ez_diff_y.block(0, Nz0_pml, Nyb, Nzb)) + 
+        //     //     Db_hx_z.block(y, Nz0_pml, Nyb, Nzb).cwiseProduct(ey_diff_z.block(0, Nz0_pml, Nyb, Nzb))
+        //     // );
+            
+        //     // // ----------------- update hy -------------------------- //
+        //     // hyb.noalias() = Da_hy_z.block(y, Nz0_pml, Nyb, Nzb).cwiseProduct(hyb) + (
+        //     //     Db_hy_z.block(y, Nz0_pml, Nyb, Nzb).cwiseProduct(ex_diff_z.block(0, Nz0_pml, Nyb, Nzb)) + 
+        //     //     Db_hy_x.block(y, Nz0_pml, Nyb, Nzb).cwiseProduct(ez_diff_x.block(0, Nz0_pml, Nyb, Nzb))
+        //     // );
+
+        //     // // ----------------- update hz -------------------------- //
+        //     // // extends the full axis along z since hz does not contribute to z-pml
+        //     // hzb.noalias() = Da_hz_x.block(y, 1, Nyb, Nz-1).cwiseProduct(hzb) + (
+        //     //     Db_hz_x.block(y, 1, Nyb, Nz-1).cwiseProduct(ey_diff_x.block(0, 0, Nyb, Nz-1)) + 
+        //     //     Db_hz_y.block(y, 1, Nyb, Nz-1).cwiseProduct(ex_diff_y.block(0, 0, Nyb, Nz-1))
+        //     // );
+            
+        // }
 
         // write update
         if ((update_interval) && ((n % update_interval) == 0))
