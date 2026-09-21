@@ -75,7 +75,8 @@ s.add_conductor(ms_upper, ms_lower, style=dict(color="gold"))
 s.add_lumped_port(1, port1_face, "z-")
 
 # PML boundaries are required on all sides to add a far-field monitor
-s.assign_PML_boundaries("x-", "x+", "y-", "y+", "z+", "z-", n_pml=5)
+s.add_PML("x-", "x+", "y-", "y+", "z+", "z-", n_pml=5)
+
 s.generate_mesh(d_max = 0.02, d_min=0.01)
 
 # setup wide-band far-field monitor
@@ -83,7 +84,7 @@ s.add_farfield_monitor(frequency=np.arange(4, 42, 2) * 1e9)
 # near-field monitor
 # s.add_field_monitor("e_tot", "e_total", "y", 0, n_step=10)
 
-# apply edge singularity correction to the edges of traces, iterate over lower leg and upper leg
+# # # apply edge singularity correction to the edges of traces, iterate over lower leg and upper leg
 for i, ms_z in enumerate((ms1_z, ms2_z)):
 
     # left edge
