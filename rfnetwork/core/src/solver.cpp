@@ -990,7 +990,7 @@ void SolverFDTD::efield_slice_update(int x)
             // ----------------- update ey -------------------------- //
             auto ey_z_pml = ey_z.block(0, Nz0_pml+1, Nyb, Nzb-1);
             ey_z_pml.noalias() = Ca_ey_z.block(y, Nz0_pml+1, Nyb, Nzb-1).cwiseProduct(ey_z_pml) + (
-                Cb_ey_z.block(y, 1, Nyb, Nzm1).cwiseProduct( (hx.block(y, Nz0_pml+1, Nyb, Nzb-1) - hx.block(y, Nz0_pml, Nyb, Nzb-1)))
+                Cb_ey_z.block(y, Nz0_pml+1, Nyb, Nzm1).cwiseProduct( (hx.block(y, Nz0_pml+1, Nyb, Nzb-1) - hx.block(y, Nz0_pml, Nyb, Nzb-1)))
             );
             
             auto ey_x_pml = ey_x.block(0, Nz0_pml+1, Nyb, Nzb-1);
@@ -1009,7 +1009,7 @@ void SolverFDTD::efield_slice_update(int x)
             );
             
             auto ez_y_pml = ez_y.block(0, 0, Nyb, Nz);
-            ez_y_pml.noalias() = Ca_ez_y.block(y, Nz0_pml, Nyb, Nz).cwiseProduct(ez_y_pml) + (
+            ez_y_pml.noalias() = Ca_ez_y.block(y, 0, Nyb, Nz).cwiseProduct(ez_y_pml) + (
                 Cb_ez_y.block(y, 0, Nyb, Nz).cwiseProduct(hx.block(y+1, 0, Nyb, Nz) - hx.block(y, 0, Nyb, Nz))
             );
 
@@ -1295,8 +1295,6 @@ void SolverFDTD::hfield_slice_update(int x)
             }
 
 
-            // do PML update here if in x-pml section
-
 
             // ----------------- update hz -------------------------- //
             // extends into z-pml because z-pml does not update hz
@@ -1358,7 +1356,7 @@ void SolverFDTD::hfield_slice_update(int x)
             // auto ey_diff_z = ey.block(y, 1, Nyb, Nz) - ey.block(y, 0, Nyb, Nz);
             // auto ex_diff_z = ex.block(y+1, 1, Nyb, Nz) - ex.block(y+1, 0, Nyb, Nz);
 
-            // // ----------------- update hy -------------------------- //
+            // ----------------- update hy -------------------------- //
             auto hy_z_pml = hy_z.block(0, Nz0_pml, Nyb, Nzb);
             hy_z_pml.noalias() = Da_hy_z.block(y, Nz0_pml, Nyb, Nzb).cwiseProduct(hy_z_pml) + (
                 Db_hy_z.block(y, Nz0_pml, Nyb, Nzb).cwiseProduct(ex.block(y+1, Nz0_pml+1, Nyb, Nzb) - ex.block(y+1, Nz0_pml, Nyb, Nzb))
@@ -1370,7 +1368,7 @@ void SolverFDTD::hfield_slice_update(int x)
             );
             hy.block(y, Nz0_pml, Nyb, Nzb) = hy_z_pml + hy_x_pml;
 
-            // // ----------------- update hz -------------------------- //
+            // ----------------- update hz -------------------------- //
             // extend into z-PML which is not updated in the z-PML section
             auto hz_x_pml = hz_x.block(0, 1, Nyb, Nzm1);
             hz_x_pml.noalias() = Da_hz_x.block(y, 1, Nyb, Nzm1).cwiseProduct(hz_x_pml) + (
