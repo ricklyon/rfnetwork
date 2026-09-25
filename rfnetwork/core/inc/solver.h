@@ -101,6 +101,7 @@ struct FieldCorrection {
     int flat_idx;
     int idx[3];
     int field;
+    float value;
 };
 
 
