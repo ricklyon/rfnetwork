@@ -2803,19 +2803,19 @@ class FDTD_Solver():
             # self.Db["hz_x2"][x0-1, y, z0] *= CFe
             idx = build_idx(p1_i[e_axis] - 1, fh_idx, n_idx)
             # self.Db[f"h{na}_{ea}2"][idx] *= CFe
-            add_correction(f"h{na}_{ea}", (1, CFe), idx)
+            add_correction(f"h{na}_{ea}", (CFe, 1), idx)
 
         if p2_i[e_axis] < self.Db[f"h{na}_{ea}"].shape[e_axis]:
             # self.Db["hz_x1"][x1, y, z0] *= CFe
             idx = build_idx(p2_i[e_axis], fh_idx, n_idx)
             # self.Db[f"h{na}_{ea}1"][idx] *= CFe
-            add_correction(f"h{na}_{ea}", (CFe, 1), idx)
+            add_correction(f"h{na}_{ea}", (1, CFe), idx)
 
         # Correct Hx above and below the PEC plane that integrates Ey  
         # self.Db["hx_z2"][x0: x1+1, y, z0-1] *= CFe
         # self.Db["hx_z1"][x0: x1+1, y, z0] *= CFe
-        add_correction(f"h{ea}_{na}", (1, CFe), build_idx(e_idx_edges, fh_idx, n_idx-1))
-        add_correction(f"h{ea}_{na}", (CFe, 1), build_idx(e_idx_edges, fh_idx, n_idx))
+        add_correction(f"h{ea}_{na}", (CFe, 1), build_idx(e_idx_edges, fh_idx, n_idx-1))
+        add_correction(f"h{ea}_{na}", (1, CFe), build_idx(e_idx_edges, fh_idx, n_idx))
         # self.Db[f"h{ea}_{na}2"][build_idx(e_idx_edges, fh_idx, n_idx-1)] *= CFe
         # self.Db[f"h{ea}_{na}1"][build_idx(e_idx_edges, fh_idx, n_idx)] *= CFe
 
@@ -2825,8 +2825,8 @@ class FDTD_Solver():
             # self.Db["hx_y1"][x0: x1+1, y0, z] *= CFe
             # self.Db[f"h{ea}_{fa}2"][build_idx(e_idx_edges, p1_i[f_axis] -1, ni)] *= CFe
             # self.Db[f"h{ea}_{fa}1"][build_idx(e_idx_edges, p1_i[f_axis], ni)] *= CFe
-            add_correction(f"h{ea}_{fa}", (1, CFe), build_idx(e_idx_edges, p1_i[f_axis] -1, ni))
-            add_correction(f"h{ea}_{fa}", (CFe, 1), build_idx(e_idx_edges, p1_i[f_axis], ni))
+            add_correction(f"h{ea}_{fa}", (CFe, 1), build_idx(e_idx_edges, p1_i[f_axis] -1, ni))
+            add_correction(f"h{ea}_{fa}", (1, CFe), build_idx(e_idx_edges, p1_i[f_axis], ni))
 
             # correct Hy components that integrate the Ez component below and above the edge 
             # self.Db["hy_z1"][x0: x1, y0, z] *= 1 / CFe
@@ -2842,12 +2842,12 @@ class FDTD_Solver():
                 # self.Db["hy_x2"][x0-1, y0, z] *= CFe
                 idx = build_idx(p1_i[e_axis] - 1, p1_i[f_axis], ni) 
                 # self.Db[f"h{fa}_{ea}2"][idx] *= CFe
-                add_correction(f"h{fa}_{ea}", (1, CFe), idx)
+                add_correction(f"h{fa}_{ea}", (CFe, 1), idx)
             if p2_i[e_axis] < self.Db[f"h{fa}_{ea}"].shape[e_axis]:
                 # self.Db["hy_x1"][x1, y0, z] *= CFe
                 idx = build_idx(p2_i[e_axis], p1_i[f_axis], ni)
                 # self.Db[f"h{fa}_{ea}1"][idx] *= CFe
-                add_correction(f"h{fa}_{ea}", (CFe, 1), idx)
+                add_correction(f"h{fa}_{ea}", (1, CFe), idx)
 
         # correct Hz components that use the Ey component in the same plane as the edge that points into the edge.
         # Hz in the same plane as the face. Both Hz and Ey are asymtotic so the correction factor cancels out
