@@ -74,7 +74,7 @@ class TestCoupledUStrip(unittest.TestCase):
             s.add_lumped_port(i+1, port_face, integration_line="z+")
 
         # assign PML layers, omitting the x- side near the ports
-        s.assign_PML_boundaries("x+", "x-", "z+", "y-", "y+", n_pml=5)
+        s.add_PML("x+", "x-", "z+", "y-", "y+", n_pml=5)
 
         # create mesh with a nominal width of 20mils far from geometry edges, and 2.5mils near edges.
         # cell widths are tapered to minimize errors
