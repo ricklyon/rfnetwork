@@ -292,9 +292,9 @@ class FDTD_Solver():
             name=name
         )
 
-    def add_current_source(self, face: pv.PolyData, field: str, src: np.ndarray, distribution: float = None):
+    def add_current_source(self, face: pv.PolyData, field: str, src: np.ndarray):
         """
-        Add a current sheet with an arbitrary magnitude distribution (wip). Must be called after generate_mesh().
+        Add a uniform current sheet. Must be called after generate_mesh().
 
         Parameters
         ----------
@@ -318,19 +318,33 @@ class FDTD_Solver():
         p0 = list(self.field_pos_to_idx(np.min(face.points, axis=0), field))
         p1 = list(self.field_pos_to_idx(np.max(face.points, axis=0), field))
 
-        # default to uniform distribution
-        if distribution is None:
-            distribution = np.ones((p1[0] - p0[0]+1, p1[1] - p0[1]+1, p1[2] - p0[2]+1))
+        idx = (
+            slice(p0[0], p1[0] +1, None),
+            slice(p0[1], p1[1] +1, None),
+            slice(p0[2], p1[2] +1, None)
+        )
 
+        # epsilon and sigma at each field
+        eps = dict(
+            ex=self.eps_ex, ey=self.eps_ey, ez=self.eps_ez, hx=self.eps_hx, hy=self.eps_hy, hz=self.eps_hz
+        )
+
+        sigma = dict(
+            ex=self.sig_ex, ey=self.sig_ey, ez=self.sig_ez
+        )
+
+        # coefficient for Js term
+        if field in ("ex", "ey", "ez"):
+            coeff = (2 * self.dt) / (2 * eps[field][idx] + sigma[field][idx] * self.dt)
+        # coefficient for Ms term
+        else:
+            coeff = (self.dt / u0) * np.ones_like(eps[field][idx])
+            
         # add current source
         self.ports += [
             dict(
-                idx = (
-                    slice(p0[0], p1[0] +1, None),
-                    slice(p0[1], p1[1] +1, None),
-                    slice(p0[2], p1[2] +1, None)
-                ),
-                Vs_a = distribution,
+                idx = idx,
+                Vs_a = coeff,
                 field = field,
                 src = src
             )
@@ -3001,8 +3015,84 @@ class FDTD_Solver():
             np.array(e_xyz), coords=dict(component=("x", "y", "z"), time=e1.time, **c1, **c2)
         )
 
+
+    def get_applied_power(self, frequency: np.ndarray, normalization: str = "applied"):
+        """
+        Get the amount of applied power to the grid in the frequency domain.
+
+        Parameters
+        ----------
+        normalization : {"applied", "accepted"}
+            By default, gain is normalized by the applied power to all lumped ports in the simulation.
+            "accepted" normalizes the gain by the combined accepted power from all ports. This removes the effect
+            of impedance mismatch from the farfield gain. Excluding conductor and dielectric losses, this is
+            equal to the directivity.
+
+        """
+
+        self.check_solution()
+
+        # source ports
+        src_ports = [p for p in self.ports if p["src"] is not None]
+
+        # if any ports are not lumped ports, they are current sources. Compute applied power using E * J
+        if any(["r0" not in s.keys() for s in src_ports]):
+
+            Pin_src = []
+            for port in src_ports:
+
+                # cell indices of port
+                idx = port["idx"]
+
+                # cell widths in inches
+                cell_w = self.fcell_w[port["field"]]
+                dx, dy, dz = [cell_w[i][idx[i]] for i in range(3)]
+                dxyz = np.meshgrid(dx, dy, dz, indexing="ij")
+
+                # differential volume in meters^3
+                dV = np.prod([conv.m_in(d) for d in dxyz], axis=0)
+
+                # field value at each cell in the port (e or h)
+                EH = utils.dtft(port["values"], frequency, 1 / self.dt, downsample=False)
+                # applied current or magnetic current density
+                JM = utils.dtft(port["src"], frequency, 1 / self.dt, downsample=False)
+
+                Pin_sources = np.real((1 / 2) * np.sum(EH * np.conjugate(JM) * dV[..., None], axis=(0, 1, 2)))
+
+                Pin_src.append(Pin_sources)
+
+        # get the total applied power to all ports
+        elif normalization == "applied":
+            # get all voltage sources in model
+            v_sources = [p["src"] for p in src_ports]
+
+            # matrix of sources, shape is (src, frequency)
+            Vs = np.array([utils.dtft(v_src, frequency, 1 / self.dt, downsample=False) for v_src in v_sources])
+
+            # get input power for each source
+            Pin_src = (1 / 2) * (np.abs(Vs)**2 / 50)
+
+        elif normalization == "accepted":
+
+            Pin_src = []
+            for i in range(len(self.ports)):
+                ip = self.vi_probe_values(f"port_{i +1}")
+                vsrc = self.ports[i]["src"]
+
+                # compute total power impressed onto the port by the source voltage (Vsrc * Ip)
+                Ip = utils.dtft(ip, frequency, 1 / self.dt, downsample=False)
+                Vs = utils.dtft(vsrc, frequency, 1 / self.dt, downsample=False)
+                Pin_src.append(np.real(-(1 / 2) * Vs * np.conjugate(Ip)))
+
+        else:
+            raise ValueError(f"normalization {normalization} not recognized.")
+
+        # sum total power across all sources
+        return np.sum(Pin_src, axis=0)
+
+    
     def get_farfield_gain(
-        self, theta: np.ndarray, phi: np.ndarray, n_threads: int = 4
+        self, theta: np.ndarray, phi: np.ndarray, n_threads: int = 4, normalization: str = "applied"
     ) -> ldarray:
         """
         Compile farfield realized gain from the farfield monitor attached to the solver. Returned value
@@ -3016,6 +3106,12 @@ class FDTD_Solver():
         phi : np.ndarray | float
             spatial phi values in degrees
 
+        normalization : {"applied", "accepted"}
+            By default, gain is normalized by the applied power to all lumped ports in the simulation.
+            "accepted" normalizes the gain by the combined accepted power from all ports. This removes the effect
+            of impedance mismatch from the farfield gain. Excluding conductor and dielectric losses, this is
+            equal to the directivity.
+
         Returns
         -------
         ldarray
@@ -3027,17 +3123,7 @@ class FDTD_Solver():
 
         frequency = rE.coords["frequency"]
 
-        # get all voltage sources in model
-        v_sources = [p["src"] for p in self.ports if p["src"] is not None]
-
-        # matrix of sources, shape is (src, frequency)
-        Vs = np.array([utils.dtft(v_src, frequency, 1 / self.dt, downsample=False) for v_src in v_sources])
-
-        # get input power for each source
-        Pin_src = (1 / 2) * (np.abs(Vs)**2 / 50)
-
-        # sum total power across all sources
-        Pin = np.sum(Pin_src, axis=0)
+        Pin = self.get_applied_power(frequency, normalization=normalization)
 
         # radiation intensity, in voltage space. Normally rE is squared to get U, but we want U to have the 
         # same phase as rE.
