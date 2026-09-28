@@ -75,7 +75,7 @@ s.add_conductor(ms_upper, ms_lower, style=dict(color="gold"))
 s.add_lumped_port(1, port1_face, "z-")
 
 # PML boundaries are required on all sides to add a far-field monitor
-s.assign_PML_boundaries("x-", "x+", "y-", "y+", "z+", "z-", n_pml=5)
+s.add_PML("x-", "x+", "y-", "y+", "z+", "z-", n_pml=5)
 s.generate_mesh(d_max = 0.02, d_min=0.01)
 
 # setup wide-band far-field monitor
@@ -128,17 +128,13 @@ s.solve(n_threads=4)
 # %%
 # Swept Gain at phi=0°, theta=90°
 # ------------------------
-ff_swept_gain = s.get_farfield_gain(theta=90, phi=[0]).sel(polarization="thetapol")
+ff_swept_gain = s.get_farfield_gain(theta=90, phi=[0])
 
 fig, ax = plt.subplots(1, 1)
-ax.plot(ff_swept_gain.coords["frequency"]  / 1e9, rfn.conv.db20_lin(ff_swept_gain).squeeze(), marker=".")
+ff_swept_gain.plot("frequency", xfmt=lambda x: x/1e9, yfmt="db20", marker=".")
 
 ax.set_xlabel("Frequency [GHz]")
 ax.set_ylabel("Gain [dBi]")
-ax.set_ylim([-10, 4])
-ax.set_xlim([5, 35])
-ax.grid(True)
-ax.set_title("Swept Gain at phi=0°, theta=90°")
 mplm.line_marker(x=10)
 
 # %%
@@ -146,40 +142,14 @@ mplm.line_marker(x=10)
 # ------------------------
 # This plot shows realized gain
 
-import time
-stime = time.time()
-pp_gain = rfn.conv.db20_lin(
-    s.get_farfield_gain(theta=np.arange(-180, 181, 1), phi=[0]).sel(polarization="thetapol")
-)
-# print(time.time() - stime)
+pp_gain = s.get_farfield_gain(theta=np.arange(-180, 181, 1), phi=[0]).sel(polarization="thetapol")
 
 fig, (ax1, ax2) = plt.subplots(1, 2, subplot_kw=dict(projection="polar"), figsize=(8, 4))
-
-# plot settings
-line_style = ["-", "--", "-", "--"]
-p_freq = [10e9, 20e9, 30e9, 40e9]
-p_axes = [ax1, ax1, ax2, ax2]
-
-theta_rad = np.deg2rad(pp_gain.coords["theta"])
-
-for i, f in enumerate(p_freq):
-    p_axes[i].plot(theta_rad, pp_gain.sel(frequency=f).squeeze(), label=f"{f/1e9:.0f} GHz", linestyle=line_style[i])
-
-for ax in (ax1, ax2):
-    ax.set_theta_zero_location('N') 
-    ax.set_theta_direction(-1) 
-    ax.set_xlabel(r"$\theta$ [deg], $\phi$=0°")
-    ax.set_ylim([-25, 5])
-    ax.set_yticks(np.arange(-25, 10, 5))
-    ax.set_yticklabels(["", "-20", "-15", "10", "-5", "0", "5dBi"])
-    ax.legend(loc="lower right")
-
-    # Set theta labels
-    ax.set_xticks(np.linspace(0, 2 * np.pi, 8, endpoint=False))
-    labels = [f"{d}°" for d in [0, 45, 90, 135, 180, -135, -90, -45]]
-    ax.set_xticklabels(labels)
+pp_gain.plot("theta", xfmt=np.deg2rad, yfmt="db20", frequency=[10e9, 20e9], ax=ax1)
+pp_gain.plot("theta", xfmt=np.deg2rad, yfmt="db20", frequency=[30e9, 40e9], ax=ax2)
 
 fig.tight_layout()
+
 
 # %%
 # Plot S11

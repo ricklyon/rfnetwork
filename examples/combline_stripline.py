@@ -235,17 +235,6 @@ for i, ln in enumerate(lines):
                 (x, y0, 0), (x, y1, 0), integration_line
             )
 
-# to check the edge correction was set up properly, plot the FDTD coefficients of the H field normal to the conductor
-# surface (hz in this case). The fields at the edge vary asymptotically along the x direction, so plot the hz_x1 or 
-# hz_x2 fields. 
-cpos = pv.CameraPosition(
-    position=(xmax/2, tap_loc, 1),
-    focal_point=(xmax/2, tap_loc, 0),
-    viewup=(0, 1, 0),
-)
-fig, ax = plt.subplots()
-s.plot_coefficients("hz_x1", "b", "z", position=0, point_size=15, cmap="brg", camera_position = cpos, axes=ax, zoom=3)
-
 # %%
 # Solve and Plot S-parameters
 # ---------------------------

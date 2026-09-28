@@ -81,9 +81,10 @@ s.add_farfield_monitor(frequency=10e9)
 s.solve(n_threads=4)
 
 fig, ax = plt.subplots()
-cpos = pv.CameraPosition(position=(2, 3, 2), focal_point=(0, 0, 0), viewup=(0, 0.0, 1.0))
+cpos = pv.CameraPosition(position=(1.5, 2.7, 1.6), focal_point=(0, 0, 0), viewup=(0, 0.0, 1.0))
 s.plot_monitor("mon1", init_time=507, camera_position=cpos, axes=ax)
 ax.set_title("Uniform Aperture")
+fig.tight_layout()
 
 # %%
 # Plot Far-field Gain
@@ -91,7 +92,8 @@ ax.set_title("Uniform Aperture")
 
 theta_cut = s.get_farfield_gain(theta=np.arange(-90, 90, 1), phi=90)
 
-fig, (ax1) = plt.subplots(1, 1, subplot_kw=dict(projection="polar"), figsize=(8, 4))
+fig, (ax1) = plt.subplots(1, 1, subplot_kw=dict(projection="polar"))
 theta_cut.plot("theta", xfmt=np.deg2rad, yfmt="db20", ax=ax1, polarization="phipol")
 fig.tight_layout()
 ax1.set_xlabel(r"$\theta$ [deg]")
+plt.show()

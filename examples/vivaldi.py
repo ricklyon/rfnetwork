@@ -74,7 +74,7 @@ port_face = pv.Rectangle(((port_x, -sub_h, port_y0), (port_x, -sub_h, port_y1), 
 s.add_lumped_port(1, port_face, "y+")
 
 # Assign PML layers on all sides, including the bottom
-s.assign_PML_boundaries("x-", "x+", "y-", "y+", "z+", "z-", n_pml=5)
+s.add_PML("x-", "x+", "y-", "y+", "z+", "z-", n_pml=5)
 s.generate_mesh(0.06, 0.01)
 
 fig, ax = plt.subplots()
@@ -119,27 +119,10 @@ ax.set_xticks(np.arange(0, 4.5, 0.5))
 
 # plot far-field cut along theta at phi=0
 ph = 0
-theta_cut = rfn.conv.db20_lin(
-    s.get_farfield_gain(theta=np.arange(-180, 181, 2), phi=ph).sel(polarization="thetapol")
-)
+theta_cut = s.get_farfield_gain(theta=np.arange(-180, 181, 2), phi=ph).sel(polarization="thetapol")
 
 fig1, ax = plt.subplots(subplot_kw=dict(projection="polar"))
-theta_rad = np.deg2rad(theta_cut.coords["theta"])
-ax.plot(theta_rad, theta_cut.squeeze().T)
-
-ax.set_theta_zero_location('N') 
-ax.set_theta_direction(-1) 
-ax.set_ylim([-25, 10])
-ax.set_yticks(np.arange(-25, 15, 5))
-ax.set_yticklabels(["", "-20", "-15", "-10", "-5", "0", "5", "10dBi"])
-
-# Set theta labels
-ax.set_xticks(np.linspace(0, 2 * np.pi, 8, endpoint=False))
-labels = [f"{d}°" for d in [0, 45, 90, 135, 180, -135, -90, -45]]
-ax.set_xticklabels(labels)
-
-ax.set_xlabel(f"$\\theta$ [deg], $\\phi$={ph}°")
-ax.legend(["{:.3f}GHz".format(f/1e9) for f in theta_cut.coords["frequency"]])
+theta_cut.plot("theta", xfmt=np.deg2rad, yfmt="db20")
 
 
 # %%

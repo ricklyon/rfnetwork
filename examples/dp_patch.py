@@ -148,7 +148,7 @@ port2_face = pv.Rectangle([(-w_ms/2, port_y, 0), (w_ms/2, port_y, 0), (w_ms/2, p
 s.add_lumped_port(2, port2_face, "z-")
 
 # PML boundaries on all sides of the solve box, 5 cells wide.
-s.assign_PML_boundaries("x-", "x+", "y-", "y+", "z+", "z-", n_pml=5)
+s.add_PML("x-", "x+", "y-", "y+", "z+", "z-", n_pml=5)
 
 # build mesh with a minimum cell size near feature edges of 0.02in, and a maximum size of 0.08in
 s.generate_mesh(d_max=0.08, d_min=0.02)
@@ -217,27 +217,10 @@ s.solve(n_threads=4)
 theta_cut = s.get_farfield_gain(theta=np.arange(-180, 181, 2), phi=0)
 
 # get cp polarization
-theta_cut_cp = rfn.conv.db20_lin(
-    rfn.antennas.pattern_spherical2cp(theta_cut)
-)
+theta_cut_cp = rfn.antennas.pattern_spherical2cp(theta_cut)
 
 fig1, ax = plt.subplots(subplot_kw=dict(projection="polar"))
-theta_rad = np.deg2rad(theta_cut_cp.coords["theta"])
-ax.plot(theta_rad, theta_cut_cp.squeeze().T)
-
-ax.set_theta_zero_location('N') 
-ax.set_theta_direction(-1) 
-ax.set_ylim([-25, 10])
-ax.set_yticks(np.arange(-25, 15, 5))
-ax.set_yticklabels(["", "-20", "-15", "-10", "-5", "0", "5", "10dBi"])
-
-# Set theta labels
-ax.set_xticks(np.linspace(0, 2 * np.pi, 8, endpoint=False))
-labels = [f"{d}°" for d in [0, 45, 90, 135, 180, -135, -90, -45]]
-ax.set_xticklabels(labels)
-
-ax.set_xlabel(r"$\theta$ [deg], $\phi$=0°")
-ax.legend(["RHCP", "LHCP"])
+theta_cut_cp.plot("theta", xfmt=np.deg2rad, yfmt="db20")
 mplm.line_marker(x=0)
 
 # %%
