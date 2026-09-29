@@ -165,7 +165,7 @@ def phitheta_uv(u: np.ndarray, v: np.ndarray, deg: bool = True):
         coords = dict(u=u, v=v)
         return ldarray(phi, coords=coords), ldarray(theta, coords=coords)
 
-def uvw_azel(az: np.ndarray, el: np.ndarray):
+def uvw_azel(az: np.ndarray, el: np.ndarray, flat: bool = False):
     """
     Convert azimuth and elevation coordinates [degrees] to u, v, w.
 
@@ -186,8 +186,12 @@ def uvw_azel(az: np.ndarray, el: np.ndarray):
         w coordinate
     """
     az, el = np.atleast_1d(az), np.atleast_1d(el)
-    # form into a meshgrid
-    az_m, el_m = _create_meshgrid(az, el)
+
+    if not flat:
+        # form into a meshgrid
+        az_m, el_m = _create_meshgrid(az, el)
+    else:
+        az_m, el_m = az, el
 
     # convert to degrees
     az_m, el_m = np.deg2rad(az_m), np.deg2rad(el_m)
@@ -199,7 +203,7 @@ def uvw_azel(az: np.ndarray, el: np.ndarray):
     coords = dict(az=az, el=el)
     return ldarray(u, coords=coords), ldarray(v, coords=coords), ldarray(w, coords=coords)
 
-def azel_uvw(u: np.ndarray, v: np.ndarray, w: np.ndarray):
+def azel_uvw(u: np.ndarray, v: np.ndarray, w: np.ndarray, flat: bool = False):
     """
     Convert u, v, w to azimuth and elevation coordinates [degrees].
 
@@ -222,7 +226,10 @@ def azel_uvw(u: np.ndarray, v: np.ndarray, w: np.ndarray):
     """
     u, v, w = np.atleast_1d(u), np.atleast_1d(v), np.atleast_1d(w)
     # form into a meshgrid
-    u_m, v_m, w_m = _create_meshgrid(u, v, w)
+    if not flat:
+        u_m, v_m, w_m = _create_meshgrid(u, v, w)
+    else:
+        u_m, v_m, w_m = u, v, w
 
     with np.errstate(all='ignore'):
         el = np.arcsin(v_m)
@@ -231,7 +238,7 @@ def azel_uvw(u: np.ndarray, v: np.ndarray, w: np.ndarray):
     # convert to degrees
     az, el = np.rad2deg(az), np.rad2deg(el)
 
-    if isinstance(az, ldarray) and isinstance(el, ldarray):
+    if flat or (isinstance(az, ldarray) and isinstance(el, ldarray)):
         return az, el
     else:
         coords = dict(u=u, v=v, w=w)
@@ -301,6 +308,8 @@ def pattern_spherical2rectangular(pattern: ldarray):
 
     if not all(pattern.polarization == ("thetapol", "phipol")):
         raise ValueError("Pattern polarization must be defined with spherical component vectors.")
+
+    pattern = np.transpose(pattern, (..., "theta", "phi"))
     
     theta_m, phi_m = np.meshgrid(pattern.theta, pattern.phi, indexing="ij")
 
@@ -322,7 +331,7 @@ def pattern_spherical2rectangular(pattern: ldarray):
 
     # matrix multiply by the transformation matrix to get rectangular polarization vectors
     return ldarray(
-        np.einsum("nmtp,mftp->nftp", A, pattern), coords=coords
+        np.einsum("nmtp,m...tp->n...tp", A, pattern), coords=coords
     )
 
 
@@ -333,7 +342,9 @@ def pattern_rectangular2spherical(pattern: ldarray):
     """
     if not all(pattern.polarization == ("x", "y", "z")):
         raise ValueError("Pattern polarization must be defined with cartesian component vectors.")
-    
+
+    pattern = np.transpose(pattern, (..., "theta", "phi"))
+
     theta_m, phi_m = np.meshgrid(pattern.theta, pattern.phi, indexing="ij")
 
     # convert to radians
@@ -353,7 +364,7 @@ def pattern_rectangular2spherical(pattern: ldarray):
 
     # matrix multiply by the transformation matrix to get spherical polarization vectors
     return ldarray(
-        np.einsum("nmtp,mftp->nftp", A, pattern), coords=coords
+        np.einsum("nmtp,m...tp->n...tp", A, pattern), coords=coords
     )
 
 def pattern_spherical2cp(pattern: ldarray):
@@ -362,9 +373,11 @@ def pattern_spherical2cp(pattern: ldarray):
     """
     if not all(pattern.polarization == ("thetapol", "phipol")):
         raise ValueError("Pattern polarization must be defined with spherical component vectors.")
+
+    pattern = np.transpose(pattern, (..., "theta", "phi"))
     
-    # project phi/theta to specified polarization. project vectors project from thetapol, phipol to a
-    # different polarization. 
+    # project phi/theta to specified polarization. project vectors project from thetapol, phipol to 
+    # rhcp, lhcp
     A = [
         [1 / np.sqrt(2), 1j / np.sqrt(2)],  # advance phi component by 90 deg for rhcp
         [1 / np.sqrt(2), -1j / np.sqrt(2)]  # delay phi component by 90 deg for lhcp
@@ -375,5 +388,70 @@ def pattern_spherical2cp(pattern: ldarray):
 
     # matrix multiply by the transformation matrix to get spherical polarization vectors
     return ldarray(
-        np.einsum("nm,mftp->nftp", A, pattern), coords=coords
+        np.einsum("nm,m...tp->n...tp", A, pattern), coords=coords
+    )
+
+def pattern_spherical2azel(pattern: ldarray):
+    r"""
+    Project pattern from spherical polarization to Ludwig's II definition.
+    """
+    if not all(pattern.polarization == ("thetapol", "phipol")):
+        raise ValueError("Pattern polarization must be defined with spherical component vectors.")
+
+    pattern = np.transpose(pattern, (..., "theta", "phi"))
+    
+    theta_m, phi_m = np.meshgrid(pattern.theta, pattern.phi, indexing="ij")
+
+    # convert to radians
+    theta_m, phi_m = np.deg2rad(theta_m), np.deg2rad(phi_m)
+
+    # rows are az, el; columns are thetapol, phipol
+    A = np.array(
+        [[np.cos(phi_m), -np.cos(theta_m) * np.sin(phi_m)], 
+         [np.cos(theta_m) * np.sin(phi_m), np.cos(phi_m)]],
+    )
+    with np.errstate(all='ignore'):
+        cosEl = np.sqrt(1 - np.sin(theta_m) ** 2 * np.sin(phi_m) ** 2)
+        A *= np.where(cosEl == 0, 0, 1 / cosEl)
+
+    coords = dict(**pattern.coords)
+    coords["polarization"] = ["l2_az", "l2_el"]
+
+    # matrix multiply by the transformation matrix to get new polarization vectors
+    return ldarray(
+        np.einsum("nmtp,m...tp->n...tp", A, pattern), coords=coords
+    )
+
+def pattern_azel2spherical(pattern: ldarray):
+    r"""
+    Project pattern from Ludwig's II definition to spherical polarization.
+    """
+    if not all(pattern.polarization == ("l2_az", "l2_el")):
+        raise ValueError("Pattern polarization must be defined with spherical component vectors.")
+
+    pattern = np.transpose(pattern, (..., "theta", "phi"))
+
+    theta_m, phi_m = np.meshgrid(pattern.theta, pattern.phi, indexing="ij")
+
+    # convert to radians
+    theta_m, phi_m = np.deg2rad(theta_m), np.deg2rad(phi_m)
+    
+    # rows are az, el; columns are thetapol, phipol
+    A = np.array(
+        [[np.cos(phi_m), -np.cos(theta_m) * np.sin(phi_m)], 
+         [np.cos(theta_m) * np.sin(phi_m), np.cos(phi_m)]],
+    )
+    with np.errstate(all='ignore'):
+        cosEl = np.sqrt(1 - np.sin(theta_m) ** 2 * np.sin(phi_m) ** 2)
+        A *= np.where(cosEl == 0, 0, 1 / cosEl)
+
+    # take inverse of A to reverse the projection. Matrix is orthogonal.
+    A_inv = np.transpose(A, (1, 0, 2, 3))
+
+    coords = dict(**pattern.coords)
+    coords["polarization"] = ["thetapol", "phipol"]
+
+    # matrix multiply by the transformation matrix to get new polarization vectors
+    return ldarray(
+        np.einsum("nmtp,m...tp->n...tp", A_inv, pattern), coords=coords
     )
