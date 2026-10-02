@@ -440,7 +440,6 @@ class FDTD_Solver():
         if any([s not in valid_sides for s in sides]):
             raise ValueError(f"PML side not recognized. Expecting one of {valid_sides}")
 
-        axis_map = dict(x=0, y=1, z=2)
         for s in sides:
             # update the PML setting dictionary
             self.pml_boundaries[s] = dict(sigma_max = sigma_max, m = m, n_pml=n_pml)
@@ -717,7 +716,7 @@ class FDTD_Solver():
 
         self._create_grid(d_max, d_min)
 
-        gx, gy, gz = self.grid.x, self.grid.y, self.grid.z
+        gx, gy, gz = self.g_edges
         dx, dy, dz = np.diff(gx).astype(dtype_), np.diff(gy).astype(dtype_), np.diff(gz).astype(dtype_)
 
         self.n_cells = len(dx), len(dy), len(dz)  
@@ -734,7 +733,6 @@ class FDTD_Solver():
         dy_h = (dy[1:] + dy[:-1]) / 2
         dz_h = (dz[1:] + dz[:-1]) / 2
 
-        self.g_edges = gx, gy, gz
         self.g_cells = gx_h, gy_h, gz_h
         self.d_cells = dx, dy, dz
         self.dh_cells = dx_h, dy_h, dz_h
@@ -860,9 +858,9 @@ class FDTD_Solver():
             # flatten list of lists of subcell widths
             mesh_cells_d[axis] = list(itertools.chain(*graded_subcells_d))
 
-        gx, gy, gz = [np.around(np.concatenate([[self.sbox_min[i]], self.sbox_min[i] + np.cumsum(mesh_cells_d[i])]), decimals=self._places) for i in range(3)]
+        grid_edges = [np.around(np.concatenate([[self.sbox_min[i]], self.sbox_min[i] + np.cumsum(mesh_cells_d[i])]), decimals=self._places) for i in range(3)]
 
-        self.grid = pv.RectilinearGrid(gx.astype(dtype_), gy.astype(dtype_), gz.astype(dtype_))
+        self.g_edges = [g.astype(dtype_) for g in grid_edges]
 
     def _init_dielectrics(self):
 
@@ -1032,7 +1030,7 @@ class FDTD_Solver():
         Cb_ex = (2 * dt) / ((2 * self.eps_ex + (self.sig_ex * dt)))
         Cb_ey = (2 * dt) / ((2 * self.eps_ey + (self.sig_ey * dt)))
         Cb_ez = (2 * dt) / ((2 * self.eps_ez + (self.sig_ez * dt)))
-    
+
         self.Ca = dict(
             ex_y = Ca_ex.copy(),
             ex_z = Ca_ex.copy(),
