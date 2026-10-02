@@ -98,7 +98,9 @@ s.generate_mesh(d_max = 0.03, d_min=0.01)
 
 s.add_farfield_monitor(f0)
 
-plotter = s.render(show_mesh=True)
+plotter = s.render(show_mesh=False)
+plotter.add_points(ele_pos, render_points_as_spheres=True, point_size=15)
+plotter.add_point_labels(ele_pos, np.arange(N), always_visible=True)
 plotter.show()
 
 
@@ -130,6 +132,9 @@ plt.figure()
 emb_pattern = get_pattern()
 emb_pattern.pcolormesh("az", "el", zfmt="db20", vmin=-20, cmap="jet")
 
+plt.figure()
+emb_pattern.sel(el=np.arange(-80, 82, 2)).plot("el", yfmt="db20", az=0, ymin=-10)
+
 
 # %%
 # Estimate Beam Pattern
@@ -139,7 +144,7 @@ emb_pattern.pcolormesh("az", "el", zfmt="db20", vmin=-20, cmap="jet")
 array_model = rfn.antennas.translate(emb_pattern, rfn.conv.m_in(ele_pos))
 
 # compute element weights for steered beam
-beam_az, beam_el = 30, 20
+beam_az, beam_el = 20, 0
 weights = np.conjugate(array_model.sel(az=beam_az, el=beam_el))
 # use phase only 
 weights = weights / np.abs(weights)
@@ -147,7 +152,7 @@ weights = weights / np.abs(weights)
 beam_pattern_estimated = np.sum(array_model * weights, axis="element") / np.sqrt(N)
 
 plt.figure()
-beam_pattern_estimated.pcolormesh("az", "el", zfmt="db20", vmin=-25, vmax=10, cmap="jet")
+beam_pattern_estimated.pcolormesh("az", "el", zfmt="db20", vmin=-25, vmax=15, cmap="jet")
 plt.title(f"Estimated Beam Pattern, L2y, {f0/1e9:.1f}GHz")
 
 # %%
@@ -162,9 +167,14 @@ exc = ldarray(exc, coords=dict(element=np.arange(N), time=vsrc.time))
 fig = plt.figure()
 exc.plot("time")
 
+# add field monitor
+# s.add_field_monitor("mon1", "ey", axis="y", position=spacing, n_step=10)
+
 # apply excitation to all elements and solve
 [s.assign_excitation(exc[i], i+1) for i in range(N)]
 s.solve(n_threads=4)
+
+# s.plot_monitor("mon1", opacity=1).show()
 
 frequency: np.ndarray = np.arange(5e9, 6.4e9, 10e6)
 sdata = s.get_sparameters(frequency, downsample=False, source_port=5)
@@ -174,7 +184,8 @@ sdata.plot("frequency", yfmt="db20")
 
 beam_pattern = get_pattern()
 plt.figure()
-beam_pattern.pcolormesh("az", "el", zfmt="db20", vmin=-25, vmax=10, cmap="jet")
+beam_pattern.pcolormesh("az", "el", zfmt="db20", vmin=-25, vmax=15, cmap="jet")
 plt.title(f"Simulated Beam Pattern, L2y, {f0/1e9:.1f}GHz")
 
 
+plt.show()
