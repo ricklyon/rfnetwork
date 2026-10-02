@@ -777,3 +777,15 @@ def setup_pv_plotter(p: pv.Plotter):
 
     p.track_click_position(callback, side="left")
 
+def phase_delay_signal(signal: ldarray, phase: float, f0: float):
+    """ 
+    Apply a phase delay [radians] at f0 to time domain signal. 
+    """
+
+    t_delay = phase / (2 * np.pi * f0)
+    # number of steps that fit in the delay (rounded, no interpolation)
+    dt = signal.coords["time"][1] - signal.coords["time"][0]
+    n_delay = int(np.around(t_delay / dt))
+
+    return ldarray(np.roll(signal, n_delay, axis="time"), coords=signal.coords)
+
