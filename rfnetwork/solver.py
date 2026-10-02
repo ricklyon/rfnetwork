@@ -3092,7 +3092,11 @@ class FDTD_Solver():
 
     
     def get_farfield_gain(
-        self, theta: np.ndarray, phi: np.ndarray, n_threads: int = 4, normalization: str = "applied"
+        self, 
+        theta: np.ndarray, 
+        phi: np.ndarray, n_threads: int = 4, 
+        frequency: np.ndarray = None, 
+        normalization: str = "applied"
     ) -> ldarray:
         """
         Compile farfield realized gain from the farfield monitor attached to the solver. Returned value
@@ -3105,6 +3109,10 @@ class FDTD_Solver():
 
         phi : np.ndarray | float
             spatial phi values in degrees
+
+        frequency : np.ndarray | float
+            frequency in Hz to evaluate gain at. All selected frequencies must be present in the
+            far-field monitor assigned to the solver.
 
         normalization : {"applied", "accepted"}
             By default, gain is normalized by the applied power to all lumped ports in the simulation.
@@ -3119,7 +3127,7 @@ class FDTD_Solver():
             Use rfn.conv.db20_lin(...) to convert to gain in dB.
         """
 
-        rE = self.get_farfield_rE(theta, phi, n_threads=n_threads)
+        rE = self.get_farfield_rE(theta, phi, n_threads=n_threads, frequency=frequency)
 
         frequency = rE.coords["frequency"]
 
@@ -3142,7 +3150,7 @@ class FDTD_Solver():
             gain_v, coords=dict(polarization=["thetapol", "phipol"], frequency=frequency, theta=theta, phi=phi)
         )
 
-    def get_farfield_rE(self, theta: np.ndarray, phi: np.ndarray, n_threads: int = 4) -> ldarray:
+    def get_farfield_rE(self, theta: np.ndarray, phi: np.ndarray, frequency: np.ndarray = None, n_threads: int = 4) -> ldarray:
         """
         Compile E-field monitor data from the farfield monitor attached to the solver.
 
@@ -3187,7 +3195,7 @@ class FDTD_Solver():
         ff_idx = self.farfield["idx"]
 
         # initialize matrix for far-field data
-        frequency = self.farfield["frequency"]
+        frequency = self.farfield["frequency"] if frequency is None else np.atleast_1d(frequency)
         n_frequencies = len(frequency)
 
         for axis in range(3):
@@ -3233,9 +3241,9 @@ class FDTD_Solver():
                         continue
                     
                     # get near-field data
-                    edata = self.get_monitor_data(emon)
-                    hdata1 = self.get_monitor_data(hmon1)
-                    hdata2 = self.get_monitor_data(hmon2)
+                    edata = self.get_monitor_data(emon).sel(frequency=frequency)
+                    hdata1 = self.get_monitor_data(hmon1).sel(frequency=frequency)
+                    hdata2 = self.get_monitor_data(hmon2).sel(frequency=frequency)
 
                     # widths of the cells that the h-components are in, along the axis
                     hidx1 = self.monitors[hmon1]["index"]
