@@ -87,6 +87,29 @@ struct Fields_PML {
     float * hz_y;
 };
 
+struct Coeff_zPML {
+    float * Ca_ex_y;
+    float * Ca_ex_z;
+    float * Cb_ex_y;
+    float * Cb_ex_z;
+
+    float * Ca_ey_z;
+    float * Ca_ey_x;
+    float * Cb_ey_z;
+    float * Cb_ey_x;
+
+    float * Da_hx_y;
+    float * Da_hx_z;
+    float * Db_hx_y;
+    float * Db_hx_z;
+
+    float * Da_hy_z;
+    float * Da_hy_x;
+    float * Db_hy_z;
+    float * Db_hy_x;
+};
+
+
 struct Fields {
     float * ex;
     float * ey;
@@ -153,6 +176,9 @@ private:
     Coeff_Hz Dz;
 
     Fields_PML fields_pml[3][2];
+
+    Coeff_zPML coeff_zpml[2];
+
     // number of pml cells
     int N_pml[3][2];
 
@@ -224,7 +250,7 @@ private:
 public:
     SolverFDTD();          // constructor
     int solver_init_fields(
-        PyObject * fields, PyObject * fields_pml, PyObject * coefficients, int Nx, int Ny, int Nz, PyObject * N_pml, int gpu
+        PyObject * fields, PyObject * coefficients, PyObject * pml_data, int Nx, int Ny, int Nz, int gpu
     );
     int solver_init_monitors(PyObject * py_monitors, int Nt, int gpu);
     int solver_init_corrections(PyObject * py_corrections);

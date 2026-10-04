@@ -231,10 +231,9 @@ SolverFDTD::SolverFDTD(){
 
 int SolverFDTD::solver_init_fields(
     PyObject * py_fields, 
-    PyObject * py_fields_pml, 
     PyObject * coefficients, 
-    int Nx_, int Ny_, int Nz_, 
-    PyObject * py_N_pml, int gpu)
+    PyObject * py_pml_data, 
+    int Nx_, int Ny_, int Nz_, int gpu)
 {
     Nx = Nx_;
     Ny = Ny_;
@@ -272,6 +271,10 @@ int SolverFDTD::solver_init_fields(
     int Nyp1 = (gpu) ? Ny : Ny+1;
     int Nzp1 = (gpu) ? Nz : Nz+1;
 
+    PyObject * py_N_pml = PyDict_GetItemString(py_pml_data, "n_pml");
+    PyObject * py_coeff_pml = PyDict_GetItemString(py_pml_data, "coefficients");
+    PyObject * py_fields_pml = PyDict_GetItemString(py_pml_data, "fields");
+
     // get pml length for each axis
     for (int i = 0; i < 3; i ++)
     {
@@ -281,9 +284,6 @@ int SolverFDTD::solver_init_fields(
         }
         
     }
-    
-    // error check memory buffer
-    std::ostringstream oss;
 
     // Cx
     Cx.Cb_ex_y = get_field_array(PyDict_GetItemString(coefficients, "Cb_ex_y"), Nx, Nyp1, Nzp1);
@@ -363,6 +363,32 @@ int SolverFDTD::solver_init_fields(
             fields_pml[i][s].hz_x = get_field_array(PyList_GetItem(PyDict_GetItemString(axis_dict, "hz_x"), s));
             fields_pml[i][s].hz_y = get_field_array(PyList_GetItem(PyDict_GetItemString(axis_dict, "hz_y"), s));
         }
+    }
+
+    // coefficients for zPML
+    PyObject* axis_dict = PyDict_GetItemString(py_coeff_pml, "z");
+    for (int s = 0; s < 2; s++)
+    {
+        coeff_zpml[s].Ca_ex_y = get_field_array(PyList_GetItem(PyDict_GetItemString(axis_dict, "Ca_ex_y"), s));
+        coeff_zpml[s].Ca_ex_z = get_field_array(PyList_GetItem(PyDict_GetItemString(axis_dict, "Ca_ex_z"), s));
+        coeff_zpml[s].Cb_ex_y = get_field_array(PyList_GetItem(PyDict_GetItemString(axis_dict, "Cb_ex_y"), s));
+        coeff_zpml[s].Cb_ex_z = get_field_array(PyList_GetItem(PyDict_GetItemString(axis_dict, "Cb_ex_z"), s));
+
+        coeff_zpml[s].Ca_ey_z = get_field_array(PyList_GetItem(PyDict_GetItemString(axis_dict, "Ca_ey_z"), s));
+        coeff_zpml[s].Ca_ey_x = get_field_array(PyList_GetItem(PyDict_GetItemString(axis_dict, "Ca_ey_x"), s));
+        coeff_zpml[s].Cb_ey_z = get_field_array(PyList_GetItem(PyDict_GetItemString(axis_dict, "Cb_ey_z"), s));
+        coeff_zpml[s].Cb_ey_x = get_field_array(PyList_GetItem(PyDict_GetItemString(axis_dict, "Cb_ey_x"), s));
+
+        coeff_zpml[s].Da_hx_y = get_field_array(PyList_GetItem(PyDict_GetItemString(axis_dict, "Da_hx_y"), s));
+        coeff_zpml[s].Da_hx_z = get_field_array(PyList_GetItem(PyDict_GetItemString(axis_dict, "Da_hx_z"), s));
+        coeff_zpml[s].Db_hx_y = get_field_array(PyList_GetItem(PyDict_GetItemString(axis_dict, "Db_hx_y"), s));
+        coeff_zpml[s].Db_hx_z = get_field_array(PyList_GetItem(PyDict_GetItemString(axis_dict, "Db_hx_z"), s));
+
+        coeff_zpml[s].Da_hy_z = get_field_array(PyList_GetItem(PyDict_GetItemString(axis_dict, "Da_hy_z"), s));
+        coeff_zpml[s].Da_hy_x = get_field_array(PyList_GetItem(PyDict_GetItemString(axis_dict, "Da_hy_x"), s));
+        coeff_zpml[s].Db_hy_z = get_field_array(PyList_GetItem(PyDict_GetItemString(axis_dict, "Db_hy_z"), s));
+        coeff_zpml[s].Db_hy_x = get_field_array(PyList_GetItem(PyDict_GetItemString(axis_dict, "Db_hy_x"), s));
+
     }
 
     return 0;
@@ -1106,10 +1132,22 @@ void SolverFDTD::efield_slice_update(int x)
             MatrixFloatType ex_y   (fields_pml[2][s].ex_y   + x_offset, sNz_pml, Nyp1);
             MatrixFloatType ex_z   (fields_pml[2][s].ex_z   + x_offset, sNz_pml, Nyp1);
 
+            // coefficients, same shape as the fields
+            MatrixFloatType zCa_ex_y (coeff_zpml[s].Ca_ex_y + x_offset, sNz_pml, Nyp1);
+            MatrixFloatType zCa_ex_z (coeff_zpml[s].Ca_ex_z + x_offset, sNz_pml, Nyp1);
+            MatrixFloatType zCb_ex_y (coeff_zpml[s].Cb_ex_y + x_offset, sNz_pml, Nyp1);
+            MatrixFloatType zCb_ex_z (coeff_zpml[s].Cb_ex_z + x_offset, sNz_pml, Nyp1);
+
             // ey split fields
             x_offset = ((x + 1) * Ny * sNz_pml);
             MatrixFloatType ey_z   (fields_pml[2][s].ey_z   + x_offset, sNz_pml, Ny);
             MatrixFloatType ey_x   (fields_pml[2][s].ey_x   + x_offset, sNz_pml, Ny);
+
+            // coefficients, same shape as the fields
+            MatrixFloatType zCa_ey_z (coeff_zpml[s].Ca_ey_z + x_offset, sNz_pml, Ny);
+            MatrixFloatType zCa_ey_x (coeff_zpml[s].Ca_ey_x + x_offset, sNz_pml, Ny);
+            MatrixFloatType zCb_ey_z (coeff_zpml[s].Cb_ey_z + x_offset, sNz_pml, Ny);
+            MatrixFloatType zCb_ey_x (coeff_zpml[s].Cb_ey_x + x_offset, sNz_pml, Ny);
 
 
             // ----------------- update ex -------------------------- // ;
@@ -1127,12 +1165,17 @@ void SolverFDTD::efield_slice_update(int x)
             auto ex_y_pml = ex_y.transpose().block(Ny0_pml+1, 0, Nyb, sNz_pml);
             auto ex_z_pml = ex_z.transpose().block(Ny0_pml+1, 0, Nyb, sNz_pml);
 
-            ex_y_pml.noalias() = Ca_ex_y.block(Ny0_pml, z0, Nyb, sNz_pml).cwiseProduct(ex_y_pml) + (
-                Cb_ex_y.block(Ny0_pml, z0, Nyb, sNz_pml).cwiseProduct(hz.block(Ny0_pml+1, z0, Nyb, sNz_pml) - hz.block(Ny0_pml, z0, Nyb, sNz_pml))
+            auto Ca_ex_y_pml = zCa_ex_y.transpose().block(Ny0_pml+1, 0, Nyb, sNz_pml);
+            auto Ca_ex_z_pml = zCa_ex_z.transpose().block(Ny0_pml+1, 0, Nyb, sNz_pml);
+            auto Cb_ex_y_pml = zCb_ex_y.transpose().block(Ny0_pml+1, 0, Nyb, sNz_pml);
+            auto Cb_ex_z_pml = zCb_ex_z.transpose().block(Ny0_pml+1, 0, Nyb, sNz_pml);
+
+            ex_y_pml.noalias() = Ca_ex_y_pml.cwiseProduct(ex_y_pml) + (
+                Cb_ex_y_pml.cwiseProduct(hz.block(Ny0_pml+1, z0, Nyb, sNz_pml) - hz.block(Ny0_pml, z0, Nyb, sNz_pml))
             );
             
-            ex_z_pml.noalias() = Ca_ex_z.block(Ny0_pml, z0, Nyb, sNz_pml).cwiseProduct(ex_z_pml ) + (
-                Cb_ex_z.block(Ny0_pml, z0, Nyb, sNz_pml).cwiseProduct(hy.block(Ny0_pml+1, z0, Nyb, sNz_pml) - hy.block(Ny0_pml+1, z0-1, Nyb, sNz_pml))
+            ex_z_pml.noalias() = Ca_ex_z_pml.cwiseProduct(ex_z_pml ) + (
+                Cb_ex_z_pml.cwiseProduct(hy.block(Ny0_pml+1, z0, Nyb, sNz_pml) - hy.block(Ny0_pml+1, z0-1, Nyb, sNz_pml))
             );
 
             ex.block(Ny0_pml, z0, Nyb, sNz_pml) = ex_y_pml + ex_z_pml;
@@ -1150,21 +1193,20 @@ void SolverFDTD::efield_slice_update(int x)
             auto ey_z_pml = ey_z.transpose().block(0, 0, Ny, sNz_pml);
             auto ey_x_pml = ey_x.transpose().block(0, 0, Ny, sNz_pml);
 
-            ey_z_pml.noalias() = Ca_ey_z.block(0, z0, Ny, sNz_pml).cwiseProduct(ey_z_pml) + (
-                Cb_ey_z.block(0, z0, Ny, sNz_pml).cwiseProduct((hx.block(0, z0, Ny, sNz_pml) - hx.block(0, z0-1, Ny, sNz_pml)))
+            auto Ca_ey_z_pml = zCa_ey_z.transpose().block(0, 0, Ny, sNz_pml);
+            auto Ca_ey_x_pml = zCa_ey_x.transpose().block(0, 0, Ny, sNz_pml);
+            auto Cb_ey_z_pml = zCb_ey_z.transpose().block(0, 0, Ny, sNz_pml);
+            auto Cb_ey_x_pml = zCb_ey_x.transpose().block(0, 0, Ny, sNz_pml);
+
+            ey_z_pml.noalias() = Ca_ey_z_pml.cwiseProduct(ey_z_pml) + (
+                Cb_ey_z_pml.cwiseProduct((hx.block(0, z0, Ny, sNz_pml) - hx.block(0, z0-1, Ny, sNz_pml)))
             );
 
-            ey_x_pml.noalias() = Ca_ey_x.block(0, z0, Ny, sNz_pml).cwiseProduct(ey_x_pml) + (
-                Cb_ey_x.block(0, z0, Ny, sNz_pml).cwiseProduct((hz_1.block(0, z0, Ny, sNz_pml) - hz.block(0, z0, Ny, sNz_pml)))
+            ey_x_pml.noalias() = Ca_ey_x_pml.cwiseProduct(ey_x_pml) + (
+                Cb_ey_x_pml.cwiseProduct((hz_1.block(0, z0, Ny, sNz_pml) - hz.block(0, z0, Ny, sNz_pml)))
             );
 
             ey.block(0, z0, Ny, sNz_pml) = ey_z_pml + ey_x_pml;
-
-
-
-           
-
-
 
         }
     }
@@ -1477,11 +1519,24 @@ void SolverFDTD::hfield_slice_update(int x)
             x_offset = ((x + 1) * Nyp1 * sNz_pml);
             MatrixFloatType hx_y   (fields_pml[2][s].hx_y   + x_offset, sNz_pml, Nyp1);
             MatrixFloatType hx_z   (fields_pml[2][s].hx_z   + x_offset, sNz_pml, Nyp1);
+            
+            // coefficients
+            MatrixFloatType zDa_hx_y (coeff_zpml[s].Da_hx_y + x_offset, sNz_pml, Nyp1);
+            MatrixFloatType zDa_hx_z (coeff_zpml[s].Da_hx_z + x_offset, sNz_pml, Nyp1);
+            MatrixFloatType zDb_hx_y (coeff_zpml[s].Db_hx_y + x_offset, sNz_pml, Nyp1);
+            MatrixFloatType zDb_hx_z (coeff_zpml[s].Db_hx_z + x_offset, sNz_pml, Nyp1);
 
             // hy split fields
             x_offset = (x * Nyp1 * sNz_pml);
             MatrixFloatType hy_z   (fields_pml[2][s].hy_z   + x_offset, sNz_pml, Nyp1);
             MatrixFloatType hy_x   (fields_pml[2][s].hy_x   + x_offset, sNz_pml, Nyp1);
+
+            // coefficients
+            MatrixFloatType zDa_hy_z (coeff_zpml[s].Da_hy_z + x_offset, sNz_pml, Nyp1);
+            MatrixFloatType zDa_hy_x (coeff_zpml[s].Da_hy_x + x_offset, sNz_pml, Nyp1);
+            MatrixFloatType zDb_hy_z (coeff_zpml[s].Db_hy_z + x_offset, sNz_pml, Nyp1);
+            MatrixFloatType zDb_hy_x (coeff_zpml[s].Db_hy_x + x_offset, sNz_pml, Nyp1);
+
 
             // ----------------- update hx -------------------------- //
             // first idx of PML (hy or hx)
@@ -1493,12 +1548,17 @@ void SolverFDTD::hfield_slice_update(int x)
             auto hx_y_pml = hx_y.transpose().block(Ny0_pml, 0, Nyb, sNz_pml);
             auto hx_z_pml = hx_z.transpose().block(Ny0_pml, 0, Nyb, sNz_pml);
 
-            hx_y_pml.noalias() = Da_hx_y.block(Ny0_pml, z0, Nyb, sNz_pml).cwiseProduct(hx_y_pml) + (
-                Db_hx_y.block(Ny0_pml, z0, Nyb, sNz_pml).cwiseProduct(ez.block(Ny0_pml + 1, z0, Nyb, sNz_pml) - ez.block(Ny0_pml, z0, Nyb, sNz_pml))
+            auto Da_hx_y_pml = zDa_hx_y.transpose().block(Ny0_pml, 0, Nyb, sNz_pml);
+            auto Da_hx_z_pml = zDa_hx_z.transpose().block(Ny0_pml, 0, Nyb, sNz_pml);
+            auto Db_hx_y_pml = zDb_hx_y.transpose().block(Ny0_pml, 0, Nyb, sNz_pml);
+            auto Db_hx_z_pml = zDb_hx_z.transpose().block(Ny0_pml, 0, Nyb, sNz_pml);
+
+            hx_y_pml.noalias() = Da_hx_y_pml.cwiseProduct(hx_y_pml) + (
+                Db_hx_y_pml.cwiseProduct(ez.block(Ny0_pml + 1, z0, Nyb, sNz_pml) - ez.block(Ny0_pml, z0, Nyb, sNz_pml))
             );
             
-            hx_z_pml.noalias() = Da_hx_z.block(Ny0_pml, z0, Nyb, sNz_pml).cwiseProduct(hx_z_pml) + (
-                Db_hx_z.block(Ny0_pml, z0, Nyb, sNz_pml).cwiseProduct(ey.block(Ny0_pml, z0+1, Nyb, sNz_pml) - ey.block(Ny0_pml, z0, Nyb, sNz_pml))
+            hx_z_pml.noalias() = Da_hx_z_pml.cwiseProduct(hx_z_pml) + (
+                Db_hx_z_pml.cwiseProduct(ey.block(Ny0_pml, z0+1, Nyb, sNz_pml) - ey.block(Ny0_pml, z0, Nyb, sNz_pml))
             );
 
             hx.block(Ny0_pml, z0, Nyb, sNz_pml) = hx_y_pml + hx_z_pml;
@@ -1517,13 +1577,18 @@ void SolverFDTD::hfield_slice_update(int x)
 
             auto hy_z_pml = hy_z.transpose().block(1, 0, Ny, sNz_pml);
             auto hy_x_pml = hy_x.transpose().block(1, 0, Ny, sNz_pml);
-            
-            hy_z_pml.noalias() = Da_hy_z.block(0, z0, Ny, sNz_pml).cwiseProduct(hy_z_pml) + (
-                Db_hy_z.block(0, z0, Ny, sNz_pml).cwiseProduct( ex.block(1, z0+1, Ny, sNz_pml) - ex.block(1, z0, Ny, sNz_pml))
+
+            auto Da_hy_z_pml = zDa_hy_z.transpose().block(1, 0, Ny, sNz_pml);
+            auto Da_hy_x_pml = zDa_hy_x.transpose().block(1, 0, Ny, sNz_pml);
+            auto Db_hy_z_pml = zDb_hy_z.transpose().block(1, 0, Ny, sNz_pml);
+            auto Db_hy_x_pml = zDb_hy_x.transpose().block(1, 0, Ny, sNz_pml);
+
+            hy_z_pml.noalias() = Da_hy_z_pml.cwiseProduct(hy_z_pml) + (
+                Db_hy_z_pml.cwiseProduct( ex.block(1, z0+1, Ny, sNz_pml) - ex.block(1, z0, Ny, sNz_pml))
             );
 
-            hy_x_pml.noalias() = Da_hy_x.block(0, z0, Ny, sNz_pml).cwiseProduct(hy_x_pml) + (
-                Db_hy_x.block(0, z0, Ny, sNz_pml).cwiseProduct(ez.block(1, z0, Ny, sNz_pml) - ez_0.block(1, z0, Ny, sNz_pml))
+            hy_x_pml.noalias() = Da_hy_x_pml.cwiseProduct(hy_x_pml) + (
+                Db_hy_x_pml.cwiseProduct(ez.block(1, z0, Ny, sNz_pml) - ez_0.block(1, z0, Ny, sNz_pml))
             );
             hy.block(0, z0, Ny, sNz_pml) = hy_z_pml + hy_x_pml;
 

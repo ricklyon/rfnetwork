@@ -60,6 +60,8 @@ class FDTD_Solver():
         self._solved = False
         self._time = None
 
+        self.dtype_ = np.float32
+
     @property
     def time(self):
         return self._time
@@ -513,10 +515,11 @@ class FDTD_Solver():
 
         # add PML layers before conductors and ports, this gives priority to any conductors that may extend into the 
         # PML
-        self._init_PML()
+        self._init_PML_coefficients()
 
         self._init_image_coefficients()
         self._init_conductors(surface_tolerance=surface_tolerance, d_min=d_min) # allow conductors to override image layers
+        self._init_PML_fields()
         self._init_lumped_elements()
         self.invalidate_solution()
 
@@ -1305,14 +1308,21 @@ class FDTD_Solver():
                 self.add_current_probe(f"port_{port}", current_face)
 
 
-    def _init_PML(self):
+    def _init_PML_coefficients(self):
         """
         Add PML layer to a single side of the grid.
 
         """
 
+        # split field names for each axis
+        pml_efields = [("ey", "ez"), ("ez", "ex"), ("ex", "ey")]
+        pml_hfields = [("hy", "hz"), ("hz", "hx"), ("hx", "hy")]
+
+        # update coefficients in the PML section
         for side, settings in self.pml_boundaries.items():
             axis = side[0]
+            side_int = 1 if side[1] == "+" else 0
+
             axis_i = dict(x=0, y=1, z=2)[axis]
 
             m_pml = settings["m"]
@@ -1358,12 +1368,8 @@ class FDTD_Solver():
                 hz=self.eps_hz,  
             )
 
-            # get the two e and h fields that are graded by the PML for the given axis direction
-            pml_efields = [("ey", "ez"), ("ez", "ex"), ("ex", "ey")][axis_i]
-            pml_hfields = [("hy", "hz"), ("hz", "hx"), ("hx", "hy")][axis_i]
-
             # grade the e-field components along axis
-            for e in pml_efields:
+            for e in pml_efields[axis_i]:
                 # first e component is at the edge of the PML where sigma = 0, last component is at the solve boundary 
                 # and not updated.
                 # sigma / eps must be constant across y and z, page 291 in taflove
@@ -1374,9 +1380,11 @@ class FDTD_Solver():
                 
                 self.Ca[f"{e}_{axis}"][tuple(e_idx)] = (2 * eps - (sigma_e * dt)) / (2 * eps + (sigma_e * dt))
                 self.Cb[f"{e}_{axis}"][tuple(e_idx)] = (2 * dt) / ((2 * eps + (sigma_e * dt)))
+                # coeff_pml[axis][f"Ca_{e}_{axis}"][side_int] = (2 * eps - (sigma_e * dt)) / (2 * eps + (sigma_e * dt))
+                # coeff_pml[axis][f"Cb_{e}_{axis}"][side_int] = (2 * dt) / ((2 * eps + (sigma_e * dt)))
 
             # grade the h-field components along axis
-            for h in pml_hfields:
+            for h in pml_hfields[axis_i]:
                 # h components are in the middle of the PML cells, use half cell indices
                 eps = field_eps[h][tuple(h_idx)]
                 # electrical conductivity
@@ -1387,6 +1395,109 @@ class FDTD_Solver():
 
                 self.Da[f"{h}_{axis}"][tuple(h_idx)] = (2 * u0 - (sigma_m * dt)) / (2 * u0 + (sigma_m * dt))
                 self.Db[f"{h}_{axis}"][tuple(h_idx)] = (2 * dt) / ((2 * u0 + (sigma_m * dt))) 
+                # coeff_pml[axis][f"Da_{h}_{axis}"][side_int] = (2 * u0 - (sigma_m * dt)) / (2 * u0 + (sigma_m * dt))
+                # coeff_pml[axis][f"Db_{h}_{axis}"][side_int] = (2 * dt) / ((2 * u0 + (sigma_m * dt))) 
+
+    def _init_PML_fields(self):
+
+        # build list of pml cell widths, two values for each axis for each end of the solve box
+        n_pml = [[0, 0], [0, 0], [0, 0]]
+
+        for i, axis in enumerate(["x", "y", "z"]):
+            for j, side in enumerate(("-", "+")):
+                if (axis + side) in self.pml_boundaries.keys():
+                    n_pml[i][j] = self.pml_boundaries[axis + side]["n_pml"]
+
+        sf_names = ("ex_y", "ex_z", "ey_z", "ey_x", "ez_x", "ez_y", "hx_y", "hx_z", "hy_z", "hy_x", "hz_x", "hz_y")
+
+        # initialize split fields in PML regions
+        fields_pml = dict(x=dict(), y=dict(), z=dict())
+        coeff_pml = dict(x=dict(), y=dict(), z=dict())
+
+        for i, axis in enumerate(["x", "y", "z"]):
+
+            # each of the two split fields for PML along the current axis
+            for sf_name in sf_names:
+                # get the base field name from the split field name
+                f_name = sf_name[:2]
+
+                field_shape = list(self.fshape[f_name])
+                coeff_shape = list(self.fshape[f_name])
+
+                # add extra pad cell for hy and hz along x.
+                # coefficents do not have extra pad cell
+                if f_name in ("hy", "hz"):
+                    field_shape[0] += 1
+                # add extra pad cell for hx and hz along y
+                if f_name in ("hx", "hz"):
+                    field_shape[1] += 1
+
+                fields_pml[axis][sf_name] = []
+                
+
+                if axis == "z":
+                    if sf_name[0] == "e":
+                        coeff_pml[axis][f"Ca_{sf_name}"] = [None, None]
+                        coeff_pml[axis][f"Cb_{sf_name}"] = [None, None]
+
+                    else:
+                        coeff_pml[axis][f"Da_{sf_name}"] = [None, None]
+                        coeff_pml[axis][f"Db_{sf_name}"] = [None, None]
+
+                for j, side in enumerate(("-", "+")):
+
+                    n_pml_side = n_pml[i][j]
+
+                    f_shape = list(field_shape)
+                    c_shape = list(coeff_shape)
+
+                    # set length of coefficents and field in the PML direction to be the PML width
+                    f_shape[i] = n_pml_side
+                    c_shape[i] = n_pml_side
+
+                    e_idx = [slice(None) for i in range(3)]
+                    h_idx = [slice(None) for i in range(3)]
+
+                    if n_pml_side:
+                        e_idx[i] = slice(n_pml_side, 0, -1) if side == "-" else slice(-n_pml_side-1, -1)
+                        h_idx[i] = slice(n_pml_side-1, None, -1) if side == "-" else slice(-n_pml_side, None)
+                    else:
+                        e_idx[i] = slice(0, 0)
+                        h_idx[i] = slice(0, 0)
+
+                    # swap memory layout for z-pml to make memory cache more efficient, ordered x, z, y
+                    if axis == "z":
+                        if sf_name[0] == "e":
+                            coeff_pml[axis][f"Ca_{sf_name}"][j] = np.array(
+                                self.Ca[f"{sf_name}"][tuple(e_idx)].transpose(0, 2, 1), order="C", dtype=self.dtype_
+                            )
+                            coeff_pml[axis][f"Cb_{sf_name}"][j] = np.array(
+                                self.Cb[f"{sf_name}"][tuple(e_idx)].transpose(0, 2, 1), order="C", dtype=self.dtype_
+                            )
+                        else:
+                            coeff_pml[axis][f"Da_{sf_name}"][j] = np.array(
+                                self.Da[f"{sf_name}"][tuple(h_idx)].transpose(0, 2, 1), order="C", dtype=self.dtype_
+                            )
+                            coeff_pml[axis][f"Db_{sf_name}"][j] = np.array(
+                                self.Db[f"{sf_name}"][tuple(h_idx)].transpose(0, 2, 1), order="C", dtype=self.dtype_
+                            )
+                        
+                        f_shape = [f_shape[0], f_shape[2], f_shape[1]]
+                        c_shape = [f_shape[0], f_shape[2], f_shape[1]]
+
+                    # initialize empty PML fields
+                    fields_pml[axis][sf_name] += [np.zeros(tuple(f_shape), dtype=self.dtype_)]
+                    # # empty PML coefficients
+                    # if sf_name[0] == "e":
+                    #     coeff_pml[axis][f"Ca_{sf_name}_{axis}"] += [np.zeros(tuple(c_shape), dtype=self.dtype_)]
+                    #     coeff_pml[axis][f"Cb_{sf_name}_{axis}"] += [np.zeros(tuple(c_shape), dtype=self.dtype_)]
+                    # else:
+                    #     coeff_pml[axis][f"Da_{sf_name}_{axis}"] += [np.zeros(tuple(c_shape), dtype=self.dtype_)]
+                    #     coeff_pml[axis][f"Db_{sf_name}_{axis}"] += [np.zeros(tuple(c_shape), dtype=self.dtype_)]
+
+
+        # add to class 
+        self.pml_data = dict(coefficients=coeff_pml, fields=fields_pml, n_pml=n_pml)
 
 
     def gaussian_source(self, width: float, t0: float, t_len: float):
@@ -1601,46 +1712,6 @@ class FDTD_Solver():
 
             fields[f_name] = np.zeros((xs, ys, zs), dtype=dtype_)
 
-        # build list of pml cell widths, two values for each axis for each end of the solve box
-        n_pml = [[0, 0], [0, 0], [0, 0]]
-
-        for i, axis in enumerate(["x", "y", "z"]):
-            for j, side in enumerate(("-", "+")):
-                if (axis + side) in self.pml_boundaries.keys():
-                    n_pml[i][j] = self.pml_boundaries[axis + side]["n_pml"]
-
-        # initialize split fields in PML regions
-        fields_pml = dict()
-        f_split_names = ("ex_y", "ex_z", "ey_z", "ey_x", "ez_x", "ez_y", "hx_y", "hx_z", "hy_z", "hy_x", "hz_x", "hz_y")
-
-        for i, axis in enumerate(["x", "y", "z"]):
-            fields_pml[axis] = dict()
-            for sf_name in f_split_names:
-                # get the base field name from the split field name
-                f_name = sf_name[:2]
-
-                f_shape = list(self.fshape[f_name])
-    
-                # add extra pad cell for hy and hz
-                xs, ys, zs = f_shape
-                if f_name in ("hy", "hz"):
-                    xs += 1
-                if f_name in ("hx", "hz"):
-                    ys += 1
-
-                # update field shape along axis to be the pml width
-                fields_pml[axis][sf_name] = []
-                for j, side in enumerate(("-", "+")):
-                    f_shape = [xs, ys, zs]
-            
-                    f_shape[i] = n_pml[i][j]
-
-                    # swap memory layout for z-pml to make memory cache more efficient
-                    if axis == "z":
-                        f_shape = [f_shape[0], f_shape[2], f_shape[1]]
-
-                    fields_pml[axis][sf_name] += [np.zeros(tuple(f_shape), dtype=dtype_)]
-
         probes = []
         # initialize sources. Sources act like probes, but the values are input to the 
         # field grid before being replaced by the actual component value.
@@ -1808,7 +1879,17 @@ class FDTD_Solver():
         else:
             solver_func = core.core_func.solver_run
 
-        ret_val = solver_func(fields, fields_pml, coefficients, probes, monitors, corrections_list, Nx, Ny, Nz, Nt, n_pml, n_threads, update_interval)
+        ret_val = solver_func(
+            fields, 
+            coefficients, 
+            self.pml_data, 
+            probes, 
+            monitors, 
+            corrections_list, 
+            Nx, Ny, Nz, Nt, 
+            n_threads, 
+            update_interval
+        )
         print(ret_val)
 
         if show_progress:
