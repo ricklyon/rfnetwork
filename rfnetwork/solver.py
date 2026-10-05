@@ -500,12 +500,13 @@ class FDTD_Solver():
             Default is 1/3 the minimum grid cell width.
         """
 
-        self._meshed = True
-
         if d_min is None:
             d_min = d_max
         elif d_min > (d_max / 1.5):
             raise ValueError("d_min must be less than d_max.")
+
+        self._meshed = True
+        self.invalidate_solution()
 
         self._init_grid(d_max=d_max, d_min=d_min)
         # init dielectrics sets the cell sigma and er but does not set the coefficients
@@ -519,9 +520,110 @@ class FDTD_Solver():
 
         self._init_image_coefficients()
         self._init_conductors(surface_tolerance=surface_tolerance, d_min=d_min) # allow conductors to override image layers
-        self._init_PML_fields()
         self._init_lumped_elements()
-        self.invalidate_solution()
+
+        self._prepare_fields()
+        self._init_PML_fields()
+
+    def _prepare_fields(self):
+        """
+        Condition coefficients and fields in final preparation to pass to solver code.
+        """
+
+        # numpy type for the field values
+        dtype_ = np.float32
+        dx, dy, dz = [conv.m_in(d).astype(dtype_) for d in self.d_cells]
+        dx_h, dy_h, dz_h = [conv.m_in(d).astype(dtype_) for d in self.dh_cells]
+        Nx, Ny, Nz = len(dx), len(dy), len(dz)
+
+        # inverse of the cell widths, measured from cell edge to edge.
+        dx_inv = 1 / dx[:, None, None]
+        dy_inv = 1 / dy[None, :, None]
+        dz_inv = 1 / dz[None, None, :]
+
+        # cell widths as viewed from the components on the cell edges, measured from cell center to cell center
+        dx_h_inv = 1 / dx_h[:, None, None]
+        dy_h_inv = 1 / dy_h[None, :, None]
+        dz_h_inv = 1 / dz_h[None, None, :]
+
+
+        # ensure coefficents at end of y axis are zero to enforce PEC boundary
+        self.Ca["ex_y"][:, -1, :] = 0
+        self.Ca["ex_z"][:, -1, :] = 0
+        self.Cb["ex_y"][:, -1, :] = 0
+        self.Cb["ex_z"][:, -1, :] = 0
+
+        self.Ca["ez_x"][:, -1, :] = 0
+        self.Ca["ez_y"][:, -1, :] = 0
+        self.Cb["ez_x"][:, -1, :] = 0
+        self.Cb["ez_y"][:, -1, :] = 0
+
+        # ensure coefficients at end of x axis are zero to enforce PEC bounary
+        self.Ca["ey_z"][-1] = 0
+        self.Ca["ey_x"][-1] = 0
+        self.Cb["ez_x"][-1] = 0
+        self.Cb["ez_y"][-1] = 0
+
+        self.Ca["ez_x"][-1] = 0
+        self.Ca["ez_y"][-1] = 0
+        self.Cb["ez_x"][-1] = 0
+        self.Cb["ez_y"][-1] = 0
+
+        # The grid in the C++ solver is parallelized along x, each x cell is defined as the Ex, Hz, Hy components, and
+        # the Ey, Ez, and Hx components at the right end of the cell. The Ey, Ez, and Hx components at the left end of
+        # the grid are not included in any cell and are not updated (PEC boundary.) 
+        # np.pad is used to add extra zero widths for the boundary elements with no neighboring cell. These
+        # components are not updated so the zero is arbitrary.
+        self.coefficients = dict(
+            # ex coefficients, edges along y and z do not get updated
+            Ca_ex_y = self.Ca["ex_y"],
+            Ca_ex_z = self.Ca["ex_z"],
+            Cb_ex_y = self.Cb["ex_y"] * np.pad(dy_h_inv, ((0, 0), (1, 1), (0, 0))), 
+            Cb_ex_z = -self.Cb["ex_z"] * np.pad(dz_h_inv, ((0, 0), (0, 0), (1, 1))),
+
+            # ey coefficients, edges along x and z do not get updated
+            Ca_ey_z = self.Ca["ey_z"],
+            Ca_ey_x = self.Ca["ey_x"],
+            Cb_ey_z = self.Cb["ey_z"] * np.pad(dz_h_inv, ((0, 0), (0, 0), (1, 1))),
+            Cb_ey_x = -self.Cb["ey_x"] * np.pad(dx_h_inv, ((1, 1), (0, 0), (0, 0))),
+
+            # ez coefficients, edges along x and y do not get updated
+            Ca_ez_x = self.Ca["ez_x"],
+            Ca_ez_y = self.Ca["ez_y"],
+            Cb_ez_x = self.Cb["ez_x"] * np.pad(dx_h_inv, ((1, 1), (0, 0), (0, 0))),
+            Cb_ez_y = -self.Cb["ez_y"] * np.pad(dy_h_inv, ((0, 0), (1, 1), (0, 0))),
+
+            # hx coefficients
+            Da_hx_y = self.Da["hx_y"],
+            Da_hx_z = self.Da["hx_z"],
+            Db_hx_y = -self.Db["hx_y"] * dy_inv,
+            Db_hx_z = self.Db["hx_z"] * dz_inv,
+
+            # hy coefficients
+            Da_hy_z = self.Da["hy_z"],
+            Da_hy_x = self.Da["hy_x"],
+            Db_hy_z = -self.Db["hy_z"] * dz_inv,
+            Db_hy_x = self.Db["hy_x"] * dx_inv,
+
+            # hz coefficients
+            Da_hz_x = self.Da["hz_x"],
+            Da_hz_y = self.Da["hz_y"],
+            Db_hz_x = -self.Db["hz_x"] * dx_inv,
+            Db_hz_y = self.Db["hz_y"] * dy_inv,
+        )
+
+        # initialize field arrays, add extra pad components for hy and hz along x and y axis so each cell can be
+        # updated in the same way, avoids bounds checking on each time step.
+        self.fields = dict()
+        for f_name, f_shape in self.fshape.items():
+            xs, ys, zs = f_shape
+            # add extra pad cell for hy and hz
+            if f_name in ("hy", "hz"):
+                xs += 1
+            if f_name in ("hx", "hz"):
+                ys += 1
+
+            self.fields[f_name] = np.zeros((xs, ys, zs), dtype=dtype_)
 
     def _get_points_from_img(self, d_min):
         """
@@ -1074,6 +1176,7 @@ class FDTD_Solver():
             hz_y = np.ones((Nx, Ny, Nz+1), dtype=dtype_) * Db_0,
         )
 
+
     def _init_image_coefficients(self):
         """
         Assign coefficients for image layers imported from gerber files.
@@ -1470,17 +1573,17 @@ class FDTD_Solver():
                     if axis == "z":
                         if sf_name[0] == "e":
                             coeff_pml[axis][f"Ca_{sf_name}"][j] = np.array(
-                                (self.Ca[f"{sf_name}"][tuple(e_idx)]).transpose(0, 2, 1), order="C", dtype=self.dtype_
+                                (self.coefficients[f"Ca_{sf_name}"][tuple(e_idx)]).transpose(0, 2, 1), order="C", dtype=self.dtype_
                             )
                             coeff_pml[axis][f"Cb_{sf_name}"][j] = np.array(
-                                (self.Cb[f"{sf_name}"][tuple(e_idx)]).transpose(0, 2, 1), order="C", dtype=self.dtype_
+                                (self.coefficients[f"Cb_{sf_name}"][tuple(e_idx)]).transpose(0, 2, 1), order="C", dtype=self.dtype_
                             )
                         else:
                             coeff_pml[axis][f"Da_{sf_name}"][j] = np.array(
-                                (self.Da[f"{sf_name}"][tuple(h_idx)]).transpose(0, 2, 1), order="C", dtype=self.dtype_
+                                (self.coefficients[f"Da_{sf_name}"][tuple(h_idx)]).transpose(0, 2, 1), order="C", dtype=self.dtype_
                             )
                             coeff_pml[axis][f"Db_{sf_name}"][j] = np.array(
-                                (self.Db[f"{sf_name}"][tuple(h_idx)]).transpose(0, 2, 1), order="C", dtype=self.dtype_
+                                (self.coefficients[f"Db_{sf_name}"][tuple(h_idx)]).transpose(0, 2, 1), order="C", dtype=self.dtype_
                             )
                         
                         f_shape = [f_shape[0], f_shape[2], f_shape[1]]
@@ -1597,15 +1700,18 @@ class FDTD_Solver():
         Parameters
         ----------
         n_thread : int, default: 4
-            number of parallel threads to run algorithm on. Fully separate threads using MPI is not supported yet.
+            number of parallel threads to run algorithm on. Memory isolated threads using MPI is not supported yet.
             Threads are controlled by the OS and will spread across the available CPU cores. On most systems
-            performance is bottle-necked by shared memory caches between cores.
+            performance is bottle-necked by memory bandwidth in shared caches between cores, not computational 
+            throughput.
         show_progress : bool, default: True
             print solver progress to stdout.
         gpu : bool, default: False
             runs the solver on a NVIDIA GPU, if available. 
         """
         self.check_mesh()
+
+        Nx, Ny, Nz = self.n_cells
 
         # error check source excitations
         excitations = [p["src"] for p in self.ports if p["src"] is not None]
@@ -1617,101 +1723,6 @@ class FDTD_Solver():
         Nt = len(excitations[0])
         if not all([Nt == len(s) for s in excitations]):
             raise ValueError("Excitations must have identical lengths.")
-
-        # numpy type for the field values
-        dtype_ = np.float32
-        dx, dy, dz = [conv.m_in(d).astype(dtype_) for d in self.d_cells]
-        dx_h, dy_h, dz_h = [conv.m_in(d).astype(dtype_) for d in self.dh_cells]
-        Nx, Ny, Nz = len(dx), len(dy), len(dz)
-
-        # inverse of the cell widths, measured from cell edge to edge.
-        dx_inv = 1 / dx[:, None, None]
-        dy_inv = 1 / dy[None, :, None]
-        dz_inv = 1 / dz[None, None, :]
-
-        # cell widths as viewed from the components on the cell edges, measured from cell center to cell center
-        dx_h_inv = 1 / dx_h[:, None, None]
-        dy_h_inv = 1 / dy_h[None, :, None]
-        dz_h_inv = 1 / dz_h[None, None, :]
-
-
-        # ensure coefficents at end of y axis are zero to enforce PEC boundary
-        self.Ca["ex_y"][:, -1, :] = 0
-        self.Ca["ex_z"][:, -1, :] = 0
-        self.Cb["ex_y"][:, -1, :] = 0
-        self.Cb["ex_z"][:, -1, :] = 0
-
-        self.Ca["ez_x"][:, -1, :] = 0
-        self.Ca["ez_y"][:, -1, :] = 0
-        self.Cb["ez_x"][:, -1, :] = 0
-        self.Cb["ez_y"][:, -1, :] = 0
-
-        # ensure coefficients at end of x axis are zero to enforce PEC bounary
-        self.Ca["ey_z"][-1] = 0
-        self.Ca["ey_x"][-1] = 0
-        self.Cb["ez_x"][-1] = 0
-        self.Cb["ez_y"][-1] = 0
-
-        self.Ca["ez_x"][-1] = 0
-        self.Ca["ez_y"][-1] = 0
-        self.Cb["ez_x"][-1] = 0
-        self.Cb["ez_y"][-1] = 0
-
-        # The grid in the C++ solver is parallelized along x, each x cell is defined as the Ex, Hz, Hy components, and
-        # the Ey, Ez, and Hx components at the right end of the cell. The Ey, Ez, and Hx components at the left end of
-        # the grid are not included in any cell and are not updated (PEC boundary.) 
-        # np.pad is used to add extra zero widths for the boundary elements with no neighboring cell. These
-        # components are not updated so the zero is arbitrary.
-        coefficients = dict(
-            # ex coefficients, edges along y and z do not get updated
-            Ca_ex_y = self.Ca["ex_y"],
-            Ca_ex_z = self.Ca["ex_z"],
-            Cb_ex_y = self.Cb["ex_y"] * np.pad(dy_h_inv, ((0, 0), (1, 1), (0, 0))), 
-            Cb_ex_z = -self.Cb["ex_z"] * np.pad(dz_h_inv, ((0, 0), (0, 0), (1, 1))),
-
-            # ey coefficients, edges along x and z do not get updated
-            Ca_ey_z = self.Ca["ey_z"],
-            Ca_ey_x = self.Ca["ey_x"],
-            Cb_ey_z = self.Cb["ey_z"] * np.pad(dz_h_inv, ((0, 0), (0, 0), (1, 1))),
-            Cb_ey_x = -self.Cb["ey_x"] * np.pad(dx_h_inv, ((1, 1), (0, 0), (0, 0))),
-
-            # ez coefficients, edges along x and y do not get updated
-            Ca_ez_x = self.Ca["ez_x"],
-            Ca_ez_y = self.Ca["ez_y"],
-            Cb_ez_x = self.Cb["ez_x"] * np.pad(dx_h_inv, ((1, 1), (0, 0), (0, 0))),
-            Cb_ez_y = -self.Cb["ez_y"] * np.pad(dy_h_inv, ((0, 0), (1, 1), (0, 0))),
-
-            # hx coefficients
-            Da_hx_y = self.Da["hx_y"],
-            Da_hx_z = self.Da["hx_z"],
-            Db_hx_y = -self.Db["hx_y"] * dy_inv,
-            Db_hx_z = self.Db["hx_z"] * dz_inv,
-
-            # hy coefficients
-            Da_hy_z = self.Da["hy_z"],
-            Da_hy_x = self.Da["hy_x"],
-            Db_hy_z = -self.Db["hy_z"] * dz_inv,
-            Db_hy_x = self.Db["hy_x"] * dx_inv,
-
-            # hz coefficients
-            Da_hz_x = self.Da["hz_x"],
-            Da_hz_y = self.Da["hz_y"],
-            Db_hz_x = -self.Db["hz_x"] * dx_inv,
-            Db_hz_y = self.Db["hz_y"] * dy_inv,
-        )
-
-        # initialize field arrays, add extra pad components for hy and hz along x and y axis so each cell can be
-        # updated in the same way, avoids bounds checking on each time step.
-        fields = dict()
-        for f_name, f_shape in self.fshape.items():
-            xs, ys, zs = f_shape
-            # add extra pad cell for hy and hz
-            if f_name in ("hy", "hz"):
-                xs += 1
-            if f_name in ("hx", "hz"):
-                ys += 1
-
-            fields[f_name] = np.zeros((xs, ys, zs), dtype=dtype_)
 
         probes = []
         # initialize sources. Sources act like probes, but the values are input to the 
@@ -1726,7 +1737,7 @@ class FDTD_Solver():
             idx, Vs_a, field, src = port["idx"], port["Vs_a"], port["field"], port["src"]
 
             if src is None:
-                src = np.zeros(Nt, dtype=dtype_, order="C")
+                src = np.zeros(Nt, dtype=self.dtype_, order="C")
 
             # convert slice indices to a list of values
             idx_list = [list(np.arange(v.start, v.stop)) if isinstance(v, slice) else [v] for v in idx]
@@ -1736,7 +1747,7 @@ class FDTD_Solver():
             for j, idx_j in enumerate(itertools.product(*idx_list)):
                 probes.append(
                     dict(
-                        values=np.array(Vs_a_flt[j] * src, dtype=dtype_, order="C"), 
+                        values=np.array(Vs_a_flt[j] * src, dtype=self.dtype_, order="C"), 
                         field=int(list(self.fshape.keys()).index(field)),
                         idx=[int(id) for id in idx_j],
                         is_source=int(port["src"] is not None)
@@ -1747,7 +1758,7 @@ class FDTD_Solver():
         for k, p in self.probes.items():
             probes.append(
                 dict(
-                    values=np.zeros(Nt, dtype=dtype_, order="C"), 
+                    values=np.zeros(Nt, dtype=self.dtype_, order="C"), 
                     field=int(list(self.fshape.keys()).index(p["field"])),
                     idx=[int(id) for id in p["index"]],
                     is_source=int(0)
@@ -1775,11 +1786,11 @@ class FDTD_Solver():
             # convert to field strings
             faxis_name, daxis1_name, daxis2_name = [("x", "y", "z")[i] for i in [faxis, daxis1, daxis2]]
 
-            fshape = fields[field].shape
+            fshape = self.fields[field].shape
 
             # Db coefficients on first and second difference direction
-            coeff_sp1 = coefficients[f"Db_h{faxis_name}_{daxis1_name}"]
-            coeff_sp2 = coefficients[f"Db_h{faxis_name}_{daxis2_name}"]
+            coeff_sp1 = self.coefficients[f"Db_h{faxis_name}_{daxis1_name}"]
+            coeff_sp2 = self.coefficients[f"Db_h{faxis_name}_{daxis2_name}"]
 
             # convert index slices to range of indices
             index_list = [list(np.arange(v.start, v.stop)) if isinstance(v, slice) else [v] for v in index]
@@ -1795,10 +1806,10 @@ class FDTD_Solver():
                     coeff = corrections[field][flat_idx]["values"]
                 else:
                     # a, b1, b2 coefficients
-                    coeff_vals  = [coefficients["Da_" + sp_field][idx]] + [coeff_sp1[idx]] * 2 + [coeff_sp2[idx]] * 2
+                    coeff_vals  = [self.coefficients["Da_" + sp_field][idx]] + [coeff_sp1[idx]] * 2 + [coeff_sp2[idx]] * 2
 
                     corrections[field][flat_idx] = dict(
-                        values=np.array(coeff_vals, dtype=dtype_, order="C"), 
+                        values=np.array(coeff_vals, dtype=self.dtype_, order="C"), 
                         field=dict(hx=3, hy=4, hz=5)[field],
                         idx=[int(id) for id in idx],
                         flat_idx=int(flat_idx),
@@ -1859,7 +1870,7 @@ class FDTD_Solver():
                 mon_config["n_frequencies"] = int(len(frequency))
             else:
                 # initialize monitor for time domain captures
-                mon_config["values"] = np.zeros(((n_m,) + m_shape), dtype=dtype_, order="C")
+                mon_config["values"] = np.zeros(((n_m,) + m_shape), dtype=self.dtype_, order="C")
 
             monitors.append(mon_config)
 
@@ -1881,8 +1892,8 @@ class FDTD_Solver():
             solver_func = core.core_func.solver_run
 
         ret_val = solver_func(
-            fields, 
-            coefficients, 
+            self.fields, 
+            self.coefficients, 
             self.pml_data, 
             probes, 
             monitors, 
@@ -1961,8 +1972,7 @@ class FDTD_Solver():
 
         self._solved = True
 
-        return fields
-
+        # TODO: remove extra pad cells from field values 
 
     def add_field_monitor(
         self, 
