@@ -1458,9 +1458,10 @@ class FDTD_Solver():
                     e_idx = [slice(None) for i in range(3)]
                     h_idx = [slice(None) for i in range(3)]
 
+                    # index PML components, not reversed like when the coefficients are assigned
                     if n_pml_side:
-                        e_idx[i] = slice(n_pml_side, 0, -1) if side == "-" else slice(-n_pml_side-1, -1)
-                        h_idx[i] = slice(n_pml_side-1, None, -1) if side == "-" else slice(-n_pml_side, None)
+                        e_idx[i] = slice(1, n_pml_side + 1) if side == "-" else slice(-n_pml_side-1, -1)
+                        h_idx[i] = slice(0, n_pml_side) if side == "-" else slice(-n_pml_side, None)
                     else:
                         e_idx[i] = slice(0, 0)
                         h_idx[i] = slice(0, 0)
@@ -1469,17 +1470,17 @@ class FDTD_Solver():
                     if axis == "z":
                         if sf_name[0] == "e":
                             coeff_pml[axis][f"Ca_{sf_name}"][j] = np.array(
-                                self.Ca[f"{sf_name}"][tuple(e_idx)].transpose(0, 2, 1), order="C", dtype=self.dtype_
+                                (self.Ca[f"{sf_name}"][tuple(e_idx)]).transpose(0, 2, 1), order="C", dtype=self.dtype_
                             )
                             coeff_pml[axis][f"Cb_{sf_name}"][j] = np.array(
-                                self.Cb[f"{sf_name}"][tuple(e_idx)].transpose(0, 2, 1), order="C", dtype=self.dtype_
+                                (self.Cb[f"{sf_name}"][tuple(e_idx)]).transpose(0, 2, 1), order="C", dtype=self.dtype_
                             )
                         else:
                             coeff_pml[axis][f"Da_{sf_name}"][j] = np.array(
-                                self.Da[f"{sf_name}"][tuple(h_idx)].transpose(0, 2, 1), order="C", dtype=self.dtype_
+                                (self.Da[f"{sf_name}"][tuple(h_idx)]).transpose(0, 2, 1), order="C", dtype=self.dtype_
                             )
                             coeff_pml[axis][f"Db_{sf_name}"][j] = np.array(
-                                self.Db[f"{sf_name}"][tuple(h_idx)].transpose(0, 2, 1), order="C", dtype=self.dtype_
+                                (self.Db[f"{sf_name}"][tuple(h_idx)]).transpose(0, 2, 1), order="C", dtype=self.dtype_
                             )
                         
                         f_shape = [f_shape[0], f_shape[2], f_shape[1]]
