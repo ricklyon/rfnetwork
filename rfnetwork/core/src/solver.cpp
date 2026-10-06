@@ -1206,6 +1206,7 @@ void SolverFDTD::efield_slice_update(int x)
                 Cb_ey_x_pml.cwiseProduct((hz_1.block(0, z0, Ny, sNz_pml) - hz.block(0, z0, Ny, sNz_pml)))
             );
 
+
             ey.block(0, z0, Ny, sNz_pml) = ey_z_pml + ey_x_pml;
 
         }
@@ -1520,11 +1521,12 @@ void SolverFDTD::hfield_slice_update(int x)
             MatrixFloatType hx_y   (fields_pml[2][s].hx_y   + x_offset, sNz_pml, Nyp1);
             MatrixFloatType hx_z   (fields_pml[2][s].hx_z   + x_offset, sNz_pml, Nyp1);
             
-            // coefficients
-            MatrixFloatType zDa_hx_y (coeff_zpml[s].Da_hx_y + x_offset, sNz_pml, Nyp1);
-            MatrixFloatType zDa_hx_z (coeff_zpml[s].Da_hx_z + x_offset, sNz_pml, Nyp1);
-            MatrixFloatType zDb_hx_y (coeff_zpml[s].Db_hx_y + x_offset, sNz_pml, Nyp1);
-            MatrixFloatType zDb_hx_z (coeff_zpml[s].Db_hx_z + x_offset, sNz_pml, Nyp1);
+            // coefficients, no pad cell like the fields
+            x_offset = ((x + 1) * Ny * sNz_pml);
+            MatrixFloatType zDa_hx_y (coeff_zpml[s].Da_hx_y + x_offset, sNz_pml, Ny);
+            MatrixFloatType zDa_hx_z (coeff_zpml[s].Da_hx_z + x_offset, sNz_pml, Ny);
+            MatrixFloatType zDb_hx_y (coeff_zpml[s].Db_hx_y + x_offset, sNz_pml, Ny);
+            MatrixFloatType zDb_hx_z (coeff_zpml[s].Db_hx_z + x_offset, sNz_pml, Ny);
 
             // hy split fields
             x_offset = (x * Nyp1 * sNz_pml);
@@ -1536,8 +1538,6 @@ void SolverFDTD::hfield_slice_update(int x)
             MatrixFloatType zDa_hy_x (coeff_zpml[s].Da_hy_x + x_offset, sNz_pml, Nyp1);
             MatrixFloatType zDb_hy_z (coeff_zpml[s].Db_hy_z + x_offset, sNz_pml, Nyp1);
             MatrixFloatType zDb_hy_x (coeff_zpml[s].Db_hy_x + x_offset, sNz_pml, Nyp1);
-
-
 
             // ----------------- update hx -------------------------- //
             // first idx of PML (hy or hx)
