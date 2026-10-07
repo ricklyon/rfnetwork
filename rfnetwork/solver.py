@@ -40,6 +40,7 @@ class FDTD_Solver():
         self.pml_boundaries = dict()
 
         self.edge_corrections = []
+        self.field_corrections = dict(hx={}, hy={}, hz={})
 
         self.monitors = dict()
         self.farfield = dict()
@@ -520,10 +521,14 @@ class FDTD_Solver():
 
         self._init_image_coefficients()
         self._init_conductors(surface_tolerance=surface_tolerance, d_min=d_min) # allow conductors to override image layers
+        
+        self._init_edge_corrections()
         self._init_lumped_elements()
 
         self._prepare_fields()
-        self._init_PML_fields()
+        self._prepare_PML_fields()
+        
+
 
     def _prepare_fields(self):
         """
@@ -1501,7 +1506,7 @@ class FDTD_Solver():
                 # coeff_pml[axis][f"Da_{h}_{axis}"][side_int] = (2 * u0 - (sigma_m * dt)) / (2 * u0 + (sigma_m * dt))
                 # coeff_pml[axis][f"Db_{h}_{axis}"][side_int] = (2 * dt) / ((2 * u0 + (sigma_m * dt))) 
 
-    def _init_PML_fields(self):
+    def _prepare_PML_fields(self):
 
         # build list of pml cell widths, two values for each axis for each end of the solve box
         n_pml = [[0, 0], [0, 0], [0, 0]]
@@ -1766,65 +1771,10 @@ class FDTD_Solver():
             )
 
         # initialize edge correction coefficients
-        # keep track of all indices to check which corrections are for the same component
-        # indices are flattened.
-        corrections = dict(hx={}, hy={}, hz={})
-        for v in self.edge_corrections:
-
-            sp_field, index, corrections_i  = v["field"], v["index"], v["corrections"]
-
-            # get field name from split field name, and the direction of the e-field difference
-            field = sp_field[:2]
-            faxis = ("x", "y", "z").index(field[1]) 
-            # e-field difference axis
-            daxis1 = (faxis + 1) % 3
-            daxis2 = (faxis + 2) % 3
-
-            # axis of correction fields
-            corr_axis = ("x", "y", "z").index(sp_field[-1])
-
-            # convert to field strings
-            faxis_name, daxis1_name, daxis2_name = [("x", "y", "z")[i] for i in [faxis, daxis1, daxis2]]
-
-            fshape = self.fields[field].shape
-
-            # Db coefficients on first and second difference direction
-            coeff_sp1 = self.coefficients[f"Db_h{faxis_name}_{daxis1_name}"]
-            coeff_sp2 = self.coefficients[f"Db_h{faxis_name}_{daxis2_name}"]
-
-            # convert index slices to range of indices
-            index_list = [list(np.arange(v.start, v.stop)) if isinstance(v, slice) else [v] for v in index]
-
-            # iterate over each field component in idx 
-            for idx in itertools.product(*index_list):
-
-                # flattened index
-                flat_idx = int(idx[0] * np.prod(fshape[1:]) + idx[1] * np.prod(fshape[2]) + idx[2])
-
-                # is there a correction for this component already
-                if flat_idx in corrections[field].keys():
-                    coeff = corrections[field][flat_idx]["values"]
-                else:
-                    # a, b1, b2 coefficients
-                    coeff_vals  = [self.coefficients["Da_" + sp_field][idx]] + [coeff_sp1[idx]] * 2 + [coeff_sp2[idx]] * 2
-
-                    corrections[field][flat_idx] = dict(
-                        values=np.array(coeff_vals, dtype=self.dtype_, order="C"), 
-                        field=dict(hx=3, hy=4, hz=5)[field],
-                        idx=[int(id) for id in idx],
-                        flat_idx=int(flat_idx),
-                    )
-
-                    coeff = corrections[field][flat_idx]["values"]
-
-                # update the coefficients with the corrections
-                corr_idx = 1 if daxis1 == corr_axis else 3
-                coeff[corr_idx: corr_idx + 2] *= corrections_i
-
         # combine corrections into a single list
         corrections_list = []
         for f in ("hx", "hy", "hz"):
-            corrections_list += list(corrections[f].values())
+            corrections_list += list(self.field_corrections[f].values())
 
         # initialize field monitors
         monitors = []
@@ -2822,8 +2772,8 @@ class FDTD_Solver():
             This should be in the plane of the PEC surface.
         
         """
-        self.invalidate_solution()
-        self.check_mesh()
+
+        self.invalidate_mesh()
 
         if CFe is None:
             CFe = 2 * np.sqrt(1/2)
@@ -2847,19 +2797,105 @@ class FDTD_Solver():
         if e_axis == f_axis:
             raise ValueError("Integration axis must be perpendicular to the edge.")
 
-        # flip points so p2 is at a higher spatial position along the axis
-        if p1[e_axis] > p2[e_axis]:
-            p2, p1 = p1, p2
-
-        # get e-field component indices at grid edges
-        p1_i = self.pos_to_idx(p1, mode="edge")
-        p2_i = self.pos_to_idx(p2, mode="edge")
-
         # axis normal to surface
         n_axis = [ax for ax in [0, 1, 2] if ax != e_axis and ax != f_axis][0]
 
-        # string values for each axis
-        ea, fa, na = [["x", "y", "z"][ax] for ax in [e_axis, f_axis, n_axis]]
+        # edge corrections need to be added a specific step during the mesh generation, save parameters
+        # for later to pass to _init_edge_corrections
+        self.edge_corrections.append(
+            dict(p1=p1, p2=p2, e_axis=e_axis, f_axis=f_axis, n_axis=n_axis, f_dir=f_dir, CFe=CFe)
+        )
+
+    def _add_field_correction(self, sp_field: str, corrections_i: tuple, index: tuple):
+        """
+        Add an entry to the field_corrections dictionary. Each entry contains the Da coefficent, Db2 and Db1.
+        Only supported for h-field corrections.
+
+        Parameters
+        ----------
+        corrections_i: tuple
+            scaling factors for the Db2 and Db1 coefficients. 
+        index: tuple
+            xyz index of the field, can contain slices for multiple cells
+        """
+        # add correction coefficients
+        # self.edge_corrections.append(
+        #     dict(field=field, corrections=corrections, index=index)
+        # )
+
+        dx, dy, dz = [conv.m_in(d).astype(self.dtype_) for d in self.d_cells]
+
+        # inverse of the cell widths, measured from cell edge to edge.
+        dx_inv = 1 / dx
+        dy_inv = 1 / dy
+        dz_inv = 1 / dz
+
+        dn_inv = dict(x=dx_inv, y=dy_inv, z=dz_inv)
+
+        # get field name from split field name, and the direction of the e-field difference
+        field = sp_field[:2]
+        faxis = ("x", "y", "z").index(sp_field[1]) 
+        # e-field difference axis
+        daxis1 = (faxis + 1) % 3
+        daxis2 = (faxis + 2) % 3
+
+        # axis of correction fields
+        corr_axis = ("x", "y", "z").index(sp_field[-1])
+
+        # convert to field strings
+        faxis_name, daxis1_name, daxis2_name = [("x", "y", "z")[i] for i in [faxis, daxis1, daxis2]]
+
+        fshape = self.fshape[field]
+
+        # add padded shape for h fields
+        xs, ys, zs = fshape
+        # add extra pad cell for hy and hz
+        if field in ("hy", "hz"):
+            xs += 1
+        if field in ("hx", "hz"):
+            ys += 1
+        fshape = (xs, ys, zs)
+
+        # Db coefficients on first and second difference direction
+        # coeff_sp1 = self.coefficients[f"Db_h{faxis_name}_{daxis1_name}"]
+        # coeff_sp2 = self.coefficients[f"Db_h{faxis_name}_{daxis2_name}"]
+        coeff_sp1 = self.Db[f"h{faxis_name}_{daxis1_name}"] 
+        coeff_sp2 = self.Db[f"h{faxis_name}_{daxis2_name}"] 
+
+        # convert index slices to range of indices
+        index_list = [list(np.arange(v.start, v.stop)) if isinstance(v, slice) else [v] for v in index]
+
+        # iterate over each field component in idx 
+        for idx in itertools.product(*index_list):
+
+            # flattened index
+            flat_idx = int(idx[0] * np.prod(fshape[1:]) + idx[1] * np.prod(fshape[2]) + idx[2])
+
+            # is there a correction for this component already
+            if flat_idx not in self.field_corrections[field].keys():
+
+                # inverse cell widths along field direction
+                dn_a1 = dn_inv[daxis1_name][idx[daxis1]]
+                dn_a2 = dn_inv[daxis2_name][idx[daxis2]]
+
+                # a, b1, b2 coefficients
+                coeff_vals  = [self.Da[sp_field][idx]] + [-coeff_sp1[idx] * dn_a1] * 2 + [coeff_sp2[idx] * dn_a2] * 2
+
+                self.field_corrections[field][flat_idx] = dict(
+                    values=np.array(coeff_vals, dtype=self.dtype_, order="C"), 
+                    field=dict(hx=3, hy=4, hz=5)[field],
+                    idx=[int(id) for id in idx],
+                    flat_idx=int(flat_idx),
+                )
+
+            coeff = self.field_corrections[field][flat_idx]["values"]
+
+            # update the coefficients with the corrections
+            corr_idx = 1 if daxis1 == corr_axis else 3
+            coeff[corr_idx: corr_idx + 2] *= corrections_i
+
+
+    def _init_edge_corrections(self):
 
         def build_idx(edge, field, normal):
             """ Return a tuple of indices into the edge, field and normal axis. """
@@ -2868,135 +2904,144 @@ class FDTD_Solver():
             idx[f_axis] = field
             idx[n_axis] = normal
             return tuple(idx)
+            
+        for edge_corr_dict in self.edge_corrections:
+            p1, p2, e_axis, f_axis, n_axis, f_dir, CFe = edge_corr_dict.values()
 
-        def add_correction(field: str, corrections: tuple, index: tuple):
+            # flip points so p2 is at a higher spatial position along the axis
+            if p1[e_axis] > p2[e_axis]:
+                p2, p1 = p1, p2
 
-            # add correction coefficients
-            self.edge_corrections.append(
-                dict(field=field, corrections=corrections, index=index)
-            )
-        
-        # indices on edge axis of the components on cell centers
-        e_idx_centers = slice(p1_i[e_axis], p2_i[e_axis])
-        # indices on edge axis of the edge components
-        e_idx_edges = slice(p1_i[e_axis], p2_i[e_axis] + 1)
+            # get e-field component indices at grid edges
+            p1_i = self.pos_to_idx(p1, mode="edge")
+            p2_i = self.pos_to_idx(p2, mode="edge")
 
-        # index of closest H component normal to the surface along field axis
-        fh_idx = p1_i[f_axis] if f_dir else p1_i[f_axis] - 1
-        # index of surface plane along the normal axis
-        n_idx = p1_i[n_axis]
+            # string values for each axis
+            ea, fa, na = [["x", "y", "z"][ax] for ax in [e_axis, f_axis, n_axis]]
 
-        # assign edge correction coefficents.
-        # Comments are for a PEC edge along the x axis, normal to the z-axis, with the field axis along y
+            # indices on edge axis of the components on cell centers
+            e_idx_centers = slice(p1_i[e_axis], p2_i[e_axis])
+            # indices on edge axis of the edge components
+            e_idx_edges = slice(p1_i[e_axis], p2_i[e_axis] + 1)
 
-        # correct Hz components that integrate the Ey component in the same plane as the PEC.
-        # (comments are for a PEC edge along x axis)
-        # Both Hz and Ey are asymtotic so the correction factor cancels out on all components but the 
-        # ex integration.
-        # self.Db["hz_y2"][x0: x1, y, z0] *= 1 / CFe
-        # self.Db["hz_y1"][x0: x1, y, z0] *= 1 / CFe
-        idx = build_idx(e_idx_centers, fh_idx, n_idx)
-        # both 1 and 2 coefficients are the same, just change the coefficent that control both
-        # self.Db[f"h{na}_{fa}2"][tuple(idx)] *= 1 / CFe
-        # self.Db[f"h{na}_{fa}1"][tuple(idx)] *= 1 / CFe
-        self.Db[f"h{na}_{fa}"][tuple(idx)] *= 1 / CFe
+            # index of closest H component normal to the surface along field axis
+            fh_idx = p1_i[f_axis] if f_dir else p1_i[f_axis] - 1
+            # index of surface plane along the normal axis
+            n_idx = p1_i[n_axis]
 
-        # hz components integrating Ey on the end points of the edge. These only have one Ey component that varies
-        # asymptotically 
-        if p1_i[e_axis] > 0:
-            # self.Db["hz_x2"][x0-1, y, z0] *= CFe
-            idx = build_idx(p1_i[e_axis] - 1, fh_idx, n_idx)
-            # self.Db[f"h{na}_{ea}2"][idx] *= CFe
-            add_correction(f"h{na}_{ea}", (CFe, 1), idx)
+            # assign edge correction coefficents.
+            # Comments are for a PEC edge along the x axis, normal to the z-axis, with the field axis along y
 
-        if p2_i[e_axis] < self.Db[f"h{na}_{ea}"].shape[e_axis]:
-            # self.Db["hz_x1"][x1, y, z0] *= CFe
-            idx = build_idx(p2_i[e_axis], fh_idx, n_idx)
-            # self.Db[f"h{na}_{ea}1"][idx] *= CFe
-            add_correction(f"h{na}_{ea}", (1, CFe), idx)
-
-        # Correct Hx above and below the PEC plane that integrates Ey  
-        # self.Db["hx_z2"][x0: x1+1, y, z0-1] *= CFe
-        # self.Db["hx_z1"][x0: x1+1, y, z0] *= CFe
-        add_correction(f"h{ea}_{na}", (CFe, 1), build_idx(e_idx_edges, fh_idx, n_idx-1))
-        add_correction(f"h{ea}_{na}", (1, CFe), build_idx(e_idx_edges, fh_idx, n_idx))
-        # self.Db[f"h{ea}_{na}2"][build_idx(e_idx_edges, fh_idx, n_idx-1)] *= CFe
-        # self.Db[f"h{ea}_{na}1"][build_idx(e_idx_edges, fh_idx, n_idx)] *= CFe
-
-        for ni in [n_idx-1, n_idx]:
-            # Correct Hx on the sides of the Ez component 
-            # self.Db["hx_y2"][x0: x1+1, y0-1, z] *= CFe
-            # self.Db["hx_y1"][x0: x1+1, y0, z] *= CFe
-            # self.Db[f"h{ea}_{fa}2"][build_idx(e_idx_edges, p1_i[f_axis] -1, ni)] *= CFe
-            # self.Db[f"h{ea}_{fa}1"][build_idx(e_idx_edges, p1_i[f_axis], ni)] *= CFe
-            add_correction(f"h{ea}_{fa}", (CFe, 1), build_idx(e_idx_edges, p1_i[f_axis] -1, ni))
-            add_correction(f"h{ea}_{fa}", (1, CFe), build_idx(e_idx_edges, p1_i[f_axis], ni))
-
-            # correct Hy components that integrate the Ez component below and above the edge 
-            # self.Db["hy_z1"][x0: x1, y0, z] *= 1 / CFe
-            # self.Db["hy_z2"][x0: x1, y0, z] *= 1 / CFe
-            # self.Db[f"h{fa}_{na}1"][build_idx(e_idx_centers, p1_i[f_axis], ni)] *= 1 / CFe
-            # self.Db[f"h{fa}_{na}2"][build_idx(e_idx_centers, p1_i[f_axis], ni)] *= 1 / CFe
+            # correct Hz components that integrate the Ey component in the same plane as the PEC.
+            # (comments are for a PEC edge along x axis)
+            # Both Hz and Ey are asymtotic so the correction factor cancels out on all components but the 
+            # ex integration.
+            # self.Db["hz_y2"][x0: x1, y, z0] *= 1 / CFe
+            # self.Db["hz_y1"][x0: x1, y, z0] *= 1 / CFe
+            idx = build_idx(e_idx_centers, fh_idx, n_idx)
             # both 1 and 2 coefficients are the same, just change the coefficent that control both
-            idx = build_idx(e_idx_centers, p1_i[f_axis], ni)
-            self.Db[f"h{fa}_{na}"][idx] *= 1 / CFe
+            # self.Db[f"h{na}_{fa}2"][tuple(idx)] *= 1 / CFe
+            # self.Db[f"h{na}_{fa}1"][tuple(idx)] *= 1 / CFe
+            self.Db[f"h{na}_{fa}"][tuple(idx)] *= 1 / CFe
+            # self._add_field_correction(f"h{na}_{fa}", (1 / CFe, 1 / CFe), idx)
 
-            # hy components integrating Ez on the end points of the edge
+            # hz components integrating Ey on the end points of the edge. These only have one Ey component that varies
+            # asymptotically 
             if p1_i[e_axis] > 0:
-                # self.Db["hy_x2"][x0-1, y0, z] *= CFe
-                idx = build_idx(p1_i[e_axis] - 1, p1_i[f_axis], ni) 
-                # self.Db[f"h{fa}_{ea}2"][idx] *= CFe
-                add_correction(f"h{fa}_{ea}", (CFe, 1), idx)
-            if p2_i[e_axis] < self.Db[f"h{fa}_{ea}"].shape[e_axis]:
-                # self.Db["hy_x1"][x1, y0, z] *= CFe
-                idx = build_idx(p2_i[e_axis], p1_i[f_axis], ni)
-                # self.Db[f"h{fa}_{ea}1"][idx] *= CFe
-                add_correction(f"h{fa}_{ea}", (1, CFe), idx)
+                # self.Db["hz_x2"][x0-1, y, z0] *= CFe
+                idx = build_idx(p1_i[e_axis] - 1, fh_idx, n_idx)
+                # self.Db[f"h{na}_{ea}2"][idx] *= CFe
+                self._add_field_correction(f"h{na}_{ea}", (CFe, 1), idx)
 
-        # correct Hz components that use the Ey component in the same plane as the edge that points into the edge.
-        # Hz in the same plane as the face. Both Hz and Ey are asymtotic so the correction factor cancels out
-        # on all components but the ex integration.
-        # for y in [y0-1, y1]:
-        #     self.Db["hz_y2"][x0: x1, y, z0] *= 1 / CF
-        #     self.Db["hz_y1"][x0: x1, y, z0] *= 1 / CF
-        #     # hz components using Ey that are just past the face along the x direction
-        #     self.Db["hz_x2"][x0-1, y, z0] *= CF
-        #     if not x1_at_edge:
-        #         self.Db["hz_x1"][x1, y, z0] *= CF
-        #     # Hx just below the Ey component
-        #     self.Db["hx_z2"][x0: x1+1, y, z0-1] *= CF
-        #     # Hx just above the Ey component
-        #     self.Db["hx_z1"][x0: x1+1, y, z0] *= CF
+            if p2_i[e_axis] < self.Db[f"h{na}_{ea}"].shape[e_axis]:
+                # self.Db["hz_x1"][x1, y, z0] *= CFe
+                idx = build_idx(p2_i[e_axis], fh_idx, n_idx)
+                # self.Db[f"h{na}_{ea}1"][idx] *= CFe
+                self._add_field_correction(f"h{na}_{ea}", (1, CFe), idx)
 
-        # # correct Hy components that use the Ez component below and above the edge 
-        # # Hy and Ez are both asymptotic and the correction factors cancel out
-        # for y in [y0, y1]:
-        #     self.Db["hy_z1"][x0: x1, y, z0-1] *= 1 / CF
-        #     self.Db["hy_z2"][x0: x1, y, z0-1] *= 1 / CF
-        #     self.Db["hy_z1"][x0: x1, y, z0] *= 1 / CF
-        #     self.Db["hy_z2"][x0: x1, y, z0] *= 1 / CF
-        #     # hy components just past the face along the x direction
-        #     self.Db["hy_x2"][x0-1, y, z0-1] *= CF
-        #     self.Db["hy_x2"][x0-1, y, z0] *= CF
-        #     if not x1_at_edge:
-        #         self.Db["hy_x1"][x1, y, z0] *= CF
-        #         self.Db["hy_x1"][x1, y, z0-1] *= CF
+            # Correct Hx above and below the PEC plane that integrates Ey  
+            # self.Db["hx_z2"][x0: x1+1, y, z0-1] *= CFe
+            # self.Db["hx_z1"][x0: x1+1, y, z0] *= CFe
+            self._add_field_correction(f"h{ea}_{na}", (CFe, 1), build_idx(e_idx_edges, fh_idx, n_idx-1))
+            self._add_field_correction(f"h{ea}_{na}", (1, CFe), build_idx(e_idx_edges, fh_idx, n_idx))
+            # self.Db[f"h{ea}_{na}2"][build_idx(e_idx_edges, fh_idx, n_idx-1)] *= CFe
+            # self.Db[f"h{ea}_{na}1"][build_idx(e_idx_edges, fh_idx, n_idx)] *= CFe
 
-        # # correct Hx components just past the face in the y direction that use the Ez components under the edge
-        # for z in [z0-1, z0]:
-        #     self.Db["hx_y2"][x0: x1+1, y0-1, z] *= CF
-        #     self.Db["hx_y1"][x0: x1+1, y0, z] *= CF
-        #     self.Db["hx_y2"][x0: x1+1, y1-1, z] *= CF
-        #     self.Db["hx_y1"][x0: x1+1, y1, z] *= CF
+            for ni in [n_idx-1, n_idx]:
+                # Correct Hx on the sides of the Ez component 
+                # self.Db["hx_y2"][x0: x1+1, y0-1, z] *= CFe
+                # self.Db["hx_y1"][x0: x1+1, y0, z] *= CFe
+                # self.Db[f"h{ea}_{fa}2"][build_idx(e_idx_edges, p1_i[f_axis] -1, ni)] *= CFe
+                # self.Db[f"h{ea}_{fa}1"][build_idx(e_idx_edges, p1_i[f_axis], ni)] *= CFe
+                self._add_field_correction(f"h{ea}_{fa}", (CFe, 1), build_idx(e_idx_edges, p1_i[f_axis] -1, ni))
+                self._add_field_correction(f"h{ea}_{fa}", (1, CFe), build_idx(e_idx_edges, p1_i[f_axis], ni))
 
-        # correction E components whose integration plane is a half a cell away from the edge, Ez, and Ey
-        # if CFh is not None:
-        #     for z in [z0-1, z0]:
-        #         self.Cb["ez_y"][x0+1: x1, y0, z] *= 1 / CFh
-        #         self.Cb["ez_y"][x0+1: x1, y1, z] *= 1 / CFh
+                # correct Hy components that integrate the Ez component below and above the edge 
+                # self.Db["hy_z1"][x0: x1, y0, z] *= 1 / CFe
+                # self.Db["hy_z2"][x0: x1, y0, z] *= 1 / CFe
+                # self.Db[f"h{fa}_{na}1"][build_idx(e_idx_centers, p1_i[f_axis], ni)] *= 1 / CFe
+                # self.Db[f"h{fa}_{na}2"][build_idx(e_idx_centers, p1_i[f_axis], ni)] *= 1 / CFe
+                # both 1 and 2 coefficients are the same, just change the coefficent that control both
+                idx = build_idx(e_idx_centers, p1_i[f_axis], ni)
+                self.Db[f"h{fa}_{na}"][idx] *= 1 / CFe
+                # self._add_field_correction(f"h{fa}_{na}", (1 / CFe, 1 / CFe), idx)
+                
+                # hy components integrating Ez on the end points of the edge
+                if p1_i[e_axis] > 0:
+                    # self.Db["hy_x2"][x0-1, y0, z] *= CFe
+                    idx = build_idx(p1_i[e_axis] - 1, p1_i[f_axis], ni) 
+                    # self.Db[f"h{fa}_{ea}2"][idx] *= CFe
+                    self._add_field_correction(f"h{fa}_{ea}", (CFe, 1), idx)
+                if p2_i[e_axis] < self.Db[f"h{fa}_{ea}"].shape[e_axis]:
+                    # self.Db["hy_x1"][x1, y0, z] *= CFe
+                    idx = build_idx(p2_i[e_axis], p1_i[f_axis], ni)
+                    # self.Db[f"h{fa}_{ea}1"][idx] *= CFe
+                    self._add_field_correction(f"h{fa}_{ea}", (1, CFe), idx)
 
-        #     for y in [y0-1, y1]:
-        #         self.Cb["ey_z"][x0+1: x1, y, z0] *= 1 / CFh
+            # correct Hz components that use the Ey component in the same plane as the edge that points into the edge.
+            # Hz in the same plane as the face. Both Hz and Ey are asymtotic so the correction factor cancels out
+            # on all components but the ex integration.
+            # for y in [y0-1, y1]:
+            #     self.Db["hz_y2"][x0: x1, y, z0] *= 1 / CF
+            #     self.Db["hz_y1"][x0: x1, y, z0] *= 1 / CF
+            #     # hz components using Ey that are just past the face along the x direction
+            #     self.Db["hz_x2"][x0-1, y, z0] *= CF
+            #     if not x1_at_edge:
+            #         self.Db["hz_x1"][x1, y, z0] *= CF
+            #     # Hx just below the Ey component
+            #     self.Db["hx_z2"][x0: x1+1, y, z0-1] *= CF
+            #     # Hx just above the Ey component
+            #     self.Db["hx_z1"][x0: x1+1, y, z0] *= CF
+
+            # # correct Hy components that use the Ez component below and above the edge 
+            # # Hy and Ez are both asymptotic and the correction factors cancel out
+            # for y in [y0, y1]:
+            #     self.Db["hy_z1"][x0: x1, y, z0-1] *= 1 / CF
+            #     self.Db["hy_z2"][x0: x1, y, z0-1] *= 1 / CF
+            #     self.Db["hy_z1"][x0: x1, y, z0] *= 1 / CF
+            #     self.Db["hy_z2"][x0: x1, y, z0] *= 1 / CF
+            #     # hy components just past the face along the x direction
+            #     self.Db["hy_x2"][x0-1, y, z0-1] *= CF
+            #     self.Db["hy_x2"][x0-1, y, z0] *= CF
+            #     if not x1_at_edge:
+            #         self.Db["hy_x1"][x1, y, z0] *= CF
+            #         self.Db["hy_x1"][x1, y, z0-1] *= CF
+
+            # # correct Hx components just past the face in the y direction that use the Ez components under the edge
+            # for z in [z0-1, z0]:
+            #     self.Db["hx_y2"][x0: x1+1, y0-1, z] *= CF
+            #     self.Db["hx_y1"][x0: x1+1, y0, z] *= CF
+            #     self.Db["hx_y2"][x0: x1+1, y1-1, z] *= CF
+            #     self.Db["hx_y1"][x0: x1+1, y1, z] *= CF
+
+            # correction E components whose integration plane is a half a cell away from the edge, Ez, and Ey
+            # if CFh is not None:
+            #     for z in [z0-1, z0]:
+            #         self.Cb["ez_y"][x0+1: x1, y0, z] *= 1 / CFh
+            #         self.Cb["ez_y"][x0+1: x1, y1, z] *= 1 / CFh
+
+            #     for y in [y0-1, y1]:
+            #         self.Cb["ey_z"][x0+1: x1, y, z0] *= 1 / CFh
 
     
     def get_monitor_data(self, name: str) -> ldarray:
