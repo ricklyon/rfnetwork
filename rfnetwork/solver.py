@@ -1852,7 +1852,9 @@ class FDTD_Solver():
             n_threads, 
             update_interval
         )
-        print(ret_val)
+
+        if ret_val:
+            raise RuntimeError("Solver returned exit code {ret_val}.")
 
         if show_progress:
             sys.stdout.write(f"\rDone in {time.time() - stime:.3f}s" + (" " * 20) + "\n")
@@ -2946,7 +2948,7 @@ class FDTD_Solver():
             # self._add_field_correction(f"h{na}_{fa}", (1 / CFe, 1 / CFe), idx)
 
             # hz components integrating Ey on the end points of the edge. These only have one Ey component that varies
-            # asymptotically 
+            # asymptotically.
             if p1_i[e_axis] > 0:
                 # self.Db["hz_x2"][x0-1, y, z0] *= CFe
                 idx = build_idx(p1_i[e_axis] - 1, fh_idx, n_idx)
@@ -2986,17 +2988,18 @@ class FDTD_Solver():
                 self.Db[f"h{fa}_{na}"][idx] *= 1 / CFe
                 # self._add_field_correction(f"h{fa}_{na}", (1 / CFe, 1 / CFe), idx)
                 
-                # hy components integrating Ez on the end points of the edge
-                if p1_i[e_axis] > 0:
-                    # self.Db["hy_x2"][x0-1, y0, z] *= CFe
-                    idx = build_idx(p1_i[e_axis] - 1, p1_i[f_axis], ni) 
-                    # self.Db[f"h{fa}_{ea}2"][idx] *= CFe
-                    self._add_field_correction(f"h{fa}_{ea}", (CFe, 1), idx)
-                if p2_i[e_axis] < self.Db[f"h{fa}_{ea}"].shape[e_axis]:
-                    # self.Db["hy_x1"][x1, y0, z] *= CFe
-                    idx = build_idx(p2_i[e_axis], p1_i[f_axis], ni)
-                    # self.Db[f"h{fa}_{ea}1"][idx] *= CFe
-                    self._add_field_correction(f"h{fa}_{ea}", (1, CFe), idx)
+                # hy components integrating Ez on the end points of the edge.
+                # Turned off because it seems to interfere with ports on the edge of
+                # if p1_i[e_axis] > 0:
+                #     # self.Db["hy_x2"][x0-1, y0, z] *= CFe
+                #     idx = build_idx(p1_i[e_axis] - 1, p1_i[f_axis], ni) 
+                #     # self.Db[f"h{fa}_{ea}2"][idx] *= CFe
+                #     self._add_field_correction(f"h{fa}_{ea}", (CFe, 1), idx)
+                # if p2_i[e_axis] < self.Db[f"h{fa}_{ea}"].shape[e_axis]:
+                #     # self.Db["hy_x1"][x1, y0, z] *= CFe
+                #     idx = build_idx(p2_i[e_axis], p1_i[f_axis], ni)
+                #     # self.Db[f"h{fa}_{ea}1"][idx] *= CFe
+                #     self._add_field_correction(f"h{fa}_{ea}", (1, CFe), idx)
 
             # correct Hz components that use the Ey component in the same plane as the edge that points into the edge.
             # Hz in the same plane as the face. Both Hz and Ey are asymtotic so the correction factor cancels out
