@@ -91,10 +91,8 @@ class TestMicroStrip(unittest.TestCase):
         s.add_lumped_port(1, port1_face, integration_line=int_axis)
 
         pml_side = ["x", "y", "z"][len_axis]
-        s.add_PML(f"{pml_side}+", n_pml=10)
+        s.add_PML(f"{pml_side}+", n_pml=5)
 
-        s.generate_mesh(d_max = 0.02)
-        
         # edge correction
         p1 = build_dims(ms_ends[0], + ms_w/2, sub_h)
         p2 = build_dims(ms_ends[1], + ms_w/2, sub_h)
@@ -106,6 +104,7 @@ class TestMicroStrip(unittest.TestCase):
 
         s.edge_correction(p1, p2, f"{wa}-")
 
+        s.generate_mesh(d_max = 0.02)
         # efield normal to trace
         e_normal = f"e{int_axis[0]}"
         s.add_field_monitor("mon1", e_normal, e_normal[1], sub_h, 5)
