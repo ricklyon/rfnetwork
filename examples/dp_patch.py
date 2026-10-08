@@ -38,7 +38,7 @@ def phase_delay_signal(signal: ldarray, phase: float, f0: float):
     dt = signal.coords["time"][1] - signal.coords["time"][0]
     n_delay = int(np.around(t_delay / dt))
 
-    return ldarray(np.roll(signal, n_delay), coords=signal.coords)
+    return ldarray(np.roll(signal, n_delay, axis="time"), coords=signal.coords)
 
 
 # %%
