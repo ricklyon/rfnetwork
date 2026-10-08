@@ -76,10 +76,9 @@ s.add_lumped_port(1, port1_face, "z-")
 
 # PML boundaries are required on all sides to add a far-field monitor
 s.add_PML("x-", "x+", "y-", "y+", "z+", "z-", n_pml=5)
-s.generate_mesh(d_max = 0.02, d_min=0.01)
 
-# setup wide-band far-field monitor
-s.add_farfield_monitor(frequency=np.arange(4, 42, 2) * 1e9)
+
+
 # near-field monitor
 # s.add_field_monitor("e_tot", "e_total", "y", 0, n_step=10)
 
@@ -107,7 +106,10 @@ for i, ms_z in enumerate((ms1_z, ms2_z)):
         integration_line=("z-" if i == 0 else "z+")
     )
 
+s.generate_mesh(d_max = 0.02, d_min=0.01)
 
+# setup wide-band far-field monitor
+s.add_farfield_monitor(frequency=np.arange(4, 42, 2) * 1e9)
 cpos = pv.CameraPosition(
     position=(3, 0, 0.0),
     focal_point=(0, 0, 0),
@@ -120,6 +122,8 @@ plotter = s.render(show_mesh=True, camera_position=cpos, zoom=0.4, axes=ax)
 # %%
 # Setup Excitation and Solve
 # ------------------------
+
+
 
 vsrc = s.gaussian_source(width=50e-12, t0=40e-12, t_len=600e-12)
 s.assign_excitation(vsrc, 1)
