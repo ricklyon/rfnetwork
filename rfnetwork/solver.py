@@ -2990,16 +2990,16 @@ class FDTD_Solver():
                 
                 # hy components integrating Ez on the end points of the edge.
                 # Turned off because it seems to interfere with ports on the edge of
-                # if p1_i[e_axis] > 0:
-                #     # self.Db["hy_x2"][x0-1, y0, z] *= CFe
-                #     idx = build_idx(p1_i[e_axis] - 1, p1_i[f_axis], ni) 
-                #     # self.Db[f"h{fa}_{ea}2"][idx] *= CFe
-                #     self._add_field_correction(f"h{fa}_{ea}", (CFe, 1), idx)
-                # if p2_i[e_axis] < self.Db[f"h{fa}_{ea}"].shape[e_axis]:
-                #     # self.Db["hy_x1"][x1, y0, z] *= CFe
-                #     idx = build_idx(p2_i[e_axis], p1_i[f_axis], ni)
-                #     # self.Db[f"h{fa}_{ea}1"][idx] *= CFe
-                #     self._add_field_correction(f"h{fa}_{ea}", (1, CFe), idx)
+                if p1_i[e_axis] > 0:
+                    # self.Db["hy_x2"][x0-1, y0, z] *= CFe
+                    idx = build_idx(p1_i[e_axis] - 1, p1_i[f_axis], ni) 
+                    # self.Db[f"h{fa}_{ea}2"][idx] *= CFe
+                    self._add_field_correction(f"h{fa}_{ea}", (CFe, 1), idx)
+                if p2_i[e_axis] < self.Db[f"h{fa}_{ea}"].shape[e_axis]:
+                    # self.Db["hy_x1"][x1, y0, z] *= CFe
+                    idx = build_idx(p2_i[e_axis], p1_i[f_axis], ni)
+                    # self.Db[f"h{fa}_{ea}1"][idx] *= CFe
+                    self._add_field_correction(f"h{fa}_{ea}", (1, CFe), idx)
 
             # correct Hz components that use the Ey component in the same plane as the edge that points into the edge.
             # Hz in the same plane as the face. Both Hz and Ey are asymtotic so the correction factor cancels out
