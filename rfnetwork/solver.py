@@ -520,10 +520,11 @@ class FDTD_Solver():
         self._init_PML_coefficients()
 
         self._init_image_coefficients()
+        self._init_lumped_elements()
         self._init_conductors(surface_tolerance=surface_tolerance, d_min=d_min) # allow conductors to override image layers
         
         self._init_edge_corrections()
-        self._init_lumped_elements()
+       
 
         self._prepare_fields()
         self._prepare_PML_fields()
@@ -2519,11 +2520,11 @@ class FDTD_Solver():
 
     def plot_coefficients(
         self, 
-        field: str, 
-        value: str, 
+        name: str,
         axis: str, 
         position: float, 
         normalization: float = True,
+        coefficients: np.ndarray = None,
         opacity: float = 1, 
         cmap: str = "brg", 
         vmin: float = None, 
@@ -2596,29 +2597,72 @@ class FDTD_Solver():
         axis_i = dict(x=0, y=1, z=2)[axis]
         full_pos[axis_i] = position
 
+        # field name (ex, hx, etc...)
+        field = name[3:5]
+
         idx = [slice(None)] * 3
         idx[axis_i] = self.field_pos_to_idx(full_pos, field[:2])[axis_i]
 
-        if value == "a":
-            values = self.Ca[field] if field[0] == "e" else self.Da[field]
+        if coefficients is not None:
+            values = coefficients[name]
         else:
-            values = self.Cb[field] if field[0] == "e" else self.Db[field]
+            values = self.coefficients[name]
+
+        # remove cell width scaling
+        if normalization:
+            dx, dy, dz = [conv.m_in(d).astype(self.dtype_) for d in self.d_cells]
+            dx_h, dy_h, dz_h = [conv.m_in(d).astype(self.dtype_) for d in self.dh_cells]
+
+            # inverse of the cell widths, measured from cell edge to edge.
+            dx_inv = 1 / dx[:, None, None]
+            dy_inv = 1 / dy[None, :, None]
+            dz_inv = 1 / dz[None, None, :]
+
+            # cell widths as viewed from the components on the cell edges, measured from cell center to cell center
+            dx_h_inv = 1 / dx_h[:, None, None]
+            dy_h_inv = 1 / dy_h[None, :, None]
+            dz_h_inv = 1 / dz_h[None, None, :]
+
+            norm_corrections = dict(
+                Cb_ex_y = np.pad(dy_h_inv, ((0, 0), (1, 1), (0, 0))), 
+                Cb_ex_z = -np.pad(dz_h_inv, ((0, 0), (0, 0), (1, 1))),
+
+                Cb_ey_z = np.pad(dz_h_inv, ((0, 0), (0, 0), (1, 1))),
+                Cb_ey_x = -np.pad(dx_h_inv, ((1, 1), (0, 0), (0, 0))),
+
+                Cb_ez_x =  np.pad(dx_h_inv, ((1, 1), (0, 0), (0, 0))),
+                Cb_ez_y = -np.pad(dy_h_inv, ((0, 0), (1, 1), (0, 0))),
+
+                Db_hx_y = -dy_inv,
+                Db_hx_z = dz_inv,
+
+                Db_hy_z = -dz_inv,
+                Db_hy_x = dx_inv,
+
+                Db_hz_x = -dx_inv,
+                Db_hz_y = dy_inv,
+            )
+
+            if name[:7] in norm_corrections.keys():
+                values = values / norm_corrections[name[:7]]
+
+
 
         # apply default normalization to b coefficients
-        if normalization is True:
-            if value == "b":
-                # divide by dt / e0 (if E) or dt / u0 (if H)
-                values = values / (self.dt / e0) if field[0] == "e" else values / (self.dt / u0) 
-        # apply custom normalization
-        elif not isinstance(normalization, bool):
-            values = values / normalization
+        # if normalization is True:
+        #     if value == "b":
+        #         # divide by dt / e0 (if E) or dt / u0 (if H)
+        #         values = values / (self.dt / e0) if field[0] == "e" else values / (self.dt / u0) 
+        # # apply custom normalization
+        # elif not isinstance(normalization, bool):
+        #     values = values / normalization
 
         if vmax is None:
-            vmax = np.max(values)
+            vmax = np.nanmax(values)
         if vmin is None:
-            vmin = np.min(values)
+            vmin = np.nanmin(values)
         
-        floc = self.floc[field[:2]]
+        floc = self.floc[field]
 
         g = [floc[i] if isinstance(s, slice) else floc[i][s: s+1] for i, s in enumerate(idx)]
 
@@ -2640,7 +2684,7 @@ class FDTD_Solver():
         )
 
         plotter.add_scalar_bar(
-            title=f"{field}, {value}\n", vertical=False, label_font_size=11, title_font_size=14
+            title=f"{name}\n", vertical=False, label_font_size=11, title_font_size=14
         )
 
         if axes is not None:
