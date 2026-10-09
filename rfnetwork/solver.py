@@ -4,6 +4,7 @@ import time
 import numpy as np 
 import pyvista as pv
 from copy import copy
+from copy import deepcopy as dcopy
 from np_struct import ldarray
 import sys
 from matplotlib.axes import Axes
@@ -2604,9 +2605,33 @@ class FDTD_Solver():
         idx[axis_i] = self.field_pos_to_idx(full_pos, field[:2])[axis_i]
 
         if coefficients is not None:
-            values = coefficients[name]
+            values = dcopy(coefficients[name])
         else:
-            values = self.coefficients[name]
+            values = dcopy(self.coefficients[name[:7]])
+
+            # replace with field correction values, if 1 or 2 is appended at the end of the name
+            if len(name) > 7:
+                if name[7] not in ("1", "2"):
+                    raise ValueError(f"Coefficient {name} not recognized")
+
+                name_base, db_side = name[:7], name[7]
+
+                # field axis
+                faxis = ("x", "y", "z").index(field[1]) 
+
+                # e-field difference axis
+                daxis = ("x", "y", "z").index(name_base[-1])
+                daxis1 = (faxis + 1) % 3
+                daxis2 = (faxis + 2) % 3
+
+                # placement of requested coefficents in edge correction list (Da, Db_x2, Db_x1, etc...)
+                coeff_idx = 1 if daxis == daxis1 else 3
+                # "2" coefficient comes first, followed by 1... (2 - 1) in update equation
+                if db_side == "1":
+                    coeff_idx += 1
+
+                for f_idx, f_corr in self.field_corrections[field].items():
+                    values[tuple(f_corr["idx"])] = f_corr["values"][coeff_idx]
 
         # remove cell width scaling
         if normalization:
@@ -2988,8 +3013,8 @@ class FDTD_Solver():
             # both 1 and 2 coefficients are the same, just change the coefficent that control both
             # self.Db[f"h{na}_{fa}2"][tuple(idx)] *= 1 / CFe
             # self.Db[f"h{na}_{fa}1"][tuple(idx)] *= 1 / CFe
-            self.Db[f"h{na}_{fa}"][tuple(idx)] *= 1 / CFe
-            # self._add_field_correction(f"h{na}_{fa}", (1 / CFe, 1 / CFe), idx)
+            # self.Db[f"h{na}_{fa}"][tuple(idx)] *= 1 / CFe
+            self._add_field_correction(f"h{na}_{fa}", (1 / CFe, 1 / CFe), idx)
 
             # hz components integrating Ey on the end points of the edge. These only have one Ey component that varies
             # asymptotically.
@@ -3029,8 +3054,8 @@ class FDTD_Solver():
                 # self.Db[f"h{fa}_{na}2"][build_idx(e_idx_centers, p1_i[f_axis], ni)] *= 1 / CFe
                 # both 1 and 2 coefficients are the same, just change the coefficent that control both
                 idx = build_idx(e_idx_centers, p1_i[f_axis], ni)
-                self.Db[f"h{fa}_{na}"][idx] *= 1 / CFe
-                # self._add_field_correction(f"h{fa}_{na}", (1 / CFe, 1 / CFe), idx)
+                # self.Db[f"h{fa}_{na}"][idx] *= 1 / CFe
+                self._add_field_correction(f"h{fa}_{na}", (1 / CFe, 1 / CFe), idx)
                 
                 # hy components integrating Ez on the end points of the edge.
                 # Turned off because it seems to interfere with ports on the edge of
