@@ -409,6 +409,7 @@ int SolverFDTD::solver_init_corrections(PyObject * py_corrections)
         corrections[m].coeff = get_source_array(py_corr, 5);
         corrections[m].field = PyLong_AsLong(PyDict_GetItemString(py_corr, "field"));
         corrections[m].value = 0;
+        corrections[m].x_cell = PyLong_AsLong(PyDict_GetItemString(py_corr, "x_cell"));
 
         // get grid index for the h-component
         PyObject* py_idx = PyDict_GetItemString(py_corr, "idx");
@@ -714,74 +715,6 @@ void SolverFDTD::solver_controller(int Nt, int n_threads, int update_interval)
             // send notification to threads that E-field updates are done.
             cv_th.notify_all();
             cv.wait(lock, [n_threads, this] { return h_updates.load() == n_threads; });
-        }
-
-        // re-run component updates that have corrections assigned
-        FieldCorrection* corr;
-        int x, y, z;
-
-        for (int i = 0; i < n_corrections; i++)
-        {   
-            // std::cout << "correction " << i << "\n";
-            corr = &(corrections[i]);
-            x = (corr->idx)[0];
-            y = (corr->idx)[1];
-            z = (corr->idx)[2];
-            
-            // the correction overwrites the value computed by the normal grid update. The corrected field value is
-            // kept in the correction struct and used to iteratively time step, ignoring the value in the normal grid.
-            // Once the value is computed, it is written to the normal grid so the E-field update uses the 
-            // correct value.
-            if ((corr->field) == 3) // hx update
-            {
-                (corr->value) = (corr->coeff)[0] * (corr->value) + (
-                    ((corr->coeff)[1] * fields.ez[x * ez_NyNz + (y + 1) * Nz + z] - (corr->coeff)[2] * fields.ez[x * ez_NyNz + y * Nz + z]) + // ez_diff_y
-                    ((corr->coeff)[3] * fields.ey[x * ey_NyNz + y * Nzp1 + (z + 1)] - (corr->coeff)[4] * fields.ey[x * ey_NyNz + y * Nzp1 + z])   // ey_diff_z
-                );
-                fields.hx[corr->flat_idx] = (corr->value);
-            }
-            
-
-            else if ((corr->field) == 4) // hy update
-            {
-                (corr->value) = (corr->coeff)[0] * (corr->value) + (
-                    ((corr->coeff)[1] * fields.ex[x * ex_NyNz + y * Nzp1 + (z +1)] - (corr->coeff)[2] * fields.ex[x * ex_NyNz + y * Nzp1 + z]) + // ex_diff_z
-                    ((corr->coeff)[3] * fields.ez[(x + 1) * ez_NyNz + y * Nz + z] - (corr->coeff)[4] * fields.ez[x * ez_NyNz + y * Nz + z])   // ez_diff_x
-                );
-                fields.hy[corr->flat_idx] = (corr->value);
-            }
-           
-
-            else if ((corr->field) == 5) // hz update
-            {
-                corr->value = (corr->coeff)[0] * (corr->value)  + (
-                    ((corr->coeff)[1] * fields.ey[(x +1) * ey_NyNz + y * Nzp1 + z] - (corr->coeff)[2] * fields.ey[x * ey_NyNz + y * Nzp1 + z]) + // ey_diff_x
-                    ((corr->coeff)[3] * fields.ex[x * ex_NyNz + (y+1) * Nzp1 + z] - (corr->coeff)[4] * fields.ex[x * ex_NyNz + y * Nzp1 + z])   // ex_diff_y
-                );
-                fields.hz[corr->flat_idx] = (corr->value);
-            }
-            
-
-
-            // // ----------------- update hx -------------------------- //
-            // hxb.noalias() = Da_hx_y.block(y, Nz0_pml, Nyb, Nzb).cwiseProduct(hxb) + (
-            //     Db_hx_y.block(y, Nz0_pml, Nyb, Nzb).cwiseProduct(ez_diff_y.block(0, Nz0_pml, Nyb, Nzb)) + 
-            //     Db_hx_z.block(y, Nz0_pml, Nyb, Nzb).cwiseProduct(ey_diff_z.block(0, Nz0_pml, Nyb, Nzb))
-            // );
-            
-            // // ----------------- update hy -------------------------- //
-            // hyb.noalias() = Da_hy_z.block(y, Nz0_pml, Nyb, Nzb).cwiseProduct(hyb) + (
-            //     Db_hy_z.block(y, Nz0_pml, Nyb, Nzb).cwiseProduct(ex_diff_z.block(0, Nz0_pml, Nyb, Nzb)) + 
-            //     Db_hy_x.block(y, Nz0_pml, Nyb, Nzb).cwiseProduct(ez_diff_x.block(0, Nz0_pml, Nyb, Nzb))
-            // );
-
-            // // ----------------- update hz -------------------------- //
-            // // extends the full axis along z since hz does not contribute to z-pml
-            // hzb.noalias() = Da_hz_x.block(y, 1, Nyb, Nz-1).cwiseProduct(hzb) + (
-            //     Db_hz_x.block(y, 1, Nyb, Nz-1).cwiseProduct(ey_diff_x.block(0, 0, Nyb, Nz-1)) + 
-            //     Db_hz_y.block(y, 1, Nyb, Nz-1).cwiseProduct(ex_diff_y.block(0, 0, Nyb, Nz-1))
-            // );
-            
         }
 
         // write update
@@ -1641,6 +1574,8 @@ void SolverFDTD::solver_thread(int x_start, int x_stop, int Nt, int thread_idx)
     std:: vector<Probe*> h_probes;
     Probe * p;
     float * fields_base[6]     = {p_ex, p_ey, p_ez, p_hx, p_hy, p_hz};
+
+    std:: vector<FieldCorrection*> corrections_th;
     
     int px, py, pz;
     // int ftype;
@@ -1702,6 +1637,18 @@ void SolverFDTD::solver_thread(int x_start, int x_stop, int Nt, int thread_idx)
         }
     }
 
+    // get all field corrections that fall within this thread's grid
+    FieldCorrection* corr;
+    for (int i = 0; i < n_corrections; i++)
+    {   
+        corr = &(corrections[i]);
+        // if correction is inside the grid for this thread
+        if (((corr->x_cell) >= x_start) && ((corr->x_cell) < x_stop))
+        {
+            corrections_th.push_back(corr);
+        }
+    }
+
     {
         // lock the mutex while updating shared variable, also ensures that only one thread sends a notification
         // to the controller at a time, preventing missed notifications.
@@ -1756,6 +1703,71 @@ void SolverFDTD::solver_thread(int x_start, int x_stop, int Nt, int thread_idx)
         {   
             hfield_slice_update(x_start + x);
         }
+
+        // update field corrections (h-field only)
+        int x, y, z;
+        for (FieldCorrection * corr : corrections_th)
+        {   
+            x = (corr->idx)[0];
+            y = (corr->idx)[1];
+            z = (corr->idx)[2];
+            
+            // the correction overwrites the value computed by the normal grid update. The corrected field value is
+            // kept in the correction struct and used to iteratively time step, ignoring the value in the normal grid.
+            // Once the value is computed, it is written to the normal grid so the E-field update uses the 
+            // correct value.
+            if ((corr->field) == 3) // hx update
+            {
+                (corr->value) = (corr->coeff)[0] * (corr->value) + (
+                    ((corr->coeff)[1] * fields.ez[x * ez_NyNz + (y + 1) * Nz + z] - (corr->coeff)[2] * fields.ez[x * ez_NyNz + y * Nz + z]) + // ez_diff_y
+                    ((corr->coeff)[3] * fields.ey[x * ey_NyNz + y * Nzp1 + (z + 1)] - (corr->coeff)[4] * fields.ey[x * ey_NyNz + y * Nzp1 + z])   // ey_diff_z
+                );
+                fields.hx[corr->flat_idx] = (corr->value);
+            }
+            
+
+            else if ((corr->field) == 4) // hy update
+            {
+                (corr->value) = (corr->coeff)[0] * (corr->value) + (
+                    ((corr->coeff)[1] * fields.ex[x * ex_NyNz + y * Nzp1 + (z +1)] - (corr->coeff)[2] * fields.ex[x * ex_NyNz + y * Nzp1 + z]) + // ex_diff_z
+                    ((corr->coeff)[3] * fields.ez[(x + 1) * ez_NyNz + y * Nz + z] - (corr->coeff)[4] * fields.ez[x * ez_NyNz + y * Nz + z])   // ez_diff_x
+                );
+                fields.hy[corr->flat_idx] = (corr->value);
+            }
+           
+
+            else if ((corr->field) == 5) // hz update
+            {
+                corr->value = (corr->coeff)[0] * (corr->value)  + (
+                    ((corr->coeff)[1] * fields.ey[(x +1) * ey_NyNz + y * Nzp1 + z] - (corr->coeff)[2] * fields.ey[x * ey_NyNz + y * Nzp1 + z]) + // ey_diff_x
+                    ((corr->coeff)[3] * fields.ex[x * ex_NyNz + (y+1) * Nzp1 + z] - (corr->coeff)[4] * fields.ex[x * ex_NyNz + y * Nzp1 + z])   // ex_diff_y
+                );
+                fields.hz[corr->flat_idx] = (corr->value);
+            }
+            
+
+
+            // // ----------------- update hx -------------------------- //
+            // hxb.noalias() = Da_hx_y.block(y, Nz0_pml, Nyb, Nzb).cwiseProduct(hxb) + (
+            //     Db_hx_y.block(y, Nz0_pml, Nyb, Nzb).cwiseProduct(ez_diff_y.block(0, Nz0_pml, Nyb, Nzb)) + 
+            //     Db_hx_z.block(y, Nz0_pml, Nyb, Nzb).cwiseProduct(ey_diff_z.block(0, Nz0_pml, Nyb, Nzb))
+            // );
+            
+            // // ----------------- update hy -------------------------- //
+            // hyb.noalias() = Da_hy_z.block(y, Nz0_pml, Nyb, Nzb).cwiseProduct(hyb) + (
+            //     Db_hy_z.block(y, Nz0_pml, Nyb, Nzb).cwiseProduct(ex_diff_z.block(0, Nz0_pml, Nyb, Nzb)) + 
+            //     Db_hy_x.block(y, Nz0_pml, Nyb, Nzb).cwiseProduct(ez_diff_x.block(0, Nz0_pml, Nyb, Nzb))
+            // );
+
+            // // ----------------- update hz -------------------------- //
+            // // extends the full axis along z since hz does not contribute to z-pml
+            // hzb.noalias() = Da_hz_x.block(y, 1, Nyb, Nz-1).cwiseProduct(hzb) + (
+            //     Db_hz_x.block(y, 1, Nyb, Nz-1).cwiseProduct(ey_diff_x.block(0, 0, Nyb, Nz-1)) + 
+            //     Db_hz_y.block(y, 1, Nyb, Nz-1).cwiseProduct(ex_diff_y.block(0, 0, Nyb, Nz-1))
+            // );
+            
+        }
+
 
         // update h-probe values
         for (Probe * p : h_probes) 

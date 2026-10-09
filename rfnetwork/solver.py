@@ -2871,10 +2871,17 @@ class FDTD_Solver():
         # axis normal to surface
         n_axis = [ax for ax in [0, 1, 2] if ax != e_axis and ax != f_axis][0]
 
+        # flip points so p2 is at a higher spatial position along the axis
+        if p1[e_axis] > p2[e_axis]:
+            p2, p1 = p1, p2
+
+        # string values for each axis
+        ea, fa, na = [["x", "y", "z"][ax] for ax in [e_axis, f_axis, n_axis]]
+
         # edge corrections need to be added a specific step during the mesh generation, save parameters
         # for later to pass to _init_edge_corrections
         self.edge_corrections.append(
-            dict(p1=p1, p2=p2, e_axis=e_axis, f_axis=f_axis, n_axis=n_axis, f_dir=f_dir, CFe=CFe)
+            dict(p1=p1, p2=p2, axis=(ea, fa, na), f_dir=f_dir, CFe=CFe)
         )
 
     def _add_field_correction(self, sp_field: str, corrections_i: tuple, index: tuple):
@@ -2956,6 +2963,7 @@ class FDTD_Solver():
                     values=np.array(coeff_vals, dtype=self.dtype_, order="C"), 
                     field=dict(hx=3, hy=4, hz=5)[field],
                     idx=[int(id) for id in idx],
+                    x_cell = int(idx[0]) - 1 if field == "hx" else int(idx[0]),
                     flat_idx=int(flat_idx),
                 )
 
@@ -2975,25 +2983,21 @@ class FDTD_Solver():
             idx[f_axis] = field
             idx[n_axis] = normal
             return tuple(idx)
-            
-        for edge_corr_dict in self.edge_corrections:
-            p1, p2, e_axis, f_axis, n_axis, f_dir, CFe = edge_corr_dict.values()
 
-            # flip points so p2 is at a higher spatial position along the axis
-            if p1[e_axis] > p2[e_axis]:
-                p2, p1 = p1, p2
+        # update all corrections that modify the Db coefficients before the single sided corrections so that the 
+        # correct values are pulled into the single sided corrections list.
+        for edge_corr_dict in self.edge_corrections:
+            p1, p2, (ea, fa, na), f_dir, CFe = edge_corr_dict.values()
 
             # get e-field component indices at grid edges
             p1_i = self.pos_to_idx(p1, mode="edge")
             p2_i = self.pos_to_idx(p2, mode="edge")
 
-            # string values for each axis
-            ea, fa, na = [["x", "y", "z"][ax] for ax in [e_axis, f_axis, n_axis]]
+            # convert to integer indices
+            e_axis, f_axis, n_axis = [["x", "y", "z"].index(ax) for ax in (ea, fa, na)]
 
             # indices on edge axis of the components on cell centers
             e_idx_centers = slice(p1_i[e_axis], p2_i[e_axis])
-            # indices on edge axis of the edge components
-            e_idx_edges = slice(p1_i[e_axis], p2_i[e_axis] + 1)
 
             # index of closest H component normal to the surface along field axis
             fh_idx = p1_i[f_axis] if f_dir else p1_i[f_axis] - 1
@@ -3013,9 +3017,39 @@ class FDTD_Solver():
             # both 1 and 2 coefficients are the same, just change the coefficent that control both
             # self.Db[f"h{na}_{fa}2"][tuple(idx)] *= 1 / CFe
             # self.Db[f"h{na}_{fa}1"][tuple(idx)] *= 1 / CFe
-            # self.Db[f"h{na}_{fa}"][tuple(idx)] *= 1 / CFe
-            self._add_field_correction(f"h{na}_{fa}", (1 / CFe, 1 / CFe), idx)
+            self.Db[f"h{na}_{fa}"][tuple(idx)] *= 1 / CFe
+            # self._add_field_correction(f"h{na}_{fa}", (1 / CFe, 1 / CFe), idx)
 
+            for ni in [n_idx-1, n_idx]:
+
+                # correct Hy components that integrate the Ez component below and above the edge 
+                # self.Db["hy_z1"][x0: x1, y0, z] *= 1 / CFe
+                # self.Db["hy_z2"][x0: x1, y0, z] *= 1 / CFe
+                # self.Db[f"h{fa}_{na}1"][build_idx(e_idx_centers, p1_i[f_axis], ni)] *= 1 / CFe
+                # self.Db[f"h{fa}_{na}2"][build_idx(e_idx_centers, p1_i[f_axis], ni)] *= 1 / CFe
+                # both 1 and 2 coefficients are the same, just change the coefficent that control both
+                idx = build_idx(e_idx_centers, p1_i[f_axis], ni)
+                self.Db[f"h{fa}_{na}"][tuple(idx)] *= 1 / CFe
+
+        # add single sided corrections
+        for edge_corr_dict in self.edge_corrections:
+            p1, p2, (ea, fa, na), f_dir, CFe = edge_corr_dict.values()
+
+            # get e-field component indices at grid edges
+            p1_i = self.pos_to_idx(p1, mode="edge")
+            p2_i = self.pos_to_idx(p2, mode="edge")
+
+            # convert axis to integer indices
+            e_axis, f_axis, n_axis = [["x", "y", "z"].index(ax) for ax in (ea, fa, na)]
+
+            # indices on edge axis of the edge components
+            e_idx_edges = slice(p1_i[e_axis], p2_i[e_axis] + 1)
+
+            # index of closest H component normal to the surface along field axis
+            fh_idx = p1_i[f_axis] if f_dir else p1_i[f_axis] - 1
+            # index of surface plane along the normal axis
+            n_idx = p1_i[n_axis]
+            
             # hz components integrating Ey on the end points of the edge. These only have one Ey component that varies
             # asymptotically.
             if p1_i[e_axis] > 0:
@@ -3046,16 +3080,6 @@ class FDTD_Solver():
                 # self.Db[f"h{ea}_{fa}1"][build_idx(e_idx_edges, p1_i[f_axis], ni)] *= CFe
                 self._add_field_correction(f"h{ea}_{fa}", (CFe, 1), build_idx(e_idx_edges, p1_i[f_axis] -1, ni))
                 self._add_field_correction(f"h{ea}_{fa}", (1, CFe), build_idx(e_idx_edges, p1_i[f_axis], ni))
-
-                # correct Hy components that integrate the Ez component below and above the edge 
-                # self.Db["hy_z1"][x0: x1, y0, z] *= 1 / CFe
-                # self.Db["hy_z2"][x0: x1, y0, z] *= 1 / CFe
-                # self.Db[f"h{fa}_{na}1"][build_idx(e_idx_centers, p1_i[f_axis], ni)] *= 1 / CFe
-                # self.Db[f"h{fa}_{na}2"][build_idx(e_idx_centers, p1_i[f_axis], ni)] *= 1 / CFe
-                # both 1 and 2 coefficients are the same, just change the coefficent that control both
-                idx = build_idx(e_idx_centers, p1_i[f_axis], ni)
-                # self.Db[f"h{fa}_{na}"][idx] *= 1 / CFe
-                self._add_field_correction(f"h{fa}_{na}", (1 / CFe, 1 / CFe), idx)
                 
                 # hy components integrating Ez on the end points of the edge.
                 # Turned off because it seems to interfere with ports on the edge of

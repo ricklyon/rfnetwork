@@ -125,6 +125,7 @@ struct FieldCorrection {
     int idx[3];
     int field;
     float value;
+    int x_cell;
 };
 
 
