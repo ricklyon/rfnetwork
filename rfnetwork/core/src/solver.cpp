@@ -1705,12 +1705,11 @@ void SolverFDTD::solver_thread(int x_start, int x_stop, int Nt, int thread_idx)
         }
 
         // update field corrections (h-field only)
-        int x, y, z;
         for (FieldCorrection * corr : corrections_th)
         {   
-            x = (corr->idx)[0];
-            y = (corr->idx)[1];
-            z = (corr->idx)[2];
+            px = (corr->idx)[0];
+            py = (corr->idx)[1];
+            pz = (corr->idx)[2];
             
             // the correction overwrites the value computed by the normal grid update. The corrected field value is
             // kept in the correction struct and used to iteratively time step, ignoring the value in the normal grid.
@@ -1719,8 +1718,8 @@ void SolverFDTD::solver_thread(int x_start, int x_stop, int Nt, int thread_idx)
             if ((corr->field) == 3) // hx update
             {
                 (corr->value) = (corr->coeff)[0] * (corr->value) + (
-                    ((corr->coeff)[1] * fields.ez[x * ez_NyNz + (y + 1) * Nz + z] - (corr->coeff)[2] * fields.ez[x * ez_NyNz + y * Nz + z]) + // ez_diff_y
-                    ((corr->coeff)[3] * fields.ey[x * ey_NyNz + y * Nzp1 + (z + 1)] - (corr->coeff)[4] * fields.ey[x * ey_NyNz + y * Nzp1 + z])   // ey_diff_z
+                    ((corr->coeff)[1] * fields.ez[px * ez_NyNz + (py + 1) * Nz + pz] - (corr->coeff)[2] * fields.ez[px * ez_NyNz + py * Nz + pz]) + // ez_diff_y
+                    ((corr->coeff)[3] * fields.ey[px * ey_NyNz + py * Nzp1 + (pz + 1)] - (corr->coeff)[4] * fields.ey[px * ey_NyNz + py * Nzp1 + pz])   // ey_diff_z
                 );
                 fields.hx[corr->flat_idx] = (corr->value);
             }
@@ -1729,8 +1728,8 @@ void SolverFDTD::solver_thread(int x_start, int x_stop, int Nt, int thread_idx)
             else if ((corr->field) == 4) // hy update
             {
                 (corr->value) = (corr->coeff)[0] * (corr->value) + (
-                    ((corr->coeff)[1] * fields.ex[x * ex_NyNz + y * Nzp1 + (z +1)] - (corr->coeff)[2] * fields.ex[x * ex_NyNz + y * Nzp1 + z]) + // ex_diff_z
-                    ((corr->coeff)[3] * fields.ez[(x + 1) * ez_NyNz + y * Nz + z] - (corr->coeff)[4] * fields.ez[x * ez_NyNz + y * Nz + z])   // ez_diff_x
+                    ((corr->coeff)[1] * fields.ex[px * ex_NyNz + py * Nzp1 + (pz +1)] - (corr->coeff)[2] * fields.ex[px * ex_NyNz + py * Nzp1 + pz]) + // ex_diff_z
+                    ((corr->coeff)[3] * fields.ez[(px + 1) * ez_NyNz + py * Nz + pz] - (corr->coeff)[4] * fields.ez[px * ez_NyNz + py * Nz + pz])   // ez_diff_x
                 );
                 fields.hy[corr->flat_idx] = (corr->value);
             }
@@ -1739,8 +1738,8 @@ void SolverFDTD::solver_thread(int x_start, int x_stop, int Nt, int thread_idx)
             else if ((corr->field) == 5) // hz update
             {
                 corr->value = (corr->coeff)[0] * (corr->value)  + (
-                    ((corr->coeff)[1] * fields.ey[(x +1) * ey_NyNz + y * Nzp1 + z] - (corr->coeff)[2] * fields.ey[x * ey_NyNz + y * Nzp1 + z]) + // ey_diff_x
-                    ((corr->coeff)[3] * fields.ex[x * ex_NyNz + (y+1) * Nzp1 + z] - (corr->coeff)[4] * fields.ex[x * ex_NyNz + y * Nzp1 + z])   // ex_diff_y
+                    ((corr->coeff)[1] * fields.ey[(px +1) * ey_NyNz + py * Nzp1 + pz] - (corr->coeff)[2] * fields.ey[px * ey_NyNz + py * Nzp1 + pz]) + // ey_diff_x
+                    ((corr->coeff)[3] * fields.ex[px * ex_NyNz + (py+1) * Nzp1 + pz] - (corr->coeff)[4] * fields.ex[px * ex_NyNz + py * Nzp1 + pz])   // ex_diff_y
                 );
                 fields.hz[corr->flat_idx] = (corr->value);
             }
