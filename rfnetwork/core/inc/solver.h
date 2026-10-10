@@ -216,7 +216,8 @@ private:
     int Ny;
     int Nz;
 
-
+    // maximum number of cells along y axis that are loaded into eigen functions at a time
+    int max_tile;
 
     int Nyp1;
     int Nzp1;
@@ -251,7 +252,7 @@ private:
 public:
     SolverFDTD();          // constructor
     int solver_init_fields(
-        PyObject * fields, PyObject * coefficients, PyObject * pml_data, int Nx, int Ny, int Nz, int gpu
+        PyObject * fields, PyObject * coefficients, PyObject * pml_data, int Nx, int Ny, int Nz, int gpu, int max_tile
     );
     int solver_init_monitors(PyObject * py_monitors, int Nt, int gpu);
     int solver_init_corrections(PyObject * py_corrections);

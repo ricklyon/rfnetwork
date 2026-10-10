@@ -1699,7 +1699,7 @@ class FDTD_Solver():
             if p is not None:
                 p["src"] = None
 
-    def solve(self, n_threads: int = 4, show_progress: bool = True, gpu: bool = False):
+    def solve(self, n_threads: int = 4, show_progress: bool = True, gpu: bool = False, max_tile: int = 128):
         """
         Run FDTD algorithm. At least one port must have an excitation defined before running. Results will be written
         to the probes and monitors attached to the model.
@@ -1809,7 +1809,8 @@ class FDTD_Solver():
             corrections_list, 
             Nx, Ny, Nz, Nt, 
             n_threads, 
-            update_interval
+            update_interval,
+            max_tile
         )
 
         if ret_val:

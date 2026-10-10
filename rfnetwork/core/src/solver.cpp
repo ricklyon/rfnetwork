@@ -40,8 +40,6 @@ typedef Eigen::Stride<Eigen::Dynamic, Eigen::Dynamic> StrideType;
 #define HY 4
 #define HZ 5
 
-#define TILE_Y 128
-
 
 // long long get_milliseconds()
 // {
@@ -233,11 +231,13 @@ int SolverFDTD::solver_init_fields(
     PyObject * py_fields, 
     PyObject * coefficients, 
     PyObject * py_pml_data, 
-    int Nx_, int Ny_, int Nz_, int gpu)
+    int Nx_, int Ny_, int Nz_, int gpu, int max_tile_)
 {
     Nx = Nx_;
     Ny = Ny_;
     Nz = Nz_;
+
+    max_tile = max_tile_;
 
     // int Nxp1 = Nx + 1;
     Nyp1 = Ny + 1;
@@ -770,9 +770,9 @@ void SolverFDTD::efield_slice_update(int x)
     std::vector<int> n_yb;
     n_yb.push_back(Ny0_pml);
 
-    for (int y = Ny0_pml; y < (Ny - Ny1_pml); y += TILE_Y) 
+    for (int y = Ny0_pml; y < (Ny - Ny1_pml); y += max_tile) 
     {
-        n_yb.push_back(std::min(TILE_Y, (Ny - Ny1_pml) - y));
+        n_yb.push_back(std::min(max_tile, (Ny - Ny1_pml) - y));
     }
 
     n_yb.push_back(Ny1_pml);
@@ -1176,9 +1176,9 @@ void SolverFDTD::hfield_slice_update(int x)
     std::vector<int> n_yb;
     n_yb.push_back(Ny0_pml);
 
-    for (int y = Ny0_pml; y < (Ny - Ny1_pml); y += TILE_Y) 
+    for (int y = Ny0_pml; y < (Ny - Ny1_pml); y += max_tile) 
     {
-        n_yb.push_back(std::min(TILE_Y, (Ny - Ny1_pml) - y));
+        n_yb.push_back(std::min(max_tile, (Ny - Ny1_pml) - y));
     }
 
     n_yb.push_back(Ny1_pml);
