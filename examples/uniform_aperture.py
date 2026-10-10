@@ -18,8 +18,6 @@ import mpl_markers as mplm
 # set matplotlib style
 plt.style.use(rfn.DEFAULT_STYLE)
 
-pv.set_jupyter_backend("trame")
-
 # %%
 # User defined Parameters [inches]
 # ------------------------
