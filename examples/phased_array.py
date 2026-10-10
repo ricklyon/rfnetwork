@@ -107,14 +107,12 @@ s.generate_mesh(d_max = 0.04, d_min=0.02)
 s.add_farfield_monitor(f0)
 
 # plot array geometry with port labels on each patch
-plotter = s.render(show_mesh=False, zoom=1.5, camera_position="xy")
-plotter.add_points(ele_pos, render_points_as_spheres=True, point_size=15)
-plotter.add_point_labels(ele_pos, np.arange(1, N+1), always_visible=True)
+plotter = pv.Plotter(off_screen=True)
 
 fig, ax = plt.subplots()
-img = plotter.screenshot()
-ax.imshow(img)
-ax.set_axis_off()
+plotter.add_points(ele_pos, render_points_as_spheres=True, point_size=15)
+plotter.add_point_labels(ele_pos, np.arange(1, N+1), always_visible=True)
+s.render(show_mesh=False, zoom=1.5, camera_position="xy", plotter=plotter, axes=ax)
 
 
 # %%
