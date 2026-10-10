@@ -2538,7 +2538,6 @@ class FDTD_Solver():
         axis: str, 
         position: float, 
         normalization: float = True,
-        coefficients: np.ndarray = None,
         opacity: float = 1, 
         cmap: str = "brg", 
         vmin: float = None, 
@@ -2546,6 +2545,7 @@ class FDTD_Solver():
         point_size: float = 10, 
         axes: Axes = None,
         plotter: pv.Plotter = None,
+        coefficients: np.ndarray = None,
         **kwargs
     ) -> pv.Plotter:
         """
@@ -2684,8 +2684,6 @@ class FDTD_Solver():
             if name[:7] in norm_corrections.keys():
                 values = values / norm_corrections[name[:7]]
 
-
-
         # apply default normalization to b coefficients
         # if normalization is True:
         #     if value == "b":
@@ -2731,6 +2729,13 @@ class FDTD_Solver():
             axes.set_axis_off()
 
         return plotter
+
+    def get_probes(self, name: str) -> dict:
+        """
+        Get probe names that match name. Voltage probes and current probes are made up of several component probes,
+        each with the same base name followed by an underscore.
+        """
+        return {k: v for k, v in self.probes.items() if k == name or k[:len(name) + 1] == name + "_"}
     
     def line_probe_values(self, name: str) -> np.ndarray:
         """
@@ -2739,7 +2744,7 @@ class FDTD_Solver():
 
         self.check_solution()
 
-        return np.array([p["values"] for k, p in self.probes.items() if k[:len(name)] == name])
+        return np.array([p["values"] for p in self.get_probes(name).values()])
 
     def vi_probe_values(self, name: str) -> np.ndarray:
         """
@@ -2747,7 +2752,7 @@ class FDTD_Solver():
         """
         self.check_solution()
 
-        return np.sum([p["values"] * p["d"] for k, p in self.probes.items() if k[:len(name)] == name], axis=0)
+        return np.sum([p["values"] * p["d"] for p in self.get_probes(name).values()], axis=0)
 
     def get_sparameters(self, frequency: np.ndarray, source_port: int = 1, downsample: bool = False) -> ldarray:
         """
@@ -2779,7 +2784,7 @@ class FDTD_Solver():
         # frequency domain voltage and current at each port termination
         Vp = np.zeros((nports, nfrequency), dtype=np.complex128)
         Ip = np.zeros((nports, nfrequency), dtype=np.complex128)
-        
+
         for i, port in enumerate(self.ports):
 
             field_idx = port["idx"]
@@ -2810,6 +2815,7 @@ class FDTD_Solver():
 
             # current through termination, positive current is defined along the positive cartesian axis
             ip = self.vi_probe_values(f"port_{i+1}")
+
             # h-fields are 1/2 time step ahead of the e-fields. Delay current so they are at the same time step
             # flip current direction if integration axis is along negative cartesian axis.
             Ip[i] = direction * utils.dtft(ip, frequency, 1 / self.dt, downsample) #* np.exp(-1j * frequency * 2 * np.pi * (self.dt / 2))
