@@ -15,7 +15,7 @@ typedef _object PyObject;
 #define MAX_MONITORS 50
 #define MAX_PROBES 5000
 #define MAX_THREADS 20
-
+#define MAX_CORRECTIONS 5000
 
 struct mbuffer_t
 {
@@ -48,35 +48,86 @@ struct Coeff_Ez {
 struct Coeff_Hx {
     float * Da_hx_y;
     float * Da_hx_z;
-
-    float * Db_hx_y1;
-    float * Db_hx_y2;
-    
-    float * Db_hx_z1;
-    float * Db_hx_z2;
+    float * Db_hx_y;
+    float * Db_hx_z;
 };
 
 struct Coeff_Hy {
     float * Da_hy_z;
     float * Da_hy_x;
-
-    float * Db_hy_z1;
-    float * Db_hy_z2;
-
-    float * Db_hy_x1;
-    float * Db_hy_x2;
+    float * Db_hy_z;
+    float * Db_hy_x;
 };
 
 struct Coeff_Hz {
     float * Da_hz_x;
     float * Da_hz_y;
 
-    float * Db_hz_x1;
-    float * Db_hz_x2;
-
-    float * Db_hz_y1;
-    float * Db_hz_y2;
+    float * Db_hz_x;
+    float * Db_hz_y;
 };
+
+struct Fields_PML {
+    float * ex_y;
+    float * ex_z;
+
+    float * ey_z;
+    float * ey_x;
+
+    float * ez_x;
+    float * ez_y;
+
+    float * hx_y;
+    float * hx_z;
+    
+    float * hy_z;
+    float * hy_x;
+
+    float * hz_x;
+    float * hz_y;
+};
+
+struct Coeff_zPML {
+    float * Ca_ex_y;
+    float * Ca_ex_z;
+    float * Cb_ex_y;
+    float * Cb_ex_z;
+
+    float * Ca_ey_z;
+    float * Ca_ey_x;
+    float * Cb_ey_z;
+    float * Cb_ey_x;
+
+    float * Da_hx_y;
+    float * Da_hx_z;
+    float * Db_hx_y;
+    float * Db_hx_z;
+
+    float * Da_hy_z;
+    float * Da_hy_x;
+    float * Db_hy_z;
+    float * Db_hy_x;
+};
+
+
+struct Fields {
+    float * ex;
+    float * ey;
+    float * ez;
+    float * hx;
+    float * hy; 
+    float * hz;
+};
+
+struct FieldCorrection {
+    float * coeff;
+    int flat_idx;
+    int idx[3];
+    int field;
+    float value;
+    int x_cell;
+};
+
 
 struct Monitor {
     char * values;
@@ -125,11 +176,23 @@ private:
     Coeff_Hy Dy;
     Coeff_Hz Dz;
 
+    Fields_PML fields_pml[3][2];
+
+    Coeff_zPML coeff_zpml[2];
+
+    // number of pml cells
+    int N_pml[3][2];
+
+    Fields fields;
+
     Monitor monitors[MAX_MONITORS];
     int n_monitors;
 
     Probe probes[MAX_PROBES];
     int n_probes;
+
+    FieldCorrection corrections[MAX_CORRECTIONS];
+    int n_corrections;
 
     std::thread threads[MAX_THREADS];
     ThreadData thread_data[MAX_THREADS + 2];
@@ -153,7 +216,30 @@ private:
     int Ny;
     int Nz;
 
-    mbuffer_t m_pool{NULL, NULL, 0};
+    // maximum number of cells along y axis that are loaded into eigen functions at a time
+    int max_tile;
+
+    int Nyp1;
+    int Nzp1;
+
+    int Nym1;
+    int Nzm1;
+
+    int ex_NyNz;
+    int ey_NyNz;
+    int ez_NyNz;
+
+    int hx_NyNz;
+    int hy_NyNz;
+    int hz_NyNz;
+
+    // size of coefficients for h fields, unlike the e-field coefficients, these differ because of the
+    // extra pad cells on the the h-fields.
+    int Dx_NyNz;
+    int Dy_NyNz;
+    int Dz_NyNz;
+
+    // mbuffer_t m_pool{NULL, NULL, 0};
 
     float * mbuffer_allocate(uint64_t size);
 
@@ -165,14 +251,20 @@ private:
 
 public:
     SolverFDTD();          // constructor
-    int solver_init_fields(PyObject * py_mem, PyObject * coefficients, int Nx, int Ny, int Nz, int gpu);
+    int solver_init_fields(
+        PyObject * fields, PyObject * coefficients, PyObject * pml_data, int Nx, int Ny, int Nz, int gpu, int max_tile
+    );
     int solver_init_monitors(PyObject * py_monitors, int Nt, int gpu);
+    int solver_init_corrections(PyObject * py_corrections);
+
     int solver_init_probes(PyObject * py_probes, int Nt);
 
     int solver_run(int Nt, int n_threads, int update_interval);
     void solver_controller(int Nt, int n_threads, int update_interval);
 
     void solver_run_cu(int Nt);
+    void efield_slice_update(int x);
+    void hfield_slice_update(int x);
 };
 
 

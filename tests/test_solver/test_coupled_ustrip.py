@@ -74,11 +74,7 @@ class TestCoupledUStrip(unittest.TestCase):
             s.add_lumped_port(i+1, port_face, integration_line="z+")
 
         # assign PML layers, omitting the x- side near the ports
-        s.assign_PML_boundaries("x+", "x-", "z+", "y-", "y+", n_pml=5)
-
-        # create mesh with a nominal width of 20mils far from geometry edges, and 2.5mils near edges.
-        # cell widths are tapered to minimize errors
-        s.generate_mesh(d_max = 0.01, d_min = 0.005)
+        s.add_PML("x+", "x-", "z+", "y-", "y+", n_pml=5)
 
         # s.render().show()
 
@@ -93,6 +89,10 @@ class TestCoupledUStrip(unittest.TestCase):
             p2 = (ms_x[1], ms_y - ms_w/2, sub_h)
 
             s.edge_correction(p1, p2, integration_line="y-")
+
+        # # create mesh with a nominal width of 20mils far from geometry edges, and 2.5mils near edges.
+        # # cell widths are tapered to minimize errors
+        s.generate_mesh(d_max = 0.01, d_min = 0.005)
 
         # create voltage waveform. Time units are in seconds
         vsrc = 1e-2 * s.gaussian_source(width=80e-12, t0=50e-12, t_len=300e-12)

@@ -78,11 +78,7 @@ for i, y in enumerate((line1_y, line2_y)):
     s.add_lumped_port(i + 1, port_face, integration_line=integration_line)
 
 # assign PML layers, omitting the x- side near the ports
-s.assign_PML_boundaries("x+", n_pml=5)
-
-# create mesh with a nominal width of 20mils far from geometry edges, and 2.5mils near edges.
-# cell widths are tapered to minimize errors
-s.generate_mesh(d_max = 0.01, d_min = 0.0025)
+s.add_PML("x+", n_pml=5)
 
 # apply edge singularity correction to the edges along the length of the microstrip lines
 for i, y in enumerate((line1_y, line1_y)):
@@ -95,6 +91,10 @@ for i, y in enumerate((line1_y, line1_y)):
     p2 = (ms_x[1], y - sl_w/2, 0)
 
     s.edge_correction(p1, p2, integration_line="y-")
+
+# create mesh with a nominal width of 20mils far from geometry edges, and 2.5mils near edges.
+# cell widths are tapered to minimize errors
+s.generate_mesh(d_max = 0.01, d_min = 0.0025)
 
 # add 2D field monitor normal to the x-axis at the center of the grid
 s.add_field_monitor("mon1", "e_total", axis="x", position=0, n_step=10)

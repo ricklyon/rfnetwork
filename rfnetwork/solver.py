@@ -4,6 +4,7 @@ import time
 import numpy as np 
 import pyvista as pv
 from copy import copy
+from copy import deepcopy as dcopy
 from np_struct import ldarray
 import sys
 from matplotlib.axes import Axes
@@ -37,15 +38,18 @@ class FDTD_Solver():
         self.lumped_elements = dict()
         self.images = dict()
 
-        self.pml_boundaries = []
+        self.pml_boundaries = dict()
+
+        self.edge_corrections = []
+        self.field_corrections = dict(hx={}, hy={}, hz={})
 
         self.monitors = dict()
         self.farfield = dict()
         self.probes = dict()
         self.ports = []
         self.ports_inv = []
-        
-        self._n_pml = None
+
+        # width of PML for each axis
         self._auto_name_counter = 0
 
         self.sbox_max = np.max(bounding_box.points, axis=0)
@@ -57,6 +61,8 @@ class FDTD_Solver():
         self._meshed = False
         self._solved = False
         self._time = None
+
+        self.dtype_ = np.float32
 
     @property
     def time(self):
@@ -290,6 +296,67 @@ class FDTD_Solver():
             name=name
         )
 
+    def add_current_source(self, face: pv.PolyData, field: str, src: np.ndarray):
+        """
+        Add a uniform current sheet. Must be called after generate_mesh().
+
+        Parameters
+        ----------
+        face : pv.PolyData
+            pyvista PolyData object of 2D face
+        field : str
+            field string. If "ex", "ey", or "ez", a electric current is added. If "hx", "hy" or "hz", a
+            magnetic current is added.
+        src : np.ndarray
+            time domain source excitation.
+        distribution : ldarray
+            labeled array of the magnitude distribution across the sheet. If not provided, current will have uniform
+            magnitude across the surface.
+
+        """
+
+        src = self._validate_source_waveform(src)
+
+        # get indices of the grid edges that bound the conductor. The mesh ensures that conductor edges fall
+        # on grid edges.
+        p0 = list(self.field_pos_to_idx(np.min(face.points, axis=0), field))
+        p1 = list(self.field_pos_to_idx(np.max(face.points, axis=0), field))
+
+        idx = (
+            slice(p0[0], p1[0] +1, None),
+            slice(p0[1], p1[1] +1, None),
+            slice(p0[2], p1[2] +1, None)
+        )
+
+        # epsilon and sigma at each field
+        eps = dict(
+            ex=self.eps_ex, ey=self.eps_ey, ez=self.eps_ez, hx=self.eps_hx, hy=self.eps_hy, hz=self.eps_hz
+        )
+
+        sigma = dict(
+            ex=self.sig_ex, ey=self.sig_ey, ez=self.sig_ez
+        )
+
+        # coefficient for Js term
+        if field in ("ex", "ey", "ez"):
+            coeff = (2 * self.dt) / (2 * eps[field][idx] + sigma[field][idx] * self.dt)
+        # coefficient for Ms term
+        else:
+            coeff = (self.dt / u0) * np.ones_like(eps[field][idx])
+            
+        # add current source
+        self.ports += [
+            dict(
+                idx = idx,
+                Vs_a = coeff,
+                field = field,
+                src = src
+            )
+        ]
+
+        self.ports_inv += [None]
+
+
     def add_image_layer(
         self,
         filepath: Path,
@@ -352,16 +419,24 @@ class FDTD_Solver():
             style={**style, "cmap":cmap} # add cmap to style so it's passed to add_mesh
         )
 
-    def assign_PML_boundaries(self, *sides: str, n_pml: float = 10):
+    def add_PML(self, *sides: str, n_pml: float = 5, sigma_max: float = 0.8, m: int = 3):
         """
-        Assign a PML boundary to sides of the solve box. All sides must have the same number of PML cells.
+        Assign a PML boundary to sides of the solve box. Call multiple times to assign different
+        PML settings to each side.
 
         Parameters
         ----------
         sides : list, str
             Valid values are ("x+", "x-", "y+", "y-", "z+", "z-",)
-        n_pml : int, default: 10
+        n_pml : int, default: 5
             number of PML cells.
+        sigma_max : float, default: 0.8
+            Amount to scale the maximum sigma value by. Actual assigned maximum sigma in the PML is:
+            `sigma_max * (m + 1) / (eta0 * d_border)`, where `d_border` is the width of the cell on the edge
+            of the grid.
+        m: int, default: 3
+            PML profile order
+
         """
         self.invalidate_mesh()
 
@@ -369,8 +444,10 @@ class FDTD_Solver():
         if any([s not in valid_sides for s in sides]):
             raise ValueError(f"PML side not recognized. Expecting one of {valid_sides}")
 
-        self.pml_boundaries = copy(list(sides))
-        self._n_pml = n_pml
+        for s in sides:
+            # update the PML setting dictionary
+            self.pml_boundaries[s] = dict(sigma_max = sigma_max, m = m, n_pml=n_pml)
+
 
     def pos_to_idx(self, position: tuple, mode: str = "edge"):
         """
@@ -425,12 +502,13 @@ class FDTD_Solver():
             Default is 1/3 the minimum grid cell width.
         """
 
-        self._meshed = True
-
         if d_min is None:
             d_min = d_max
         elif d_min > (d_max / 1.5):
             raise ValueError("d_min must be less than d_max.")
+
+        self._meshed = True
+        self.invalidate_solution()
 
         self._init_grid(d_max=d_max, d_min=d_min)
         # init dielectrics sets the cell sigma and er but does not set the coefficients
@@ -440,13 +518,119 @@ class FDTD_Solver():
 
         # add PML layers before conductors and ports, this gives priority to any conductors that may extend into the 
         # PML
-        for pml_side in self.pml_boundaries:
-            self._init_PML(pml_side)
+        self._init_PML_coefficients()
 
         self._init_image_coefficients()
-        self._init_conductors(surface_tolerance=surface_tolerance, d_min=d_min) # allow conductors to override image layers
         self._init_lumped_elements()
-        self.invalidate_solution()
+        self._init_conductors(surface_tolerance=surface_tolerance, d_min=d_min) # allow conductors to override image layers
+        
+        self._init_edge_corrections()
+       
+
+        self._prepare_fields()
+        self._prepare_PML_fields()
+        
+
+
+    def _prepare_fields(self):
+        """
+        Condition coefficients and fields in final preparation to pass to solver code.
+        """
+
+        # numpy type for the field values
+        dtype_ = np.float32
+        dx, dy, dz = [conv.m_in(d).astype(dtype_) for d in self.d_cells]
+        dx_h, dy_h, dz_h = [conv.m_in(d).astype(dtype_) for d in self.dh_cells]
+        Nx, Ny, Nz = len(dx), len(dy), len(dz)
+
+        # inverse of the cell widths, measured from cell edge to edge.
+        dx_inv = 1 / dx[:, None, None]
+        dy_inv = 1 / dy[None, :, None]
+        dz_inv = 1 / dz[None, None, :]
+
+        # cell widths as viewed from the components on the cell edges, measured from cell center to cell center
+        dx_h_inv = 1 / dx_h[:, None, None]
+        dy_h_inv = 1 / dy_h[None, :, None]
+        dz_h_inv = 1 / dz_h[None, None, :]
+
+
+        # ensure coefficents at end of y axis are zero to enforce PEC boundary
+        self.Ca["ex_y"][:, -1, :] = 0
+        self.Ca["ex_z"][:, -1, :] = 0
+        self.Cb["ex_y"][:, -1, :] = 0
+        self.Cb["ex_z"][:, -1, :] = 0
+
+        self.Ca["ez_x"][:, -1, :] = 0
+        self.Ca["ez_y"][:, -1, :] = 0
+        self.Cb["ez_x"][:, -1, :] = 0
+        self.Cb["ez_y"][:, -1, :] = 0
+
+        # ensure coefficients at end of x axis are zero to enforce PEC bounary
+        self.Ca["ey_z"][-1] = 0
+        self.Ca["ey_x"][-1] = 0
+        self.Cb["ez_x"][-1] = 0
+        self.Cb["ez_y"][-1] = 0
+
+        self.Ca["ez_x"][-1] = 0
+        self.Ca["ez_y"][-1] = 0
+        self.Cb["ez_x"][-1] = 0
+        self.Cb["ez_y"][-1] = 0
+
+        # The grid in the C++ solver is parallelized along x, each x cell is defined as the Ex, Hz, Hy components, and
+        # the Ey, Ez, and Hx components at the right end of the cell. The Ey, Ez, and Hx components at the left end of
+        # the grid are not included in any cell and are not updated (PEC boundary.) 
+        # np.pad is used to add extra zero widths for the boundary elements with no neighboring cell. These
+        # components are not updated so the zero is arbitrary.
+        self.coefficients = dict(
+            # ex coefficients, edges along y and z do not get updated
+            Ca_ex_y = self.Ca["ex_y"],
+            Ca_ex_z = self.Ca["ex_z"],
+            Cb_ex_y = self.Cb["ex_y"] * np.pad(dy_h_inv, ((0, 0), (1, 1), (0, 0))), 
+            Cb_ex_z = -self.Cb["ex_z"] * np.pad(dz_h_inv, ((0, 0), (0, 0), (1, 1))),
+
+            # ey coefficients, edges along x and z do not get updated
+            Ca_ey_z = self.Ca["ey_z"],
+            Ca_ey_x = self.Ca["ey_x"],
+            Cb_ey_z = self.Cb["ey_z"] * np.pad(dz_h_inv, ((0, 0), (0, 0), (1, 1))),
+            Cb_ey_x = -self.Cb["ey_x"] * np.pad(dx_h_inv, ((1, 1), (0, 0), (0, 0))),
+
+            # ez coefficients, edges along x and y do not get updated
+            Ca_ez_x = self.Ca["ez_x"],
+            Ca_ez_y = self.Ca["ez_y"],
+            Cb_ez_x = self.Cb["ez_x"] * np.pad(dx_h_inv, ((1, 1), (0, 0), (0, 0))),
+            Cb_ez_y = -self.Cb["ez_y"] * np.pad(dy_h_inv, ((0, 0), (1, 1), (0, 0))),
+
+            # hx coefficients
+            Da_hx_y = self.Da["hx_y"],
+            Da_hx_z = self.Da["hx_z"],
+            Db_hx_y = -self.Db["hx_y"] * dy_inv,
+            Db_hx_z = self.Db["hx_z"] * dz_inv,
+
+            # hy coefficients
+            Da_hy_z = self.Da["hy_z"],
+            Da_hy_x = self.Da["hy_x"],
+            Db_hy_z = -self.Db["hy_z"] * dz_inv,
+            Db_hy_x = self.Db["hy_x"] * dx_inv,
+
+            # hz coefficients
+            Da_hz_x = self.Da["hz_x"],
+            Da_hz_y = self.Da["hz_y"],
+            Db_hz_x = -self.Db["hz_x"] * dx_inv,
+            Db_hz_y = self.Db["hz_y"] * dy_inv,
+        )
+
+        # initialize field arrays, add extra pad components for hy and hz along x and y axis so each cell can be
+        # updated in the same way, avoids bounds checking on each time step.
+        self.fields = dict()
+        for f_name, f_shape in self.fshape.items():
+            xs, ys, zs = f_shape
+            # add extra pad cell for hy and hz
+            if f_name in ("hy", "hz"):
+                xs += 1
+            if f_name in ("hx", "hz"):
+                ys += 1
+
+            self.fields[f_name] = np.zeros((xs, ys, zs), dtype=dtype_)
 
     def _get_points_from_img(self, d_min):
         """
@@ -644,7 +828,7 @@ class FDTD_Solver():
 
         self._create_grid(d_max, d_min)
 
-        gx, gy, gz = self.grid.x, self.grid.y, self.grid.z
+        gx, gy, gz = self.g_edges
         dx, dy, dz = np.diff(gx).astype(dtype_), np.diff(gy).astype(dtype_), np.diff(gz).astype(dtype_)
 
         self.n_cells = len(dx), len(dy), len(dz)  
@@ -661,7 +845,6 @@ class FDTD_Solver():
         dy_h = (dy[1:] + dy[:-1]) / 2
         dz_h = (dz[1:] + dz[:-1]) / 2
 
-        self.g_edges = gx, gy, gz
         self.g_cells = gx_h, gy_h, gz_h
         self.d_cells = dx, dy, dz
         self.dh_cells = dx_h, dy_h, dz_h
@@ -787,9 +970,9 @@ class FDTD_Solver():
             # flatten list of lists of subcell widths
             mesh_cells_d[axis] = list(itertools.chain(*graded_subcells_d))
 
-        gx, gy, gz = [np.around(np.concatenate([[self.sbox_min[i]], self.sbox_min[i] + np.cumsum(mesh_cells_d[i])]), decimals=self._places) for i in range(3)]
+        grid_edges = [np.around(np.concatenate([[self.sbox_min[i]], self.sbox_min[i] + np.cumsum(mesh_cells_d[i])]), decimals=self._places) for i in range(3)]
 
-        self.grid = pv.RectilinearGrid(gx.astype(dtype_), gy.astype(dtype_), gz.astype(dtype_))
+        self.g_edges = [g.astype(dtype_) for g in grid_edges]
 
     def _init_dielectrics(self):
 
@@ -959,7 +1142,7 @@ class FDTD_Solver():
         Cb_ex = (2 * dt) / ((2 * self.eps_ex + (self.sig_ex * dt)))
         Cb_ey = (2 * dt) / ((2 * self.eps_ey + (self.sig_ey * dt)))
         Cb_ez = (2 * dt) / ((2 * self.eps_ez + (self.sig_ez * dt)))
-    
+
         self.Ca = dict(
             ex_y = Ca_ex.copy(),
             ex_z = Ca_ex.copy(),
@@ -981,26 +1164,25 @@ class FDTD_Solver():
         self.Da = dict(
             hx_y = np.ones((Nx+1, Ny, Nz), dtype=dtype_) * Da_0,
             hx_z = np.ones((Nx+1, Ny, Nz), dtype=dtype_) * Da_0,
+
             hy_z = np.ones((Nx, Ny+1, Nz), dtype=dtype_) * Da_0,
             hy_x = np.ones((Nx, Ny+1, Nz), dtype=dtype_) * Da_0,
+
             hz_x = np.ones((Nx, Ny, Nz+1), dtype=dtype_) * Da_0,
             hz_y = np.ones((Nx, Ny, Nz+1), dtype=dtype_) * Da_0,
         )
         
         self.Db = dict(
-            hx_y1 = np.ones((Nx+1, Ny, Nz), dtype=dtype_) * Db_0,
-            hx_y2 = np.ones((Nx+1, Ny, Nz), dtype=dtype_) * Db_0,
-            hx_z1 = np.ones((Nx+1, Ny, Nz), dtype=dtype_) * Db_0,
-            hx_z2 = np.ones((Nx+1, Ny, Nz), dtype=dtype_) * Db_0,
-            hy_z1 = np.ones((Nx, Ny+1, Nz), dtype=dtype_) * Db_0,
-            hy_z2 = np.ones((Nx, Ny+1, Nz), dtype=dtype_) * Db_0,
-            hy_x1 = np.ones((Nx, Ny+1, Nz), dtype=dtype_) * Db_0,
-            hy_x2 = np.ones((Nx, Ny+1, Nz), dtype=dtype_) * Db_0,
-            hz_x1 = np.ones((Nx, Ny, Nz+1), dtype=dtype_) * Db_0,
-            hz_x2 = np.ones((Nx, Ny, Nz+1), dtype=dtype_) * Db_0,
-            hz_y1 = np.ones((Nx, Ny, Nz+1), dtype=dtype_) * Db_0,
-            hz_y2 = np.ones((Nx, Ny, Nz+1), dtype=dtype_) * Db_0,
+            hx_y = np.ones((Nx+1, Ny, Nz), dtype=dtype_) * Db_0,
+            hx_z = np.ones((Nx+1, Ny, Nz), dtype=dtype_) * Db_0,
+
+            hy_z = np.ones((Nx, Ny+1, Nz), dtype=dtype_) * Db_0,
+            hy_x = np.ones((Nx, Ny+1, Nz), dtype=dtype_) * Db_0,
+
+            hz_x = np.ones((Nx, Ny, Nz+1), dtype=dtype_) * Db_0,
+            hz_y = np.ones((Nx, Ny, Nz+1), dtype=dtype_) * Db_0,
         )
+
 
     def _init_image_coefficients(self):
         """
@@ -1236,93 +1418,197 @@ class FDTD_Solver():
                 self.add_current_probe(f"port_{port}", current_face)
 
 
-    def _init_PML(self, side: str):
+    def _init_PML_coefficients(self):
         """
         Add PML layer to a single side of the grid.
 
-        Parameters
-        ----------
-        side : list, str
-            Valid values are ("x+", "x-", "y+", "y-", "z+", "z-",)
         """
-        n_pml = self._n_pml
 
-        if n_pml is None:
-            return
+        # split field names for each axis
+        pml_efields = [("ey", "ez"), ("ez", "ex"), ("ex", "ey")]
+        pml_hfields = [("hy", "hz"), ("hz", "hx"), ("hx", "hy")]
 
-        axis = side[0]
-        axis_i = dict(x=0, y=1, z=2)[axis]
-        m_pml = 3 # sigma profile order
+        # update coefficients in the PML section
+        for side, settings in self.pml_boundaries.items():
+            axis = side[0]
+            side_int = 1 if side[1] == "+" else 0
 
-        dt = self.dt
-        dcells = self.d_cells[axis_i]
-        d_border = conv.m_in(dcells[-1]) if side[1] == "+" else conv.m_in(dcells[0])
-        eta0 = np.sqrt(u0 / e0)
-        # now define the values of sigma and sigma_m from the profiles
-        sigma_max = 0.8 * (m_pml + 1) / (eta0 * d_border)
-    
-        # define sigma profile in the PML region on the right side of the grid.
-        i_pml_axis = np.arange(0, n_pml)
-        # broadcast across other dimensions that are not the PML direction
-        i_pml_b = [None] * 3
-        i_pml_b[axis_i] = slice(None)
-        i_pml = i_pml_axis[tuple(i_pml_b)]
-    
-        # sigma on the cell edges. Components on the edge of the PML have a sigma of 0.
-        sigma_e_n = sigma_max * ((i_pml) / (n_pml))**m_pml
-        # sigma in the middle of the cells. First Hz component in the PML is 0.5 cells into the PML
-        sigma_e_np5 = sigma_max * ((i_pml + 0.5) / (n_pml))**m_pml
+            axis_i = dict(x=0, y=1, z=2)[axis]
 
-        # magnetic conductivity
-        # plt.figure()
-        # plt.plot(np.arange(0, n_pml, 1), sigma_e_n.squeeze())
-        # plt.plot(np.arange(0.5, n_pml + .5, 1), sigma_e_np5.squeeze())
+            m_pml = settings["m"]
+            sigma_max_scale = settings.get("sigma_max", 0.8)
+            n_pml = settings["n_pml"]
 
-        e_idx = [slice(None) for i in range(3)]
-        h_idx = [slice(None) for i in range(3)]
+            dt = self.dt
+            dcells = self.d_cells[axis_i]
+            d_border = conv.m_in(dcells[-1]) if side[1] == "+" else conv.m_in(dcells[0])
+            eta0 = np.sqrt(u0 / e0)
+            # now define the values of sigma and sigma_m from the profiles
+            sigma_max = sigma_max_scale * (m_pml + 1) / (eta0 * d_border)
+        
+            # define sigma profile in the PML region on the right side of the grid.
+            i_pml_axis = np.arange(0, n_pml)
+            # broadcast across other dimensions that are not the PML direction
+            i_pml_b = [None] * 3
+            i_pml_b[axis_i] = slice(None)
+            i_pml = i_pml_axis[tuple(i_pml_b)]
+        
+            # sigma on the cell edges. Components on the edge of the PML have a sigma of 0.
+            sigma_e_n = sigma_max * ((i_pml) / (n_pml))**m_pml
+            # sigma in the middle of the cells. First Hz component in the PML is 0.5 cells into the PML
+            sigma_e_np5 = sigma_max * ((i_pml + 0.5) / (n_pml))**m_pml
 
-        e_idx[axis_i] = slice(n_pml, 0, -1) if side[1] == "-" else slice(-n_pml-1, -1)
-        h_idx[axis_i] = slice(n_pml-1, None, -1) if side[1] == "-" else slice(-n_pml, None)
-
-        field_eps = dict(
-            ex=self.eps_ex,
-            ey=self.eps_ey,
-            ez=self.eps_ez,
-            hx=self.eps_hx,
-            hy=self.eps_hy,
-            hz=self.eps_hz,  
-        )
-
-        # get the two e and h fields that are graded by the PML for the given axis direction
-        pml_efields = [("ey", "ez"), ("ez", "ex"), ("ex", "ey")][axis_i]
-        pml_hfields = [("hy", "hz"), ("hz", "hx"), ("hx", "hy")][axis_i]
-
-        # grade the e-field components along axis
-        for e in pml_efields:
-            # first e component is at the edge of the PML where sigma = 0, last component is at the solve boundary 
-            # and not updated.
-            # sigma / eps must be constant across y and z, page 291 in taflove
-            # scale sigma by eps so that sigma / eps is constant
-            eps = field_eps[e][tuple(e_idx)]
-            sigma_e = np.broadcast_to(sigma_e_n, eps.shape).copy()
-            sigma_e *= (eps / e0)
-            
-            self.Ca[f"{e}_{axis}"][tuple(e_idx)] = (2 * eps - (sigma_e * dt)) / (2 * eps + (sigma_e * dt))
-            self.Cb[f"{e}_{axis}"][tuple(e_idx)] = (2 * dt) / ((2 * eps + (sigma_e * dt)))
-
-        # grade the h-field components along axis
-        for h in pml_hfields:
-            # h components are in the middle of the PML cells, use half cell indices
-            eps = field_eps[h][tuple(h_idx)]
-            # electrical conductivity
-            simga_e = np.broadcast_to(sigma_e_np5, eps.shape).copy()
-            simga_e *= (eps / e0)
             # magnetic conductivity
-            sigma_m = simga_e * u0 / eps
+            # plt.figure()
+            # plt.plot(np.arange(0, n_pml, 1), sigma_e_n.squeeze())
+            # plt.plot(np.arange(0.5, n_pml + .5, 1), sigma_e_np5.squeeze())
 
-            self.Da[f"{h}_{axis}"][tuple(h_idx)] = (2 * u0 - (sigma_m * dt)) / (2 * u0 + (sigma_m * dt))
-            self.Db[f"{h}_{axis}1"][tuple(h_idx)] = (2 * dt) / ((2 * u0 + (sigma_m * dt))) 
-            self.Db[f"{h}_{axis}2"][tuple(h_idx)] = (2 * dt) / ((2 * u0 + (sigma_m * dt))) 
+            e_idx = [slice(None) for i in range(3)]
+            h_idx = [slice(None) for i in range(3)]
+
+            e_idx[axis_i] = slice(n_pml, 0, -1) if side[1] == "-" else slice(-n_pml-1, -1)
+            h_idx[axis_i] = slice(n_pml-1, None, -1) if side[1] == "-" else slice(-n_pml, None)
+
+            field_eps = dict(
+                ex=self.eps_ex,
+                ey=self.eps_ey,
+                ez=self.eps_ez,
+                hx=self.eps_hx,
+                hy=self.eps_hy,
+                hz=self.eps_hz,  
+            )
+
+            # grade the e-field components along axis
+            for e in pml_efields[axis_i]:
+                # first e component is at the edge of the PML where sigma = 0, last component is at the solve boundary 
+                # and not updated.
+                # sigma / eps must be constant across y and z, page 291 in taflove
+                # scale sigma by eps so that sigma / eps is constant
+                eps = field_eps[e][tuple(e_idx)]
+                sigma_e = np.broadcast_to(sigma_e_n, eps.shape).copy()
+                sigma_e *= (eps / e0)
+                
+                self.Ca[f"{e}_{axis}"][tuple(e_idx)] = (2 * eps - (sigma_e * dt)) / (2 * eps + (sigma_e * dt))
+                self.Cb[f"{e}_{axis}"][tuple(e_idx)] = (2 * dt) / ((2 * eps + (sigma_e * dt)))
+                # coeff_pml[axis][f"Ca_{e}_{axis}"][side_int] = (2 * eps - (sigma_e * dt)) / (2 * eps + (sigma_e * dt))
+                # coeff_pml[axis][f"Cb_{e}_{axis}"][side_int] = (2 * dt) / ((2 * eps + (sigma_e * dt)))
+
+            # grade the h-field components along axis
+            for h in pml_hfields[axis_i]:
+                # h components are in the middle of the PML cells, use half cell indices
+                eps = field_eps[h][tuple(h_idx)]
+                # electrical conductivity
+                simga_e = np.broadcast_to(sigma_e_np5, eps.shape).copy()
+                simga_e *= (eps / e0)
+                # magnetic conductivity
+                sigma_m = simga_e * u0 / eps
+
+                self.Da[f"{h}_{axis}"][tuple(h_idx)] = (2 * u0 - (sigma_m * dt)) / (2 * u0 + (sigma_m * dt))
+                self.Db[f"{h}_{axis}"][tuple(h_idx)] = (2 * dt) / ((2 * u0 + (sigma_m * dt))) 
+                # coeff_pml[axis][f"Da_{h}_{axis}"][side_int] = (2 * u0 - (sigma_m * dt)) / (2 * u0 + (sigma_m * dt))
+                # coeff_pml[axis][f"Db_{h}_{axis}"][side_int] = (2 * dt) / ((2 * u0 + (sigma_m * dt))) 
+
+    def _prepare_PML_fields(self):
+
+        # build list of pml cell widths, two values for each axis for each end of the solve box
+        n_pml = [[0, 0], [0, 0], [0, 0]]
+
+        for i, axis in enumerate(["x", "y", "z"]):
+            for j, side in enumerate(("-", "+")):
+                if (axis + side) in self.pml_boundaries.keys():
+                    n_pml[i][j] = self.pml_boundaries[axis + side]["n_pml"]
+
+        sf_names = ("ex_y", "ex_z", "ey_z", "ey_x", "ez_x", "ez_y", "hx_y", "hx_z", "hy_z", "hy_x", "hz_x", "hz_y")
+
+        # initialize split fields in PML regions
+        fields_pml = dict(x=dict(), y=dict(), z=dict())
+        coeff_pml = dict(x=dict(), y=dict(), z=dict())
+
+        for i, axis in enumerate(["x", "y", "z"]):
+
+            # each of the two split fields for PML along the current axis
+            for sf_name in sf_names:
+                # get the base field name from the split field name
+                f_name = sf_name[:2]
+
+                field_shape = list(self.fshape[f_name])
+                coeff_shape = list(self.fshape[f_name])
+
+                # add extra pad cell for hy and hz along x.
+                # coefficents do not have extra pad cell
+                if f_name in ("hy", "hz"):
+                    field_shape[0] += 1
+                # add extra pad cell for hx and hz along y
+                if f_name in ("hx", "hz"):
+                    field_shape[1] += 1
+
+                fields_pml[axis][sf_name] = []
+                
+
+                if axis == "z":
+                    if sf_name[0] == "e":
+                        coeff_pml[axis][f"Ca_{sf_name}"] = [None, None]
+                        coeff_pml[axis][f"Cb_{sf_name}"] = [None, None]
+
+                    else:
+                        coeff_pml[axis][f"Da_{sf_name}"] = [None, None]
+                        coeff_pml[axis][f"Db_{sf_name}"] = [None, None]
+
+                for j, side in enumerate(("-", "+")):
+
+                    n_pml_side = n_pml[i][j]
+
+                    f_shape = list(field_shape)
+                    c_shape = list(coeff_shape)
+
+                    # set length of coefficents and field in the PML direction to be the PML width
+                    f_shape[i] = n_pml_side
+                    c_shape[i] = n_pml_side
+
+                    e_idx = [slice(None) for i in range(3)]
+                    h_idx = [slice(None) for i in range(3)]
+
+                    # index PML components, not reversed like when the coefficients are assigned
+                    if n_pml_side:
+                        e_idx[i] = slice(1, n_pml_side + 1) if side == "-" else slice(-n_pml_side-1, -1)
+                        h_idx[i] = slice(0, n_pml_side) if side == "-" else slice(-n_pml_side, None)
+                    else:
+                        e_idx[i] = slice(0, 0)
+                        h_idx[i] = slice(0, 0)
+
+                    # swap memory layout for z-pml to make memory cache more efficient, ordered x, z, y
+                    if axis == "z":
+                        if sf_name[0] == "e":
+                            coeff_pml[axis][f"Ca_{sf_name}"][j] = np.array(
+                                (self.coefficients[f"Ca_{sf_name}"][tuple(e_idx)]).transpose(0, 2, 1), order="C", dtype=self.dtype_
+                            )
+                            coeff_pml[axis][f"Cb_{sf_name}"][j] = np.array(
+                                (self.coefficients[f"Cb_{sf_name}"][tuple(e_idx)]).transpose(0, 2, 1), order="C", dtype=self.dtype_
+                            )
+                        else:
+                            coeff_pml[axis][f"Da_{sf_name}"][j] = np.array(
+                                (self.coefficients[f"Da_{sf_name}"][tuple(h_idx)]).transpose(0, 2, 1), order="C", dtype=self.dtype_
+                            )
+                            coeff_pml[axis][f"Db_{sf_name}"][j] = np.array(
+                                (self.coefficients[f"Db_{sf_name}"][tuple(h_idx)]).transpose(0, 2, 1), order="C", dtype=self.dtype_
+                            )
+                        
+                        f_shape = [f_shape[0], f_shape[2], f_shape[1]]
+                        c_shape = [f_shape[0], f_shape[2], f_shape[1]]
+
+                    # initialize empty PML fields
+                    fields_pml[axis][sf_name] += [np.zeros(tuple(f_shape), dtype=self.dtype_)]
+                    # # empty PML coefficients
+                    # if sf_name[0] == "e":
+                    #     coeff_pml[axis][f"Ca_{sf_name}_{axis}"] += [np.zeros(tuple(c_shape), dtype=self.dtype_)]
+                    #     coeff_pml[axis][f"Cb_{sf_name}_{axis}"] += [np.zeros(tuple(c_shape), dtype=self.dtype_)]
+                    # else:
+                    #     coeff_pml[axis][f"Da_{sf_name}_{axis}"] += [np.zeros(tuple(c_shape), dtype=self.dtype_)]
+                    #     coeff_pml[axis][f"Db_{sf_name}_{axis}"] += [np.zeros(tuple(c_shape), dtype=self.dtype_)]
+
+
+        # add to class 
+        self.pml_data = dict(coefficients=coeff_pml, fields=fields_pml, n_pml=n_pml)
 
 
     def gaussian_source(self, width: float, t0: float, t_len: float):
@@ -1372,6 +1658,19 @@ class FDTD_Solver():
         self.invalidate_solution()
         self.check_mesh()
 
+        waveform = self._validate_source_waveform(waveform)
+                
+        for p in np.atleast_1d(ports):
+            self.ports[p-1]["src"] = waveform
+
+            # assign the inverted version of the waveform to the secondary port, if present. The integration
+            # axis points in the opposite direction as the primary which will flip the sign and we don't need
+            # to do it here.
+            if self.ports_inv[p-1] is not None:
+                self.ports_inv[p-1]["src"] = waveform
+
+    def _validate_source_waveform(self, waveform):
+
         if self._time is None:
             self._time = np.arange(0, self.dt * len(waveform), self.dt)
         
@@ -1385,15 +1684,8 @@ class FDTD_Solver():
         # truncate waveform
         if len(self._time) < len(waveform):
             waveform = waveform[:len(self._time)]
-                
-        for p in np.atleast_1d(ports):
-            self.ports[p-1]["src"] = waveform.astype(np.float32)
 
-            # assign the inverted version of the waveform to the secondary port, if present. The integration
-            # axis points in the opposite direction as the primary which will flip the sign and we don't need
-            # to do it here.
-            if self.ports_inv[p-1] is not None:
-                self.ports_inv[p-1]["src"] = waveform.astype(np.float32)
+        return waveform.astype(np.float32)
 
     def reset_excitations(self):
         """ Remove excitations from all ports. """
@@ -1407,7 +1699,7 @@ class FDTD_Solver():
             if p is not None:
                 p["src"] = None
 
-    def solve(self, n_threads: int = 4, show_progress: bool = True, gpu: bool = False):
+    def solve(self, n_threads: int = 4, show_progress: bool = True, gpu: bool = False, max_tile: int = 128):
         """
         Run FDTD algorithm. At least one port must have an excitation defined before running. Results will be written
         to the probes and monitors attached to the model.
@@ -1415,15 +1707,20 @@ class FDTD_Solver():
         Parameters
         ----------
         n_thread : int, default: 4
-            number of parallel threads to run algorithm on. Fully separate threads using MPI is not supported yet.
+            number of parallel threads to run algorithm on. Memory isolated threads using MPI is not supported yet.
             Threads are controlled by the OS and will spread across the available CPU cores. On most systems
-            performance is bottle-necked by shared memory caches between cores.
+            performance is bottle-necked by memory bandwidth in shared caches between cores, not computational 
+            throughput.
         show_progress : bool, default: True
             print solver progress to stdout.
         gpu : bool, default: False
             runs the solver on a NVIDIA GPU, if available. 
         """
         self.check_mesh()
+
+        self._init_monitors()
+
+        Nx, Ny, Nz = self.n_cells
 
         # error check source excitations
         excitations = [p["src"] for p in self.ports if p["src"] is not None]
@@ -1435,103 +1732,6 @@ class FDTD_Solver():
         Nt = len(excitations[0])
         if not all([Nt == len(s) for s in excitations]):
             raise ValueError("Excitations must have identical lengths.")
-
-        # numpy type for the field values
-        dtype_ = np.float32
-        dx, dy, dz = [conv.m_in(d).astype(dtype_) for d in self.d_cells]
-        dx_h, dy_h, dz_h = [conv.m_in(d).astype(dtype_) for d in self.dh_cells]
-        Nx, Ny, Nz = len(dx), len(dy), len(dz)
-
-        dx_inv = 1 / dx[:, None, None]
-        dy_inv = 1 / dy[None, :, None]
-        dz_inv = 1 / dz[None, None, :]
-
-        dx_h_inv = 1 / dx_h[:, None, None]
-        dy_h_inv = 1 / dy_h[None, :, None]
-        dz_h_inv = 1 / dz_h[None, None, :]
-
-        # dx, dy, dz with an extra component for the last component at the edge of the grid that has no neighboring
-        # cell.
-        # This also ensures the fields remain at 0 at the end of the grid (PEC boundary)
-        dx1_h_inv = np.concatenate([dx_h_inv, [[[0]]]], axis=0)
-        dy1_h_inv = np.concatenate([dy_h_inv, [[[0]]]], axis=1)
-        dz1_h_inv = np.concatenate([dz_h_inv, [[[0]]]], axis=2)
-
-        # cpu solver drops the coefficients at the edges of the grid, gpu does not so that all fields and 
-        # coefficents are the same shape. Equally sized arrays don't work as well for the CPU because an extra
-        # h-field component is needed past the end of the grid to avoid a special case for the edge components
-        end = None if gpu else -1
-
-        hs = 1 if gpu else 0
-
-
-        # to avoid inefficiently indexing the coefficients at every update, the ends of the coefficients are indexed
-        # out so they can be directly multiplied with the difference operations in the update equations. 
-        # The grid in the C++ solver is parallelized along x, each x cell is defined as the Ex, Hz, Hy components, and
-        # the Ey, Ez, and Hx components at the right end of the cell. The Ey, Ez, and Hx components at the left end of
-        # the grid are not included in any cell and are not updated (PEC boundary.) 
-        coefficients = dict(
-            # ex coefficients, edges along y and z do not get updated
-            Ca_ex_y = self.Ca["ex_y"][:, 1:end, 1:end],
-            Ca_ex_z = self.Ca["ex_z"][:, 1:end, 1:end],
-            Cb_ex_y = self.Cb["ex_y"][:, 1:end, 1:end] * dy1_h_inv[:, :end],
-            Cb_ex_z = -self.Cb["ex_z"][:, 1:end, 1:end] * dz1_h_inv[..., :end],
-
-            # ey coefficients, edges along x and z do not get updated
-            Ca_ey_z = self.Ca["ey_z"][1:, :, 1:end],
-            Ca_ey_x = self.Ca["ey_x"][1:, :, 1:end],
-            Cb_ey_z = self.Cb["ey_z"][1:, :, 1:end] * dz1_h_inv[..., :end],
-            Cb_ey_x = -self.Cb["ey_x"][1:, :, 1:end] * dx1_h_inv,
-
-            # ez coefficients, edges along x and y do not get updated
-            Ca_ez_x = self.Ca["ez_x"][1:, 1:end, :],
-            Ca_ez_y = self.Ca["ez_y"][1:, 1:end, :],
-            Cb_ez_x = self.Cb["ez_x"][1:, 1:end, :] * dx1_h_inv,
-            Cb_ez_y = -self.Cb["ez_y"][1:, 1:end, :] * dy1_h_inv[:, :end],
-
-            # hx coefficients
-            Da_hx_y = self.Da["hx_y"][1:],
-            Da_hx_z = self.Da["hx_z"][1:],
-            
-            Db_hx_y1 = -self.Db["hx_y1"][1:] * dy_inv,
-            Db_hx_y2 = -self.Db["hx_y2"][1:] * dy_inv,
-            Db_hx_z1 = self.Db["hx_z1"][1:] * dz_inv, 
-            Db_hx_z2 = self.Db["hx_z2"][1:] * dz_inv,
-
-            # hy coefficients
-            Da_hy_z = self.Da["hy_z"][:, hs:],
-            Da_hy_x = self.Da["hy_x"][:, hs:],
-            
-            Db_hy_z1 = -self.Db["hy_z1"][:, hs:] * dz_inv,
-            Db_hy_z2 = -self.Db["hy_z2"][:, hs:] * dz_inv,
-            Db_hy_x1 = self.Db["hy_x1"][:, hs:] * dx_inv,
-            Db_hy_x2 = self.Db["hy_x2"][:, hs:] * dx_inv,
-
-            # hz coefficients
-            Da_hz_x = self.Da["hz_x"][:, :, hs:],
-            Da_hz_y = self.Da["hz_y"][:, :, hs:],
-            
-            Db_hz_x1 = -self.Db["hz_x1"][:, :, hs:] * dx_inv,
-            Db_hz_x2 = -self.Db["hz_x2"][:, :, hs:] * dx_inv,
-            Db_hz_y1 = self.Db["hz_y1"][:, :, hs:] * dy_inv,
-            Db_hz_y2 = self.Db["hz_y2"][:, :, hs:] * dy_inv,
-        )
-
-
-        # copy arrays to row-ordered arrays in the solver dtype
-        for k in coefficients.keys():
-            coefficients[k] = np.array(coefficients[k], order="C", dtype=dtype_)
-
-        temp_mem_size = 0
-        for s in self.fshape.values():
-            # three copies of each field, two for the split fields and one combined field
-            # the first components at x=0 are not updated and not included in the memory buffer
-            temp_mem_size += 3 * np.prod((Nx,) + s[1:])
-
-        # add a buffer for each thread, and the endpoints for the edge components
-        temp_mem_size += (4 * (Ny + 1) * (Nz + 1)) * n_threads * 8
-
-        mem = np.zeros(temp_mem_size, dtype=dtype_)
 
         probes = []
         # initialize sources. Sources act like probes, but the values are input to the 
@@ -1546,17 +1746,17 @@ class FDTD_Solver():
             idx, Vs_a, field, src = port["idx"], port["Vs_a"], port["field"], port["src"]
 
             if src is None:
-                src = np.zeros(Nt, dtype=dtype_, order="C")
+                src = np.zeros(Nt, dtype=self.dtype_, order="C")
 
             # convert slice indices to a list of values
             idx_list = [list(np.arange(v.start, v.stop)) if isinstance(v, slice) else [v] for v in idx]
 
-            # create a list of sources for each ez component, with the integer index and scalar waveform data
+            # create a list of sources for each component, with the integer index and scalar waveform data
             Vs_a_flt = Vs_a.flatten()
             for j, idx_j in enumerate(itertools.product(*idx_list)):
                 probes.append(
                     dict(
-                        values=np.array(Vs_a_flt[j] * src, dtype=dtype_, order="C"), 
+                        values=np.array(Vs_a_flt[j] * src, dtype=self.dtype_, order="C"), 
                         field=int(list(self.fshape.keys()).index(field)),
                         idx=[int(id) for id in idx_j],
                         is_source=int(port["src"] is not None)
@@ -1567,59 +1767,21 @@ class FDTD_Solver():
         for k, p in self.probes.items():
             probes.append(
                 dict(
-                    values=np.zeros(Nt, dtype=dtype_, order="C"), 
+                    values=np.zeros(Nt, dtype=self.dtype_, order="C"), 
                     field=int(list(self.fshape.keys()).index(p["field"])),
                     idx=[int(id) for id in p["index"]],
                     is_source=int(0)
                 )
             )
 
+        # initialize edge correction coefficients
+        # combine corrections into a single list
+        corrections_list = []
+        for f in ("hx", "hy", "hz"):
+            corrections_list += list(self.field_corrections[f].values())
+
         # initialize field monitors
-        monitors = []
-        for k, m in self.monitors.items():
-
-            n_m = int(Nt / m["n_step"]) + 1
-
-            field_idx = list(self.fshape.keys()).index(m["field"])
-
-            # allocated array length for each field type in the solver, all e-field components are included,
-            # except at x=0. H-field components have an extra component at the ends of the grid along y and z.
-            f_Ny = [self.Ny+1, self.Ny, self.Ny+1, self.Ny, self.Ny+1, self.Ny]
-            f_Nz = [self.Nz+1, self.Nz+1, self.Nz, self.Nz, self.Nz, self.Nz+1]
-
-            if m["axis"] == 0:
-                m_shape = (Ny, Nz) if gpu else (f_Ny[field_idx], f_Nz[field_idx])
-            elif m["axis"] == 1:
-                m_shape = (Nx, Nz) if gpu else (self.Nx, f_Nz[field_idx])
-            else:
-                m_shape = (Nx, Ny) if gpu else (self.Nx, f_Ny[field_idx])
-
-            mon_config = dict(
-                axis=int(m["axis"]),
-                position=int(m["index"]),
-                field=field_idx,
-                n_step=int(m["n_step"]),
-            )
-
-            if m["frequency"] is not None:
-                # initialize monitor for frequency domain phasor captures.
-                # DTFT is computed with a running sum in the time stepping equations
-                frequency = m["frequency"]
-                fs = (1 / (self.dt *  m["n_step"]))
-                fn = frequency / fs
-                omega = 2 * np.pi * fn
-                # phase terms of the DTFT at a single frequency for each time step
-                mon_config["values"] = np.zeros(((len(frequency),) + m_shape), dtype=np.complex64, order="C")
-                # dtft phase is ordered (n_m, frequency)
-                mon_config["dtft_phase"] = np.exp(
-                    -1j * omega[None] * np.arange(n_m)[:, None], dtype=np.complex64, order="C" 
-                )
-                mon_config["n_frequencies"] = int(len(frequency))
-            else:
-                # initialize monitor for time domain captures
-                mon_config["values"] = np.zeros(((n_m,) + m_shape), dtype=dtype_, order="C")
-
-            monitors.append(mon_config)
+        monitors = list(self.monitors.values())
 
         n_cells = self.Nx * self.Ny * self.Nz
         if show_progress:
@@ -1638,42 +1800,24 @@ class FDTD_Solver():
         else:
             solver_func = core.core_func.solver_run
 
-        solver_func(coefficients, probes, monitors, mem, Nx, Ny, Nz, Nt, n_threads, update_interval)
+        ret_val = solver_func(
+            self.fields, 
+            self.coefficients, 
+            self.pml_data, 
+            probes, 
+            monitors, 
+            corrections_list, 
+            Nx, Ny, Nz, Nt, 
+            n_threads, 
+            update_interval,
+            max_tile
+        )
+
+        if ret_val:
+            raise RuntimeError("Solver returned exit code {ret_val}.")
 
         if show_progress:
             sys.stdout.write(f"\rDone in {time.time() - stime:.3f}s" + (" " * 20) + "\n")
-
-        # move monitor values back to the class variable
-        for i, (k, m) in enumerate(self.monitors.items()):
-            m_val = monitors[i]["values"]
-
-            # add an extra row along x for the components that start at the edge of the grid and weren't included in
-            # the sover gird.
-            if m["axis"] in [1, 2] and m["field"] in ["hx", "ey", "ez"]:
-                m_val = np.pad(m_val, ((0, 0), (1, 0), (0, 0)))
-
-            if gpu:
-                # gpu grid is Nx, Ny, Nz for all components. Add extra row columns for components that start at
-                # the edge of the grid
-
-                # add extra component along y axis
-                if m["field"] in ["hy", "ex", "ez"]:
-                    # monitor on x-axis (yz plane)
-                    if m["axis"] == 0:
-                        m_val = np.pad(m_val, ((0, 0), (1, 0), (0, 0)))
-                    # monitor on z-axis (xy plane)
-                    if m["axis"] == 2:
-                        m_val = np.pad(m_val, ((0, 0), (0, 0), (1, 0)))
-                # extra component along z axis
-                if m["field"] in ["hz", "ex", "ey"]:
-                    # monitor on x-axis (yz plane)
-                    if m["axis"] == 0:
-                        m_val = np.pad(m_val, ((0, 0), (0, 0), (1, 0)))
-                    # monitor on y-axis (xz plane)
-                    if m["axis"] == 1:
-                        m_val = np.pad(m_val, ((0, 0), (0, 0), (1, 0)))
-
-            self.monitors[k]["values"] = m_val
 
         # get the voltages at each source components
         src_v = [s["values"] for s in probes]
@@ -1699,6 +1843,7 @@ class FDTD_Solver():
 
         self._solved = True
 
+        # TODO: remove extra pad cells from field values 
 
     def add_field_monitor(
         self, 
@@ -1732,6 +1877,8 @@ class FDTD_Solver():
 
         """
 
+        self.check_mesh()
+
         supported_fields = tuple(self.fshape.keys()) + ("e_total",)
 
         if field not in supported_fields:
@@ -1764,15 +1911,109 @@ class FDTD_Solver():
             if index < 0 or index >= (axis_len - 1):
                 raise ValueError("Field position out of bounds")
 
+            field_idx = list(self.fshape.keys()).index(f)
+
             self.monitors[n] = dict(
-                field=f, 
-                axis=axis_i,
+                field=f,
+                field_idx=int(field_idx), 
+                axis=int(axis_i),
                 position=position, 
-                index=index, 
-                n_step=n_step, 
+                index=int(index), 
+                n_step=int(n_step), 
                 shape=tuple(shape),
                 frequency=np.atleast_1d(frequency) if frequency is not None else None
             )
+
+            #####
+
+    def _init_monitors(self):
+
+        for k, m in self.monitors.items():
+            field = m["field"]
+            n_m = int(len(self.time) / m["n_step"]) + 1
+            field_idx = list(self.fshape.keys()).index(field)
+
+            xs, ys, zs = self.fshape[field]
+            # add extra pad cell for hy and hz
+            if field in ("hy", "hz"):
+                xs += 1
+            if field in ("hx", "hz"):
+                ys += 1
+            # first x components not included in grid updates
+            if field in ("ey", "ez", "hx"):
+                xs -= 1
+
+            if m["axis"] == 0: # x axis
+                m_shape = (ys, zs)
+            elif m["axis"] == 1: # y axis
+                m_shape = (xs, zs)
+            else: # z axis
+                m_shape = (xs, ys)
+
+            if m["frequency"] is not None:
+                # initialize monitor for frequency domain phasor captures.
+                # DTFT is computed with a running sum in the time stepping equations
+                fs = (1 / (self.dt *  m["n_step"]))
+                fn = m["frequency"] / fs
+                omega = 2 * np.pi * fn
+                # phase terms of the DTFT at a single frequency for each time step
+                m["values"] = np.zeros(((len(m["frequency"]),) + m_shape), dtype=np.complex64, order="C")
+                # dtft phase is ordered (n_m, frequency)
+                m["dtft_phase"] = np.exp(
+                    -1j * omega[None] * np.arange(n_m)[:, None], dtype=np.complex64, order="C" 
+                )
+                m["n_frequencies"] = int(len(m["frequency"]))
+            else:
+                # initialize monitor for time domain captures
+                m["values"] = np.zeros(((n_m,) + m_shape), dtype=self.dtype_, order="C")
+
+
+        # for k, m in self.monitors.items():
+
+        #     n_m = int(Nt / m["n_step"]) + 1
+
+        #     field_idx = list(self.fshape.keys()).index(m["field"])
+
+        #     # allocated array length for each field type in the solver, all e-field components are included,
+        #     # except at x=0. H-field components have an extra component at the ends of the grid along y and z.
+        #     # includes pad cell at end of y axis for hx and hy
+        #     f_Ny = [self.Ny+1, self.Ny, self.Ny+1, self.Ny+1, self.Ny+1, self.Ny+1]
+        #     f_Nz = [self.Nz+1, self.Nz+1, self.Nz, self.Nz, self.Nz, self.Nz+1]
+
+        #     if m["axis"] == 0:
+        #         m_shape = (Ny, Nz) if gpu else (f_Ny[field_idx], f_Nz[field_idx])
+        #     elif m["axis"] == 1:
+        #         m_shape = (Nx, Nz) if gpu else (self.Nx, f_Nz[field_idx])
+        #     else:
+        #         m_shape = (Nx, Ny) if gpu else (self.Nx, f_Ny[field_idx])
+
+        #     mon_config = dict(
+        #         axis=int(m["axis"]),
+        #         position=int(m["index"]),
+        #         field=field_idx,
+        #         n_step=int(m["n_step"]),
+        #     )
+
+        #     if m["frequency"] is not None:
+        #         # initialize monitor for frequency domain phasor captures.
+        #         # DTFT is computed with a running sum in the time stepping equations
+        #         frequency = m["frequency"]
+        #         fs = (1 / (self.dt *  m["n_step"]))
+        #         fn = frequency / fs
+        #         omega = 2 * np.pi * fn
+        #         # phase terms of the DTFT at a single frequency for each time step
+        #         mon_config["values"] = np.zeros(((len(frequency),) + m_shape), dtype=np.complex64, order="C")
+        #         # dtft phase is ordered (n_m, frequency)
+        #         mon_config["dtft_phase"] = np.exp(
+        #             -1j * omega[None] * np.arange(n_m)[:, None], dtype=np.complex64, order="C" 
+        #         )
+        #         mon_config["n_frequencies"] = int(len(frequency))
+        #     else:
+        #         # initialize monitor for time domain captures
+        #         mon_config["values"] = np.zeros(((n_m,) + m_shape), dtype=self.dtype_, order="C")
+
+        #     monitors.append(mon_config)
+
 
     def add_farfield_monitor(self, frequency: np.ndarray, padding: int = 2):
         """
@@ -1819,20 +2060,22 @@ class FDTD_Solver():
             sf0_s, sf1_s = [a for a in ("x", "y", "z") if a != axis_s]
             
             # for each face on either side of the far-field box
-            for j, side in enumerate(["n", "p"]):
+            for j, side in enumerate(["-", "+"]):
                 skipped = False
-                pml_name = axis_s + ("-" if side == "n" else "+")
+                pml_name = axis_s + side
+
                 # if face has no PML boundary, the boundary condition is PEC, place surface on boundary edge
-                if pml_name not in self.pml_boundaries:
+                if pml_name not in self.pml_boundaries.keys():
                     # flag this side of the grid to prevent a field monitor from being attached.
                     skipped = True
                     ff_idx[axis, j] = 0 if j == 0 else len(self.g_edges[axis]) - 1
                 else:
+                    n_pml = self.pml_boundaries[pml_name]["n_pml"]
                     # set the position of farfield integration surface by index value in the grid
-                    if side == "n":
-                        ff_idx[axis, j] = self._n_pml + padding
+                    if side == "-":
+                        ff_idx[axis, j] = n_pml + padding
                     else:
-                        ff_idx[axis, j] = len(self.g_edges[axis]) - self._n_pml - 1 - padding
+                        ff_idx[axis, j] = len(self.g_edges[axis]) - n_pml - 1 - padding
 
                 # integration face position, inches
                 surf_idx = ff_idx[axis, j] 
@@ -1851,21 +2094,21 @@ class FDTD_Solver():
                     f_s = ("x", "y", "z")[f]
                     # add e-field monitor
                     self.add_field_monitor(
-                        f"ff_e{f_s}_{side}{axis_s}", f"e{f_s}", axis_s, index=surf_idx, frequency=frequency
+                        f"ff_e{f_s}_{axis_s}{side}", f"e{f_s}", axis_s, index=surf_idx, frequency=frequency
                     )
 
                     # add h-field monitor 
                     self.add_field_monitor(
-                        f"ff_h{f_s}1_{side}{axis_s}", f"h{f_s}", axis_s, index=surf_idx, frequency=frequency
+                        f"ff_h{f_s}1_{axis_s}{side}", f"h{f_s}", axis_s, index=surf_idx, frequency=frequency
                     )
                     # add monitor on other side of edge so H fields can be averaged
                     if j == 0 :
                         self.add_field_monitor(
-                            f"ff_h{f_s}2_{side}{axis_s}", f"h{f_s}", axis_s, index=surf_idx-1, frequency=frequency
+                            f"ff_h{f_s}2_{axis_s}{side}", f"h{f_s}", axis_s, index=surf_idx-1, frequency=frequency
                         )
                     else:
                         self.add_field_monitor(
-                            f"ff_h{f_s}2_{side}{axis_s}", f"h{f_s}", axis_s, index=surf_idx+1, frequency=frequency
+                            f"ff_h{f_s}2_{axis_s}{side}", f"h{f_s}", axis_s, index=surf_idx+1, frequency=frequency
                         )
 
         for axis in range(3):
@@ -2291,8 +2534,7 @@ class FDTD_Solver():
 
     def plot_coefficients(
         self, 
-        field: str, 
-        value: str, 
+        name: str,
         axis: str, 
         position: float, 
         normalization: float = True,
@@ -2303,6 +2545,7 @@ class FDTD_Solver():
         point_size: float = 10, 
         axes: Axes = None,
         plotter: pv.Plotter = None,
+        coefficients: np.ndarray = None,
         **kwargs
     ) -> pv.Plotter:
         """
@@ -2368,29 +2611,94 @@ class FDTD_Solver():
         axis_i = dict(x=0, y=1, z=2)[axis]
         full_pos[axis_i] = position
 
+        # field name (ex, hx, etc...)
+        field = name[3:5]
+
         idx = [slice(None)] * 3
         idx[axis_i] = self.field_pos_to_idx(full_pos, field[:2])[axis_i]
 
-        if value == "a":
-            values = self.Ca[field] if field[0] == "e" else self.Da[field]
+        if coefficients is not None:
+            values = dcopy(coefficients[name])
         else:
-            values = self.Cb[field] if field[0] == "e" else self.Db[field]
+            values = dcopy(self.coefficients[name[:7]])
+
+            # replace with field correction values, if 1 or 2 is appended at the end of the name
+            if len(name) > 7:
+                if name[7] not in ("1", "2"):
+                    raise ValueError(f"Coefficient {name} not recognized")
+
+                name_base, db_side = name[:7], name[7]
+
+                # field axis
+                faxis = ("x", "y", "z").index(field[1]) 
+
+                # e-field difference axis
+                daxis = ("x", "y", "z").index(name_base[-1])
+                daxis1 = (faxis + 1) % 3
+                daxis2 = (faxis + 2) % 3
+
+                # placement of requested coefficents in edge correction list (Da, Db_x2, Db_x1, etc...)
+                coeff_idx = 1 if daxis == daxis1 else 3
+                # "2" coefficient comes first, followed by 1... (2 - 1) in update equation
+                if db_side == "1":
+                    coeff_idx += 1
+
+                for f_idx, f_corr in self.field_corrections[field].items():
+                    values[tuple(f_corr["idx"])] = f_corr["values"][coeff_idx]
+
+        # remove cell width scaling
+        if normalization:
+            dx, dy, dz = [conv.m_in(d).astype(self.dtype_) for d in self.d_cells]
+            dx_h, dy_h, dz_h = [conv.m_in(d).astype(self.dtype_) for d in self.dh_cells]
+
+            # inverse of the cell widths, measured from cell edge to edge.
+            dx_inv = 1 / dx[:, None, None]
+            dy_inv = 1 / dy[None, :, None]
+            dz_inv = 1 / dz[None, None, :]
+
+            # cell widths as viewed from the components on the cell edges, measured from cell center to cell center
+            dx_h_inv = 1 / dx_h[:, None, None]
+            dy_h_inv = 1 / dy_h[None, :, None]
+            dz_h_inv = 1 / dz_h[None, None, :]
+
+            norm_corrections = dict(
+                Cb_ex_y = np.pad(dy_h_inv, ((0, 0), (1, 1), (0, 0))), 
+                Cb_ex_z = -np.pad(dz_h_inv, ((0, 0), (0, 0), (1, 1))),
+
+                Cb_ey_z = np.pad(dz_h_inv, ((0, 0), (0, 0), (1, 1))),
+                Cb_ey_x = -np.pad(dx_h_inv, ((1, 1), (0, 0), (0, 0))),
+
+                Cb_ez_x =  np.pad(dx_h_inv, ((1, 1), (0, 0), (0, 0))),
+                Cb_ez_y = -np.pad(dy_h_inv, ((0, 0), (1, 1), (0, 0))),
+
+                Db_hx_y = -dy_inv,
+                Db_hx_z = dz_inv,
+
+                Db_hy_z = -dz_inv,
+                Db_hy_x = dx_inv,
+
+                Db_hz_x = -dx_inv,
+                Db_hz_y = dy_inv,
+            )
+
+            if name[:7] in norm_corrections.keys():
+                values = values / norm_corrections[name[:7]]
 
         # apply default normalization to b coefficients
-        if normalization is True:
-            if value == "b":
-                # divide by dt / e0 (if E) or dt / u0 (if H)
-                values = values / (self.dt / e0) if field[0] == "e" else values / (self.dt / u0) 
-        # apply custom normalization
-        elif not isinstance(normalization, bool):
-            values = values / normalization
+        # if normalization is True:
+        #     if value == "b":
+        #         # divide by dt / e0 (if E) or dt / u0 (if H)
+        #         values = values / (self.dt / e0) if field[0] == "e" else values / (self.dt / u0) 
+        # # apply custom normalization
+        # elif not isinstance(normalization, bool):
+        #     values = values / normalization
 
         if vmax is None:
-            vmax = np.max(values)
+            vmax = np.nanmax(values)
         if vmin is None:
-            vmin = np.min(values)
+            vmin = np.nanmin(values)
         
-        floc = self.floc[field[:2]]
+        floc = self.floc[field]
 
         g = [floc[i] if isinstance(s, slice) else floc[i][s: s+1] for i, s in enumerate(idx)]
 
@@ -2412,7 +2720,7 @@ class FDTD_Solver():
         )
 
         plotter.add_scalar_bar(
-            title=f"{field}, {value}\n", vertical=False, label_font_size=11, title_font_size=14
+            title=f"{name}\n", vertical=False, label_font_size=11, title_font_size=14
         )
 
         if axes is not None:
@@ -2421,6 +2729,13 @@ class FDTD_Solver():
             axes.set_axis_off()
 
         return plotter
+
+    def get_probes(self, name: str) -> dict:
+        """
+        Get probe names that match name. Voltage probes and current probes are made up of several component probes,
+        each with the same base name followed by an underscore.
+        """
+        return {k: v for k, v in self.probes.items() if k == name or k[:len(name) + 1] == name + "_"}
     
     def line_probe_values(self, name: str) -> np.ndarray:
         """
@@ -2429,7 +2744,7 @@ class FDTD_Solver():
 
         self.check_solution()
 
-        return np.array([p["values"] for k, p in self.probes.items() if k[:len(name)] == name])
+        return np.array([p["values"] for p in self.get_probes(name).values()])
 
     def vi_probe_values(self, name: str) -> np.ndarray:
         """
@@ -2437,7 +2752,7 @@ class FDTD_Solver():
         """
         self.check_solution()
 
-        return np.sum([p["values"] * p["d"] for k, p in self.probes.items() if k[:len(name)] == name], axis=0)
+        return np.sum([p["values"] * p["d"] for p in self.get_probes(name).values()], axis=0)
 
     def get_sparameters(self, frequency: np.ndarray, source_port: int = 1, downsample: bool = False) -> ldarray:
         """
@@ -2469,7 +2784,7 @@ class FDTD_Solver():
         # frequency domain voltage and current at each port termination
         Vp = np.zeros((nports, nfrequency), dtype=np.complex128)
         Ip = np.zeros((nports, nfrequency), dtype=np.complex128)
-        
+
         for i, port in enumerate(self.ports):
 
             field_idx = port["idx"]
@@ -2500,6 +2815,7 @@ class FDTD_Solver():
 
             # current through termination, positive current is defined along the positive cartesian axis
             ip = self.vi_probe_values(f"port_{i+1}")
+
             # h-fields are 1/2 time step ahead of the e-fields. Delay current so they are at the same time step
             # flip current direction if integration axis is along negative cartesian axis.
             Ip[i] = direction * utils.dtft(ip, frequency, 1 / self.dt, downsample) #* np.exp(-1j * frequency * 2 * np.pi * (self.dt / 2))
@@ -2546,8 +2862,8 @@ class FDTD_Solver():
             This should be in the plane of the PEC surface.
         
         """
-        self.invalidate_solution()
-        self.check_mesh()
+
+        self.invalidate_mesh()
 
         if CFe is None:
             CFe = 2 * np.sqrt(1/2)
@@ -2571,19 +2887,113 @@ class FDTD_Solver():
         if e_axis == f_axis:
             raise ValueError("Integration axis must be perpendicular to the edge.")
 
+        # axis normal to surface
+        n_axis = [ax for ax in [0, 1, 2] if ax != e_axis and ax != f_axis][0]
+
         # flip points so p2 is at a higher spatial position along the axis
         if p1[e_axis] > p2[e_axis]:
             p2, p1 = p1, p2
 
-        # get e-field component indices at grid edges
-        p1_i = self.pos_to_idx(p1, mode="edge")
-        p2_i = self.pos_to_idx(p2, mode="edge")
-
-        # axis normal to surface
-        n_axis = [ax for ax in [0, 1, 2] if ax != e_axis and ax != f_axis][0]
-
         # string values for each axis
         ea, fa, na = [["x", "y", "z"][ax] for ax in [e_axis, f_axis, n_axis]]
+
+        # edge corrections need to be added a specific step during the mesh generation, save parameters
+        # for later to pass to _init_edge_corrections
+        self.edge_corrections.append(
+            dict(p1=p1, p2=p2, axis=(ea, fa, na), f_dir=f_dir, CFe=CFe)
+        )
+
+    def _add_field_correction(self, sp_field: str, corrections_i: tuple, index: tuple):
+        """
+        Add an entry to the field_corrections dictionary. Each entry contains the Da coefficent, Db2 and Db1.
+        Only supported for h-field corrections.
+
+        Parameters
+        ----------
+        corrections_i: tuple
+            scaling factors for the Db2 and Db1 coefficients. 
+        index: tuple
+            xyz index of the field, can contain slices for multiple cells
+        """
+        # add correction coefficients
+        # self.edge_corrections.append(
+        #     dict(field=field, corrections=corrections, index=index)
+        # )
+
+        dx, dy, dz = [conv.m_in(d).astype(self.dtype_) for d in self.d_cells]
+
+        # inverse of the cell widths, measured from cell edge to edge.
+        dx_inv = 1 / dx
+        dy_inv = 1 / dy
+        dz_inv = 1 / dz
+
+        dn_inv = dict(x=dx_inv, y=dy_inv, z=dz_inv)
+
+        # get field name from split field name, and the direction of the e-field difference
+        field = sp_field[:2]
+        faxis = ("x", "y", "z").index(sp_field[1]) 
+        # e-field difference axis
+        daxis1 = (faxis + 1) % 3
+        daxis2 = (faxis + 2) % 3
+
+        # axis of correction fields
+        corr_axis = ("x", "y", "z").index(sp_field[-1])
+
+        # convert to field strings
+        faxis_name, daxis1_name, daxis2_name = [("x", "y", "z")[i] for i in [faxis, daxis1, daxis2]]
+
+        fshape = self.fshape[field]
+
+        # add padded shape for h fields
+        xs, ys, zs = fshape
+        # add extra pad cell for hy and hz
+        if field in ("hy", "hz"):
+            xs += 1
+        if field in ("hx", "hz"):
+            ys += 1
+        fshape = (xs, ys, zs)
+
+        # Db coefficients on first and second difference direction
+        # coeff_sp1 = self.coefficients[f"Db_h{faxis_name}_{daxis1_name}"]
+        # coeff_sp2 = self.coefficients[f"Db_h{faxis_name}_{daxis2_name}"]
+        coeff_sp1 = self.Db[f"h{faxis_name}_{daxis1_name}"] 
+        coeff_sp2 = self.Db[f"h{faxis_name}_{daxis2_name}"] 
+
+        # convert index slices to range of indices
+        index_list = [list(np.arange(v.start, v.stop)) if isinstance(v, slice) else [v] for v in index]
+
+        # iterate over each field component in idx 
+        for idx in itertools.product(*index_list):
+
+            # flattened index
+            flat_idx = int(idx[0] * np.prod(fshape[1:]) + idx[1] * np.prod(fshape[2]) + idx[2])
+
+            # is there a correction for this component already
+            if flat_idx not in self.field_corrections[field].keys():
+
+                # inverse cell widths along field direction
+                dn_a1 = dn_inv[daxis1_name][idx[daxis1]]
+                dn_a2 = dn_inv[daxis2_name][idx[daxis2]]
+
+                # a, b1, b2 coefficients
+                coeff_vals  = [self.Da[sp_field][idx]] + [-coeff_sp1[idx] * dn_a1] * 2 + [coeff_sp2[idx] * dn_a2] * 2
+
+                self.field_corrections[field][flat_idx] = dict(
+                    values=np.array(coeff_vals, dtype=self.dtype_, order="C"), 
+                    field=dict(hx=3, hy=4, hz=5)[field],
+                    idx=[int(id) for id in idx],
+                    x_cell = int(idx[0]) - 1 if field == "hx" else int(idx[0]),
+                    flat_idx=int(flat_idx),
+                )
+
+            coeff = self.field_corrections[field][flat_idx]["values"]
+
+            # update the coefficients with the corrections
+            corr_idx = 1 if daxis1 == corr_axis else 3
+            coeff[corr_idx: corr_idx + 2] *= corrections_i
+
+
+    def _init_edge_corrections(self):
 
         def build_idx(edge, field, normal):
             """ Return a tuple of indices into the edge, field and normal axis. """
@@ -2592,112 +3002,161 @@ class FDTD_Solver():
             idx[f_axis] = field
             idx[n_axis] = normal
             return tuple(idx)
-        
-        # indices on edge axis of the components on cell centers
-        e_idx_centers = slice(p1_i[e_axis], p2_i[e_axis])
-        # indices on edge axis of the edge components
-        e_idx_edges = slice(p1_i[e_axis], p2_i[e_axis] + 1)
 
-        # index of closest H component normal to the surface along field axis
-        fh_idx = p1_i[f_axis] if f_dir else p1_i[f_axis] - 1
-        # index of surface plane along the normal axis
-        n_idx = p1_i[n_axis]
+        # update all corrections that modify the Db coefficients before the single sided corrections so that the 
+        # correct values are pulled into the single sided corrections list.
+        for edge_corr_dict in self.edge_corrections:
+            p1, p2, (ea, fa, na), f_dir, CFe = edge_corr_dict.values()
 
-        # assign edge correction coefficents.
-        # Comments are for a PEC edge along the x axis, normal to the z-axis, with the field axis along y
+            # get e-field component indices at grid edges
+            p1_i = self.pos_to_idx(p1, mode="edge")
+            p2_i = self.pos_to_idx(p2, mode="edge")
 
-        # correct Hz components that integrate the Ey component in the same plane as the PEC.
-        # Both Hz and Ey are asymtotic so the correction factor cancels out on all components but the 
-        # ex integration.
-        # self.Db["hz_y2"][x0: x1, y, z0] *= 1 / CFe
-        # self.Db["hz_y1"][x0: x1, y, z0] *= 1 / CFe
-        idx = build_idx(e_idx_centers, fh_idx, n_idx)
-        self.Db[f"h{na}_{fa}2"][tuple(idx)] *= 1 / CFe
-        self.Db[f"h{na}_{fa}1"][tuple(idx)] *= 1 / CFe
+            # convert to integer indices
+            e_axis, f_axis, n_axis = [["x", "y", "z"].index(ax) for ax in (ea, fa, na)]
 
-        # hz components integrating Ey on the end points of the edge
-        if p1_i[e_axis] > 0:
-            # self.Db["hz_x2"][x0-1, y, z0] *= CFe
-            idx = build_idx(p1_i[e_axis] - 1, fh_idx, n_idx)
-            self.Db[f"h{na}_{ea}2"][idx] *= CFe
-        if p2_i[e_axis] < self.Db[f"h{na}_{ea}1"].shape[e_axis]:
-            # self.Db["hz_x1"][x1, y, z0] *= CFe
-            idx = build_idx(p2_i[e_axis], fh_idx, n_idx)
-            self.Db[f"h{na}_{ea}1"][idx] *= CFe
+            # indices on edge axis of the components on cell centers
+            e_idx_centers = slice(p1_i[e_axis], p2_i[e_axis])
 
-        # Correct Hx above and below the PEC plane that integrates Ey 
-        # self.Db["hx_z2"][x0: x1+1, y, z0-1] *= CFe
-        # self.Db["hx_z1"][x0: x1+1, y, z0] *= CFe
-        self.Db[f"h{ea}_{na}2"][build_idx(e_idx_edges, fh_idx, n_idx-1)] *= CFe
-        self.Db[f"h{ea}_{na}1"][build_idx(e_idx_edges, fh_idx, n_idx)] *= CFe
+            # index of closest H component normal to the surface along field axis
+            fh_idx = p1_i[f_axis] if f_dir else p1_i[f_axis] - 1
+            # index of surface plane along the normal axis
+            n_idx = p1_i[n_axis]
 
-        for ni in [n_idx-1, n_idx]:
-            # Correct Hx on the sides of the Ez component 
-            # self.Db["hx_y2"][x0: x1+1, y0-1, z] *= CFe
-            # self.Db["hx_y1"][x0: x1+1, y0, z] *= CFe
-            self.Db[f"h{ea}_{fa}2"][build_idx(e_idx_edges, p1_i[f_axis] -1, ni)] *= CFe
-            self.Db[f"h{ea}_{fa}1"][build_idx(e_idx_edges, p1_i[f_axis], ni)] *= CFe
+            # assign edge correction coefficents.
+            # Comments are for a PEC edge along the x axis, normal to the z-axis, with the field axis along y
 
-            # correct Hy components that integrate the Ez component below and above the edge 
-            # self.Db["hy_z1"][x0: x1, y0, z] *= 1 / CFe
-            # self.Db["hy_z2"][x0: x1, y0, z] *= 1 / CFe
-            self.Db[f"h{fa}_{na}1"][build_idx(e_idx_centers, p1_i[f_axis], ni)] *= 1 / CFe
-            self.Db[f"h{fa}_{na}2"][build_idx(e_idx_centers, p1_i[f_axis], ni)] *= 1 / CFe
+            # correct Hz components that integrate the Ey component in the same plane as the PEC.
+            # (comments are for a PEC edge along x axis)
+            # Both Hz and Ey are asymtotic so the correction factor cancels out on all components but the 
+            # ex integration.
+            # self.Db["hz_y2"][x0: x1, y, z0] *= 1 / CFe
+            # self.Db["hz_y1"][x0: x1, y, z0] *= 1 / CFe
+            idx = build_idx(e_idx_centers, fh_idx, n_idx)
+            # both 1 and 2 coefficients are the same, just change the coefficent that control both
+            # self.Db[f"h{na}_{fa}2"][tuple(idx)] *= 1 / CFe
+            # self.Db[f"h{na}_{fa}1"][tuple(idx)] *= 1 / CFe
+            self.Db[f"h{na}_{fa}"][tuple(idx)] *= 1 / CFe
+            # self._add_field_correction(f"h{na}_{fa}", (1 / CFe, 1 / CFe), idx)
 
-            # hy components integrating Ez on the end points of the edge
+            for ni in [n_idx-1, n_idx]:
+
+                # correct Hy components that integrate the Ez component below and above the edge 
+                # self.Db["hy_z1"][x0: x1, y0, z] *= 1 / CFe
+                # self.Db["hy_z2"][x0: x1, y0, z] *= 1 / CFe
+                # self.Db[f"h{fa}_{na}1"][build_idx(e_idx_centers, p1_i[f_axis], ni)] *= 1 / CFe
+                # self.Db[f"h{fa}_{na}2"][build_idx(e_idx_centers, p1_i[f_axis], ni)] *= 1 / CFe
+                # both 1 and 2 coefficients are the same, just change the coefficent that control both
+                idx = build_idx(e_idx_centers, p1_i[f_axis], ni)
+                self.Db[f"h{fa}_{na}"][tuple(idx)] *= 1 / CFe
+
+        # add single sided corrections
+        for edge_corr_dict in self.edge_corrections:
+            p1, p2, (ea, fa, na), f_dir, CFe = edge_corr_dict.values()
+
+            # get e-field component indices at grid edges
+            p1_i = self.pos_to_idx(p1, mode="edge")
+            p2_i = self.pos_to_idx(p2, mode="edge")
+
+            # convert axis to integer indices
+            e_axis, f_axis, n_axis = [["x", "y", "z"].index(ax) for ax in (ea, fa, na)]
+
+            # indices on edge axis of the edge components
+            e_idx_edges = slice(p1_i[e_axis], p2_i[e_axis] + 1)
+
+            # index of closest H component normal to the surface along field axis
+            fh_idx = p1_i[f_axis] if f_dir else p1_i[f_axis] - 1
+            # index of surface plane along the normal axis
+            n_idx = p1_i[n_axis]
+            
+            # hz components integrating Ey on the end points of the edge. These only have one Ey component that varies
+            # asymptotically.
             if p1_i[e_axis] > 0:
-                # self.Db["hy_x2"][x0-1, y0, z] *= CFe
-                idx = build_idx(p1_i[e_axis] - 1, p1_i[f_axis], ni) 
-                self.Db[f"h{fa}_{ea}2"][idx] *= CFe
-            if p2_i[e_axis] < self.Db[f"h{fa}_{ea}1"].shape[e_axis]:
-                # self.Db["hy_x1"][x1, y0, z] *= CFe
-                idx = build_idx(p2_i[e_axis], p1_i[f_axis], ni)
-                self.Db[f"h{fa}_{ea}1"][idx] *= CFe
+                # self.Db["hz_x2"][x0-1, y, z0] *= CFe
+                idx = build_idx(p1_i[e_axis] - 1, fh_idx, n_idx)
+                # self.Db[f"h{na}_{ea}2"][idx] *= CFe
+                self._add_field_correction(f"h{na}_{ea}", (CFe, 1), idx)
 
-        # correct Hz components that use the Ey component in the same plane as the edge that points into the edge.
-        # Hz in the same plane as the face. Both Hz and Ey are asymtotic so the correction factor cancels out
-        # on all components but the ex integration.
-        # for y in [y0-1, y1]:
-        #     self.Db["hz_y2"][x0: x1, y, z0] *= 1 / CF
-        #     self.Db["hz_y1"][x0: x1, y, z0] *= 1 / CF
-        #     # hz components using Ey that are just past the face along the x direction
-        #     self.Db["hz_x2"][x0-1, y, z0] *= CF
-        #     if not x1_at_edge:
-        #         self.Db["hz_x1"][x1, y, z0] *= CF
-        #     # Hx just below the Ey component
-        #     self.Db["hx_z2"][x0: x1+1, y, z0-1] *= CF
-        #     # Hx just above the Ey component
-        #     self.Db["hx_z1"][x0: x1+1, y, z0] *= CF
+            if p2_i[e_axis] < self.Db[f"h{na}_{ea}"].shape[e_axis]:
+                # self.Db["hz_x1"][x1, y, z0] *= CFe
+                idx = build_idx(p2_i[e_axis], fh_idx, n_idx)
+                # self.Db[f"h{na}_{ea}1"][idx] *= CFe
+                self._add_field_correction(f"h{na}_{ea}", (1, CFe), idx)
 
-        # # correct Hy components that use the Ez component below and above the edge 
-        # # Hy and Ez are both asymptotic and the correction factors cancel out
-        # for y in [y0, y1]:
-        #     self.Db["hy_z1"][x0: x1, y, z0-1] *= 1 / CF
-        #     self.Db["hy_z2"][x0: x1, y, z0-1] *= 1 / CF
-        #     self.Db["hy_z1"][x0: x1, y, z0] *= 1 / CF
-        #     self.Db["hy_z2"][x0: x1, y, z0] *= 1 / CF
-        #     # hy components just past the face along the x direction
-        #     self.Db["hy_x2"][x0-1, y, z0-1] *= CF
-        #     self.Db["hy_x2"][x0-1, y, z0] *= CF
-        #     if not x1_at_edge:
-        #         self.Db["hy_x1"][x1, y, z0] *= CF
-        #         self.Db["hy_x1"][x1, y, z0-1] *= CF
+            # Correct Hx above and below the PEC plane that integrates Ey  
+            # self.Db["hx_z2"][x0: x1+1, y, z0-1] *= CFe
+            # self.Db["hx_z1"][x0: x1+1, y, z0] *= CFe
+            self._add_field_correction(f"h{ea}_{na}", (CFe, 1), build_idx(e_idx_edges, fh_idx, n_idx-1))
+            self._add_field_correction(f"h{ea}_{na}", (1, CFe), build_idx(e_idx_edges, fh_idx, n_idx))
+            # self.Db[f"h{ea}_{na}2"][build_idx(e_idx_edges, fh_idx, n_idx-1)] *= CFe
+            # self.Db[f"h{ea}_{na}1"][build_idx(e_idx_edges, fh_idx, n_idx)] *= CFe
 
-        # # correct Hx components just past the face in the y direction that use the Ez components under the edge
-        # for z in [z0-1, z0]:
-        #     self.Db["hx_y2"][x0: x1+1, y0-1, z] *= CF
-        #     self.Db["hx_y1"][x0: x1+1, y0, z] *= CF
-        #     self.Db["hx_y2"][x0: x1+1, y1-1, z] *= CF
-        #     self.Db["hx_y1"][x0: x1+1, y1, z] *= CF
+            for ni in [n_idx-1, n_idx]:
+                # Correct Hx on the sides of the Ez component 
+                # self.Db["hx_y2"][x0: x1+1, y0-1, z] *= CFe
+                # self.Db["hx_y1"][x0: x1+1, y0, z] *= CFe
+                # self.Db[f"h{ea}_{fa}2"][build_idx(e_idx_edges, p1_i[f_axis] -1, ni)] *= CFe
+                # self.Db[f"h{ea}_{fa}1"][build_idx(e_idx_edges, p1_i[f_axis], ni)] *= CFe
+                self._add_field_correction(f"h{ea}_{fa}", (CFe, 1), build_idx(e_idx_edges, p1_i[f_axis] -1, ni))
+                self._add_field_correction(f"h{ea}_{fa}", (1, CFe), build_idx(e_idx_edges, p1_i[f_axis], ni))
+                
+                # hy components integrating Ez on the end points of the edge.
+                # Turned off because it seems to interfere with ports on the edge of
+                if p1_i[e_axis] > 0:
+                    # self.Db["hy_x2"][x0-1, y0, z] *= CFe
+                    idx = build_idx(p1_i[e_axis] - 1, p1_i[f_axis], ni) 
+                    # self.Db[f"h{fa}_{ea}2"][idx] *= CFe
+                    self._add_field_correction(f"h{fa}_{ea}", (CFe, 1), idx)
+                if p2_i[e_axis] < self.Db[f"h{fa}_{ea}"].shape[e_axis]:
+                    # self.Db["hy_x1"][x1, y0, z] *= CFe
+                    idx = build_idx(p2_i[e_axis], p1_i[f_axis], ni)
+                    # self.Db[f"h{fa}_{ea}1"][idx] *= CFe
+                    self._add_field_correction(f"h{fa}_{ea}", (1, CFe), idx)
 
-        # correction E components whose integration plane is a half a cell away from the edge, Ez, and Ey
-        # if CFh is not None:
-        #     for z in [z0-1, z0]:
-        #         self.Cb["ez_y"][x0+1: x1, y0, z] *= 1 / CFh
-        #         self.Cb["ez_y"][x0+1: x1, y1, z] *= 1 / CFh
+            # correct Hz components that use the Ey component in the same plane as the edge that points into the edge.
+            # Hz in the same plane as the face. Both Hz and Ey are asymtotic so the correction factor cancels out
+            # on all components but the ex integration.
+            # for y in [y0-1, y1]:
+            #     self.Db["hz_y2"][x0: x1, y, z0] *= 1 / CF
+            #     self.Db["hz_y1"][x0: x1, y, z0] *= 1 / CF
+            #     # hz components using Ey that are just past the face along the x direction
+            #     self.Db["hz_x2"][x0-1, y, z0] *= CF
+            #     if not x1_at_edge:
+            #         self.Db["hz_x1"][x1, y, z0] *= CF
+            #     # Hx just below the Ey component
+            #     self.Db["hx_z2"][x0: x1+1, y, z0-1] *= CF
+            #     # Hx just above the Ey component
+            #     self.Db["hx_z1"][x0: x1+1, y, z0] *= CF
 
-        #     for y in [y0-1, y1]:
-        #         self.Cb["ey_z"][x0+1: x1, y, z0] *= 1 / CFh
+            # # correct Hy components that use the Ez component below and above the edge 
+            # # Hy and Ez are both asymptotic and the correction factors cancel out
+            # for y in [y0, y1]:
+            #     self.Db["hy_z1"][x0: x1, y, z0-1] *= 1 / CF
+            #     self.Db["hy_z2"][x0: x1, y, z0-1] *= 1 / CF
+            #     self.Db["hy_z1"][x0: x1, y, z0] *= 1 / CF
+            #     self.Db["hy_z2"][x0: x1, y, z0] *= 1 / CF
+            #     # hy components just past the face along the x direction
+            #     self.Db["hy_x2"][x0-1, y, z0-1] *= CF
+            #     self.Db["hy_x2"][x0-1, y, z0] *= CF
+            #     if not x1_at_edge:
+            #         self.Db["hy_x1"][x1, y, z0] *= CF
+            #         self.Db["hy_x1"][x1, y, z0-1] *= CF
+
+            # # correct Hx components just past the face in the y direction that use the Ez components under the edge
+            # for z in [z0-1, z0]:
+            #     self.Db["hx_y2"][x0: x1+1, y0-1, z] *= CF
+            #     self.Db["hx_y1"][x0: x1+1, y0, z] *= CF
+            #     self.Db["hx_y2"][x0: x1+1, y1-1, z] *= CF
+            #     self.Db["hx_y1"][x0: x1+1, y1, z] *= CF
+
+            # correction E components whose integration plane is a half a cell away from the edge, Ez, and Ey
+            # if CFh is not None:
+            #     for z in [z0-1, z0]:
+            #         self.Cb["ez_y"][x0+1: x1, y0, z] *= 1 / CFh
+            #         self.Cb["ez_y"][x0+1: x1, y1, z] *= 1 / CFh
+
+            #     for y in [y0-1, y1]:
+            #         self.Cb["ey_z"][x0+1: x1, y, z0] *= 1 / CFh
 
     
     def get_monitor_data(self, name: str) -> ldarray:
@@ -2742,10 +3201,19 @@ class FDTD_Solver():
         # build coordinates in inches for the two spatial dimensions of the slice
         spatial_coords = {spatial_dims[i]: self.floc[field][i] for i in spatial_axis}
 
-        if mon_frequency is not None:
-            return ldarray(monitor["values"], coords=dict(frequency=mon_frequency, **spatial_coords))
+        # remove extra pad cells in h-fields by indexing by the shape of the fields
+        ms0, ms1 = tuple([len(v) for k, v in spatial_coords.items()])
+
+        # add extra cell for components at the edge of x axis. These are not included in the grid update equations
+        if field in ("ez", "ey", "hx") and axis in (1, 2):
+            values = np.pad(monitor["values"][:, :ms0, :ms1], ((0, 0), (1, 0), (0, 0)))
         else:
-            return ldarray(monitor["values"], coords=dict(time=time_values, **spatial_coords))
+            values = monitor["values"][:, :ms0, :ms1]
+
+        if mon_frequency is not None:
+            return ldarray(values, coords=dict(frequency=mon_frequency, **spatial_coords))
+        else:
+            return ldarray(values, coords=dict(time=time_values, **spatial_coords))
             
     def get_total_monitor_data(self, name: str):
         """
@@ -2806,8 +3274,88 @@ class FDTD_Solver():
             np.array(e_xyz), coords=dict(component=("x", "y", "z"), time=e1.time, **c1, **c2)
         )
 
+
+    def get_applied_power(self, frequency: np.ndarray, normalization: str = "applied"):
+        """
+        Get the amount of applied power to the grid in the frequency domain.
+
+        Parameters
+        ----------
+        normalization : {"applied", "accepted"}
+            By default, gain is normalized by the applied power to all lumped ports in the simulation.
+            "accepted" normalizes the gain by the combined accepted power from all ports. This removes the effect
+            of impedance mismatch from the farfield gain. Excluding conductor and dielectric losses, this is
+            equal to the directivity.
+
+        """
+
+        self.check_solution()
+
+        # source ports
+        src_ports = [p for p in self.ports if p["src"] is not None]
+
+        # if any ports are not lumped ports, they are current sources. Compute applied power using E * J
+        if any(["r0" not in s.keys() for s in src_ports]):
+
+            Pin_src = []
+            for port in src_ports:
+
+                # cell indices of port
+                idx = port["idx"]
+
+                # cell widths in inches
+                cell_w = self.fcell_w[port["field"]]
+                dx, dy, dz = [cell_w[i][idx[i]] for i in range(3)]
+                dxyz = np.meshgrid(dx, dy, dz, indexing="ij")
+
+                # differential volume in meters^3
+                dV = np.prod([conv.m_in(d) for d in dxyz], axis=0)
+
+                # field value at each cell in the port (e or h)
+                EH = utils.dtft(port["values"], frequency, 1 / self.dt, downsample=False)
+                # applied current or magnetic current density
+                JM = utils.dtft(port["src"], frequency, 1 / self.dt, downsample=False)
+
+                Pin_sources = np.real((1 / 2) * np.sum(EH * np.conjugate(JM) * dV[..., None], axis=(0, 1, 2)))
+
+                Pin_src.append(Pin_sources)
+
+        # get the total applied power to all ports
+        elif normalization == "applied":
+            # get all voltage sources in model
+            v_sources = [p["src"] for p in src_ports]
+
+            # matrix of sources, shape is (src, frequency)
+            Vs = np.array([utils.dtft(v_src, frequency, 1 / self.dt, downsample=False) for v_src in v_sources])
+
+            # get input power for each source
+            Pin_src = (1 / 2) * (np.abs(Vs)**2 / 50)
+
+        elif normalization == "accepted":
+
+            Pin_src = []
+            for i in range(len(self.ports)):
+                ip = self.vi_probe_values(f"port_{i +1}")
+                vsrc = self.ports[i]["src"]
+
+                # compute total power impressed onto the port by the source voltage (Vsrc * Ip)
+                Ip = utils.dtft(ip, frequency, 1 / self.dt, downsample=False)
+                Vs = utils.dtft(vsrc, frequency, 1 / self.dt, downsample=False)
+                Pin_src.append(np.real(-(1 / 2) * Vs * np.conjugate(Ip)))
+
+        else:
+            raise ValueError(f"normalization {normalization} not recognized.")
+
+        # sum total power across all sources
+        return np.sum(Pin_src, axis=0)
+
+    
     def get_farfield_gain(
-        self, theta: np.ndarray, phi: np.ndarray, n_threads: int = 4
+        self, 
+        theta: np.ndarray, 
+        phi: np.ndarray, n_threads: int = 4, 
+        frequency: np.ndarray = None, 
+        normalization: str = "applied"
     ) -> ldarray:
         """
         Compile farfield realized gain from the farfield monitor attached to the solver. Returned value
@@ -2821,6 +3369,16 @@ class FDTD_Solver():
         phi : np.ndarray | float
             spatial phi values in degrees
 
+        frequency : np.ndarray | float
+            frequency in Hz to evaluate gain at. All selected frequencies must be present in the
+            far-field monitor assigned to the solver.
+
+        normalization : {"applied", "accepted"}
+            By default, gain is normalized by the applied power to all lumped ports in the simulation.
+            "accepted" normalizes the gain by the combined accepted power from all ports. This removes the effect
+            of impedance mismatch from the farfield gain. Excluding conductor and dielectric losses, this is
+            equal to the directivity.
+
         Returns
         -------
         ldarray
@@ -2828,21 +3386,11 @@ class FDTD_Solver():
             Use rfn.conv.db20_lin(...) to convert to gain in dB.
         """
 
-        rE = self.get_farfield_rE(theta, phi, n_threads=n_threads)
+        rE = self.get_farfield_rE(theta, phi, n_threads=n_threads, frequency=frequency)
 
         frequency = rE.coords["frequency"]
 
-        # get all voltage sources in model
-        v_sources = [p["src"] for p in self.ports if p["src"] is not None]
-
-        # matrix of sources, shape is (src, frequency)
-        Vs = np.array([utils.dtft(v_src, frequency, 1 / self.dt, downsample=False) for v_src in v_sources])
-
-        # get input power for each source
-        Pin_src = (1 / 2) * (np.abs(Vs)**2 / 50)
-
-        # sum total power across all sources
-        Pin = np.sum(Pin_src, axis=0)
+        Pin = self.get_applied_power(frequency, normalization=normalization)
 
         # radiation intensity, in voltage space. Normally rE is squared to get U, but we want U to have the 
         # same phase as rE.
@@ -2861,7 +3409,7 @@ class FDTD_Solver():
             gain_v, coords=dict(polarization=["thetapol", "phipol"], frequency=frequency, theta=theta, phi=phi)
         )
 
-    def get_farfield_rE(self, theta: np.ndarray, phi: np.ndarray, n_threads: int = 4) -> ldarray:
+    def get_farfield_rE(self, theta: np.ndarray, phi: np.ndarray, frequency: np.ndarray = None, n_threads: int = 4) -> ldarray:
         """
         Compile E-field monitor data from the farfield monitor attached to the solver.
 
@@ -2906,7 +3454,7 @@ class FDTD_Solver():
         ff_idx = self.farfield["idx"]
 
         # initialize matrix for far-field data
-        frequency = self.farfield["frequency"]
+        frequency = self.farfield["frequency"] if frequency is None else np.atleast_1d(frequency)
         n_frequencies = len(frequency)
 
         for axis in range(3):
@@ -2926,7 +3474,7 @@ class FDTD_Solver():
             ds_grid[axis] = np.array(ds, dtype=np.complex64, order="C")
 
             # for each face on either side of the far-field box
-            for j, side in enumerate(["n", "p"]):
+            for j, side in enumerate(["-", "+"]):
                 # surface position, meters
                 surf_pos[axis][j] = self.farfield["surf_pos"][axis, j]
 
@@ -2942,19 +3490,19 @@ class FDTD_Solver():
                     f_s = ("x", "y", "z")[f]
 
                     # near-field monitor names
-                    emon = f"ff_e{f_s}_{side}{axis_s}"
-                    hmon1 = f"ff_h{f_s}1_{side}{axis_s}"
-                    hmon2 = f"ff_h{f_s}2_{side}{axis_s}"
+                    emon = f"ff_e{f_s}_{axis_s}{side}"
+                    hmon1 = f"ff_h{f_s}1_{axis_s}{side}"
+                    hmon2 = f"ff_h{f_s}2_{axis_s}{side}"
 
                     # skip faces that are on solve box boundaries
                     if emon not in self.monitors.keys():
-                        print(f"Skipped far-field side {axis_s}, {side}")
+                        print(f"Skipped far-field side {axis_s}{side}")
                         continue
                     
                     # get near-field data
-                    edata = self.get_monitor_data(emon)
-                    hdata1 = self.get_monitor_data(hmon1)
-                    hdata2 = self.get_monitor_data(hmon2)
+                    edata = self.get_monitor_data(emon).sel(frequency=frequency)
+                    hdata1 = self.get_monitor_data(hmon1).sel(frequency=frequency)
+                    hdata2 = self.get_monitor_data(hmon2).sel(frequency=frequency)
 
                     # widths of the cells that the h-components are in, along the axis
                     hidx1 = self.monitors[hmon1]["index"]

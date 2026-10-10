@@ -77,9 +77,7 @@ s.add_conductor(ms1_trace, style=dict(color="gold"))
 s.add_lumped_port(1, port1_face, "z+")
 s.add_lumped_port(2, port2_face, "z+")
 
-s.assign_PML_boundaries("z+", n_pml=7)
-
-s.generate_mesh(d_max = 0.02, d_min=0.005)
+s.add_PML("z+", n_pml=7)
 
 # apply edge correction on either side of line
 p1 = (ms_x[0], + ms_w/2, sub_h)
@@ -89,6 +87,8 @@ s.edge_correction(p1, p2, f"y+")
 p1 = (ms_x[0], - ms_w/2, sub_h)
 p2 = (ms_x[1], - ms_w/2, sub_h)
 s.edge_correction(p1, p2, f"y-")
+
+s.generate_mesh(d_max = 0.02, d_min=0.005)
 
 # s.plot_coefficients("ex_z", "a", "z", sub_h, point_size=15, cmap="brg", axes=ax, camera_position="xy", zoom=5)
 
