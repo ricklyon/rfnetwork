@@ -193,10 +193,9 @@ cpos = pv.CameraPosition(
     viewup=(0, 0.0, 1.0),
 )
 
-# fig, ax = plt.subplots()
-# # render the model before generating the mesh to check for any obvious errors
-# s.render(show_mesh=False, show_rulers=False, axes=ax, camera_position=cpos)
-# s.render().show()
+fig, ax = plt.subplots()
+# render the model before generating the mesh to check for any obvious errors
+s.render(show_mesh=False, show_rulers=False, axes=ax, camera_position=cpos)
 
 # %%
 # Apply Edge Correction

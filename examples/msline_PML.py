@@ -150,7 +150,7 @@ s.solve(n_threads=4, show_progress=False)
 # Plot PML Attenuation
 # -----------
 # Show the amount of attenuation from th PML layer
-
+# 
 #  .. image:: ../_static/img/msline_pml.gif
 
 # get the current and voltage values from each probe

@@ -1,11 +1,13 @@
 
 
 """
-Base Microstrip Patch Antenna
+Phased Array
 =============
+
+Demonstrate a small phased array from microstrip patch antennas.
 """
 
-# sphinx_gallery_thumbnail_number = -1
+# sphinx_gallery_thumbnail_number = -2
 
 import numpy as np 
 import matplotlib.pyplot as plt 
@@ -112,7 +114,7 @@ plotter = pv.Plotter(off_screen=True)
 fig, ax = plt.subplots()
 plotter.add_points(ele_pos, render_points_as_spheres=True, point_size=15)
 plotter.add_point_labels(ele_pos, np.arange(1, N+1), always_visible=True)
-s.render(show_mesh=False, zoom=1.5, camera_position="xy", plotter=plotter, axes=ax)
+s.render(show_mesh=False, zoom=1.5, plotter=plotter, axes=ax)
 
 
 # %%
@@ -158,9 +160,9 @@ s.add_field_monitor("mon1", "ey", axis="y", position=spacing, n_step=5)
 [s.assign_excitation(exc[i], i+1) for i in range(N)]
 s.solve(n_threads=4)
 
-cpos = pv.CameraPosition(position=(1.5, -0.5, 1.3), focal_point=(1.5, 0.5, 0.3), viewup=(0, 0.0, 1.0))
+cpos = pv.CameraPosition(position=(1.5, 0.5, 1.3), focal_point=(1.8, 1.5, 0.3), viewup=(0, 0.0, 1.0))
 fig, ax = plt.subplots(constrained_layout=True)
-s.plot_monitor("mon1", opacity=1, axes=ax, camera_position=cpos, init_time=800)
+s.plot_monitor("mon1", opacity=1, init_time=800, camera_position=cpos, axes=ax)
 
 # get far-field pattern in spherical coordinates
 pattern = s.get_farfield_gain(theta=np.arange(0, 92, 2), phi=np.arange(-180, 182, 2))
