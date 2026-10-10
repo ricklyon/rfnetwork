@@ -1718,6 +1718,8 @@ class FDTD_Solver():
         """
         self.check_mesh()
 
+        self._init_monitors()
+
         Nx, Ny, Nz = self.n_cells
 
         # error check source excitations
@@ -1779,52 +1781,7 @@ class FDTD_Solver():
             corrections_list += list(self.field_corrections[f].values())
 
         # initialize field monitors
-        monitors = []
-        for k, m in self.monitors.items():
-
-            n_m = int(Nt / m["n_step"]) + 1
-
-            field_idx = list(self.fshape.keys()).index(m["field"])
-
-            # allocated array length for each field type in the solver, all e-field components are included,
-            # except at x=0. H-field components have an extra component at the ends of the grid along y and z.
-            # includes pad cell at end of y axis for hx and hy
-            f_Ny = [self.Ny+1, self.Ny, self.Ny+1, self.Ny+1, self.Ny+1, self.Ny+1]
-            f_Nz = [self.Nz+1, self.Nz+1, self.Nz, self.Nz, self.Nz, self.Nz+1]
-
-            if m["axis"] == 0:
-                m_shape = (Ny, Nz) if gpu else (f_Ny[field_idx], f_Nz[field_idx])
-            elif m["axis"] == 1:
-                m_shape = (Nx, Nz) if gpu else (self.Nx, f_Nz[field_idx])
-            else:
-                m_shape = (Nx, Ny) if gpu else (self.Nx, f_Ny[field_idx])
-
-            mon_config = dict(
-                axis=int(m["axis"]),
-                position=int(m["index"]),
-                field=field_idx,
-                n_step=int(m["n_step"]),
-            )
-
-            if m["frequency"] is not None:
-                # initialize monitor for frequency domain phasor captures.
-                # DTFT is computed with a running sum in the time stepping equations
-                frequency = m["frequency"]
-                fs = (1 / (self.dt *  m["n_step"]))
-                fn = frequency / fs
-                omega = 2 * np.pi * fn
-                # phase terms of the DTFT at a single frequency for each time step
-                mon_config["values"] = np.zeros(((len(frequency),) + m_shape), dtype=np.complex64, order="C")
-                # dtft phase is ordered (n_m, frequency)
-                mon_config["dtft_phase"] = np.exp(
-                    -1j * omega[None] * np.arange(n_m)[:, None], dtype=np.complex64, order="C" 
-                )
-                mon_config["n_frequencies"] = int(len(frequency))
-            else:
-                # initialize monitor for time domain captures
-                mon_config["values"] = np.zeros(((n_m,) + m_shape), dtype=self.dtype_, order="C")
-
-            monitors.append(mon_config)
+        monitors = list(self.monitors.values())
 
         n_cells = self.Nx * self.Ny * self.Nz
         if show_progress:
@@ -1860,47 +1817,6 @@ class FDTD_Solver():
 
         if show_progress:
             sys.stdout.write(f"\rDone in {time.time() - stime:.3f}s" + (" " * 20) + "\n")
-
-        # move monitor values back to the class variable
-        for i, (k, m) in enumerate(self.monitors.items()):
-            m_val = monitors[i]["values"]
-
-            # add an extra row along x for the components that start at the edge of the grid and weren't included in
-            # the sover gird.
-            if m["axis"] in [1, 2] and m["field"] in ["hx", "ey", "ez"]:
-                m_val = np.pad(m_val, ((0, 0), (1, 0), (0, 0)))
-
-            # remove pad cell at end of y axis for hx and hz monitors
-            if m["field"] in ("hx", "hz"):
-                if m["axis"] == 0:
-                    # dims are time, y, z
-                    m_val = m_val[:, :-1]
-                elif m["axis"] == 2:
-                    # dims are time, x, y
-                    m_val = m_val[:, :, :-1]
-
-            if gpu:
-                # gpu grid is Nx, Ny, Nz for all components. Add extra row columns for components that start at
-                # the edge of the grid
-
-                # add extra component along y axis
-                if m["field"] in ["hy", "ex", "ez"]:
-                    # monitor on x-axis (yz plane)
-                    if m["axis"] == 0:
-                        m_val = np.pad(m_val, ((0, 0), (1, 0), (0, 0)))
-                    # monitor on z-axis (xy plane)
-                    if m["axis"] == 2:
-                        m_val = np.pad(m_val, ((0, 0), (0, 0), (1, 0)))
-                # extra component along z axis
-                if m["field"] in ["hz", "ex", "ey"]:
-                    # monitor on x-axis (yz plane)
-                    if m["axis"] == 0:
-                        m_val = np.pad(m_val, ((0, 0), (0, 0), (1, 0)))
-                    # monitor on y-axis (xz plane)
-                    if m["axis"] == 1:
-                        m_val = np.pad(m_val, ((0, 0), (0, 0), (1, 0)))
-
-            self.monitors[k]["values"] = m_val
 
         # get the voltages at each source components
         src_v = [s["values"] for s in probes]
@@ -1960,6 +1876,8 @@ class FDTD_Solver():
 
         """
 
+        self.check_mesh()
+
         supported_fields = tuple(self.fshape.keys()) + ("e_total",)
 
         if field not in supported_fields:
@@ -1992,15 +1910,109 @@ class FDTD_Solver():
             if index < 0 or index >= (axis_len - 1):
                 raise ValueError("Field position out of bounds")
 
+            field_idx = list(self.fshape.keys()).index(f)
+
             self.monitors[n] = dict(
-                field=f, 
-                axis=axis_i,
+                field=f,
+                field_idx=int(field_idx), 
+                axis=int(axis_i),
                 position=position, 
-                index=index, 
-                n_step=n_step, 
+                index=int(index), 
+                n_step=int(n_step), 
                 shape=tuple(shape),
                 frequency=np.atleast_1d(frequency) if frequency is not None else None
             )
+
+            #####
+
+    def _init_monitors(self):
+
+        for k, m in self.monitors.items():
+            field = m["field"]
+            n_m = int(len(self.time) / m["n_step"]) + 1
+            field_idx = list(self.fshape.keys()).index(field)
+
+            xs, ys, zs = self.fshape[field]
+            # add extra pad cell for hy and hz
+            if field in ("hy", "hz"):
+                xs += 1
+            if field in ("hx", "hz"):
+                ys += 1
+            # first x components not included in grid updates
+            if field in ("ey", "ez", "hx"):
+                xs -= 1
+
+            if m["axis"] == 0: # x axis
+                m_shape = (ys, zs)
+            elif m["axis"] == 1: # y axis
+                m_shape = (xs, zs)
+            else: # z axis
+                m_shape = (xs, ys)
+
+            if m["frequency"] is not None:
+                # initialize monitor for frequency domain phasor captures.
+                # DTFT is computed with a running sum in the time stepping equations
+                fs = (1 / (self.dt *  m["n_step"]))
+                fn = m["frequency"] / fs
+                omega = 2 * np.pi * fn
+                # phase terms of the DTFT at a single frequency for each time step
+                m["values"] = np.zeros(((len(m["frequency"]),) + m_shape), dtype=np.complex64, order="C")
+                # dtft phase is ordered (n_m, frequency)
+                m["dtft_phase"] = np.exp(
+                    -1j * omega[None] * np.arange(n_m)[:, None], dtype=np.complex64, order="C" 
+                )
+                m["n_frequencies"] = int(len(m["frequency"]))
+            else:
+                # initialize monitor for time domain captures
+                m["values"] = np.zeros(((n_m,) + m_shape), dtype=self.dtype_, order="C")
+
+
+        # for k, m in self.monitors.items():
+
+        #     n_m = int(Nt / m["n_step"]) + 1
+
+        #     field_idx = list(self.fshape.keys()).index(m["field"])
+
+        #     # allocated array length for each field type in the solver, all e-field components are included,
+        #     # except at x=0. H-field components have an extra component at the ends of the grid along y and z.
+        #     # includes pad cell at end of y axis for hx and hy
+        #     f_Ny = [self.Ny+1, self.Ny, self.Ny+1, self.Ny+1, self.Ny+1, self.Ny+1]
+        #     f_Nz = [self.Nz+1, self.Nz+1, self.Nz, self.Nz, self.Nz, self.Nz+1]
+
+        #     if m["axis"] == 0:
+        #         m_shape = (Ny, Nz) if gpu else (f_Ny[field_idx], f_Nz[field_idx])
+        #     elif m["axis"] == 1:
+        #         m_shape = (Nx, Nz) if gpu else (self.Nx, f_Nz[field_idx])
+        #     else:
+        #         m_shape = (Nx, Ny) if gpu else (self.Nx, f_Ny[field_idx])
+
+        #     mon_config = dict(
+        #         axis=int(m["axis"]),
+        #         position=int(m["index"]),
+        #         field=field_idx,
+        #         n_step=int(m["n_step"]),
+        #     )
+
+        #     if m["frequency"] is not None:
+        #         # initialize monitor for frequency domain phasor captures.
+        #         # DTFT is computed with a running sum in the time stepping equations
+        #         frequency = m["frequency"]
+        #         fs = (1 / (self.dt *  m["n_step"]))
+        #         fn = frequency / fs
+        #         omega = 2 * np.pi * fn
+        #         # phase terms of the DTFT at a single frequency for each time step
+        #         mon_config["values"] = np.zeros(((len(frequency),) + m_shape), dtype=np.complex64, order="C")
+        #         # dtft phase is ordered (n_m, frequency)
+        #         mon_config["dtft_phase"] = np.exp(
+        #             -1j * omega[None] * np.arange(n_m)[:, None], dtype=np.complex64, order="C" 
+        #         )
+        #         mon_config["n_frequencies"] = int(len(frequency))
+        #     else:
+        #         # initialize monitor for time domain captures
+        #         mon_config["values"] = np.zeros(((n_m,) + m_shape), dtype=self.dtype_, order="C")
+
+        #     monitors.append(mon_config)
+
 
     def add_farfield_monitor(self, frequency: np.ndarray, padding: int = 2):
         """
@@ -3182,10 +3194,19 @@ class FDTD_Solver():
         # build coordinates in inches for the two spatial dimensions of the slice
         spatial_coords = {spatial_dims[i]: self.floc[field][i] for i in spatial_axis}
 
-        if mon_frequency is not None:
-            return ldarray(monitor["values"], coords=dict(frequency=mon_frequency, **spatial_coords))
+        # remove extra pad cells in h-fields by indexing by the shape of the fields
+        ms0, ms1 = tuple([len(v) for k, v in spatial_coords.items()])
+
+        # add extra cell for components at the edge of x axis. These are not included in the grid update equations
+        if field in ("ez", "ey", "hx") and axis in (1, 2):
+            values = np.pad(monitor["values"][:, :ms0, :ms1], ((0, 0), (1, 0), (0, 0)))
         else:
-            return ldarray(monitor["values"], coords=dict(time=time_values, **spatial_coords))
+            values = monitor["values"][:, :ms0, :ms1]
+
+        if mon_frequency is not None:
+            return ldarray(values, coords=dict(frequency=mon_frequency, **spatial_coords))
+        else:
+            return ldarray(values, coords=dict(time=time_values, **spatial_coords))
             
     def get_total_monitor_data(self, name: str):
         """

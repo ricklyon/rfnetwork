@@ -214,7 +214,7 @@ std::complex<float> * get_complex_array(PyObject * dict, const char * name, int 
     for (int i = 0; i < ndim; ++i) {
         if (shape[i] != (int) npy_shape[i])
         {
-            oss << "Invalid data array " << name << ". Expected shape on axis " << i << " of " << npy_shape[i];
+            oss << "Invalid data array " << name << ". Expected shape on axis " << i << " of " << shape[i];
             throw std::runtime_error(oss.str());
         }
     }
@@ -441,6 +441,8 @@ int SolverFDTD::solver_init_monitors(PyObject * py_monitors, int Nt, int gpu)
     // int Ny[6] = {Ex.Ny, Ey.Ny, Ez.Ny, Hx.Ny, Hy.Ny, Hz.Ny};
     // int Nz[6] = {Ex.Nz, Ey.Nz, Ez.Nz, Hx.Nz, Hy.Nz, Hz.Nz};
 
+    // includes extra pad cell at end of x axis for hy and hz
+    int f_Nx[6] = {Nx, Nx, Nx, Nx, Nx+1, Nx+1};
     // includes pad cell at end of y axis for hx and hz
     int f_Ny[6] = {Nyp1, Ny, Nyp1, Nyp1, Nyp1, Nyp1};
     int f_Nz[6] = {Nzp1, Nzp1, Nz, Nz, Nz, Nzp1};
@@ -456,10 +458,10 @@ int SolverFDTD::solver_init_monitors(PyObject * py_monitors, int Nt, int gpu)
         int Nm = (Nt / n_step) + 1;
         
         int axis = PyLong_AsLong(PyDict_GetItemString(py_mon, "axis"));
-        int field = PyLong_AsLong(PyDict_GetItemString(py_mon, "field"));
+        int field = PyLong_AsLong(PyDict_GetItemString(py_mon, "field_idx"));
 
         monitors[m].field_type = field;
-        monitors[m].position = PyLong_AsLong(PyDict_GetItemString(py_mon, "position"));
+        monitors[m].position = PyLong_AsLong(PyDict_GetItemString(py_mon, "index"));
         monitors[m].n_step = n_step;
         monitors[m].axis = axis;
 
@@ -493,7 +495,7 @@ int SolverFDTD::solver_init_monitors(PyObject * py_monitors, int Nt, int gpu)
             // each column (along z) skips by 1
             monitors[m].col_stride = 1;
             monitors[m].yz_offset = (monitors[m].position) * f_Nz[field];
-            monitors[m].N1 = Nx;
+            monitors[m].N1 = f_Nx[field];
             monitors[m].N2 = f_Nz[field];
         }
         // monitor is on xy plane
@@ -509,10 +511,10 @@ int SolverFDTD::solver_init_monitors(PyObject * py_monitors, int Nt, int gpu)
             // each column (along y) skips by Nz
             monitors[m].col_stride = f_Nz[field];
             monitors[m].yz_offset = (monitors[m].position);
-            monitors[m].N1 = Nx;
+            monitors[m].N1 = f_Nx[field];
             monitors[m].N2 = f_Ny[field];
         }
-        
+
         // monitor is frequency domain phasor if dtft phase is present in the dictionary
         if (PyDict_Contains(py_mon, PyUnicode_FromString("dtft_phase")))
         {   
