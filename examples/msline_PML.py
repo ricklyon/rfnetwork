@@ -1,5 +1,3 @@
-
-
 """
 PML Terminated Micro-strip
 ============
@@ -7,7 +5,8 @@ PML Terminated Micro-strip
 Terminate a microstrip line with a PML layer and evaluate PML attenuation.
 """
 
-# sphinx_gallery_thumbnail_number = 1import numpy as np 
+# sphinx_gallery_thumbnail_number = 1
+
 import matplotlib.pyplot as plt 
 from rfnetwork import const, conv, utils
 import pyvista as pv
