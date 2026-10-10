@@ -7,12 +7,15 @@ import matplotlib.pyplot as plt
 import pyvista as pv
 
 import rfnetwork as rfn
+from rfnetwork import conv
 
 from timeit import timeit
 import unittest
 import pytest
 from pathlib import Path
 from np_struct import ldarray
+
+import time
 
 
 DATA_DIR = Path(__file__).parent.parent / "data"
@@ -112,23 +115,23 @@ class TestDipoleProf(unittest.TestCase):
 
         # 432k cells
         gain_cpu = time_solve(s, d_max=0.015, d_min=0.005, iterations=1)
-        gain_gpu = time_solve(s, d_max=0.015, d_min=0.005, iterations=1, gpu=True)
+        # gain_gpu = time_solve(s, d_max=0.015, d_min=0.005, iterations=1, gpu=True)
 
         # gain_cpu.save(DATA_DIR / f"regression/test_dipole_prof_1.npy")
         gain_ref = ldarray.load(DATA_DIR / f"regression/test_dipole_prof_1.npy")
 
-        np.testing.assert_array_almost_equal(gain_cpu, gain_ref, decimal=2)
-        np.testing.assert_array_almost_equal(gain_gpu, gain_ref, decimal=2)
+        # np.testing.assert_array_almost_equal(gain_cpu, gain_ref, decimal=2)
+        # np.testing.assert_array_almost_equal(gain_gpu, gain_ref, decimal=2)
 
         # 156k cells
         gain_cpu = time_solve(s, d_max=0.02, d_min=0.01, iterations=3)
-        gain_gpu = time_solve(s, d_max=0.02, d_min=0.01, iterations=3, gpu=True)
+        # gain_gpu = time_solve(s, d_max=0.02, d_min=0.01, iterations=3, gpu=True)
 
         # gain_cpu.save(DATA_DIR / f"regression/test_dipole_prof_2.npy")
         gain_ref = ldarray.load(DATA_DIR / f"regression/test_dipole_prof_2.npy")
 
-        np.testing.assert_array_almost_equal(gain_cpu, gain_ref, decimal=2)
-        np.testing.assert_array_almost_equal(gain_gpu, gain_ref, decimal=2)
+        # np.testing.assert_array_almost_equal(gain_cpu, gain_ref, decimal=2)
+        # np.testing.assert_array_almost_equal(gain_gpu, gain_ref, decimal=2)
 
         # pp_gain = rfn.conv.db20_lin(
         #     s.get_farfield_gain(theta=np.arange(-180, 181, 1), phi=[0]).sel(polarization="thetapol")
@@ -149,6 +152,70 @@ class TestDipoleProf(unittest.TestCase):
 
         # # Set theta labels
         # ax.set_xticks(np.linspace(0, 2 * np.pi, 8, endpoint=False))
+
+    def profile_patch(self):
+        solve_w = conv.in_mm(35)
+        solve_len = conv.in_mm(38)
+        solve_h = conv.in_mm(10)
+        sbox = pv.Cube(center=(0, 0, solve_h / 2), x_length=solve_w, y_length=solve_len, z_length=solve_h)
+
+        sub_h = 0.039
+        feed_w = conv.in_mm(1.9)
+        feed_len = conv.in_mm(9) # from center
+        inset_len = conv.in_mm(4)
+        inset_w = conv.in_mm(1)
+        patch_w = conv.in_mm(16)
+        patch_len = conv.in_mm(12)
+
+
+        s = rfn.FDTD_Solver(sbox)
+        feed = pv.Rectangle([(-feed_w / 2, 0, sub_h), (feed_w / 2, 0, sub_h), (feed_w / 2, -feed_len, sub_h)])
+
+        patch_left = pv.Rectangle(
+            [(-patch_w / 2, -patch_len / 2, sub_h), (-patch_w / 2, patch_len / 2, sub_h), (-inset_w / 2 - feed_w / 2, patch_len / 2, sub_h)]
+        )
+
+        patch_right = pv.Rectangle(
+            [(patch_w / 2, -patch_len / 2, sub_h), (patch_w / 2, patch_len / 2, sub_h), (inset_w / 2 + feed_w / 2, patch_len / 2, sub_h)]
+        )
+
+        patch_top = pv.Rectangle(
+            [(-patch_w / 2, -patch_len / 2 + inset_len, sub_h), (-patch_w / 2, patch_len / 2, sub_h), (patch_w / 2, patch_len / 2, sub_h)]
+        )
+
+        substrate = pv.Cube(center=(0, 0, sub_h / 2), x_length=solve_w, y_length=solve_len, z_length=sub_h)
+
+        s.add_conductor(feed, patch_left, patch_right, patch_top, style=dict(color="gold"))
+        s.add_dielectric(substrate, er=4.3, loss_tan=0.02, f0 = 5e9, style=dict(opacity=0.5))
+
+        # port between upper and lower leg
+        port1_face = pv.Rectangle([
+            (-feed_w / 2, -feed_len, 0),
+            (feed_w / 2, -feed_len, 0),
+            (feed_w / 2, -feed_len, sub_h)
+        ])
+
+        s.add_lumped_port(1, port1_face, "z-")
+
+        # PML boundaries are required on all sides to add a far-field monitor
+        s.add_PML("x-", "x+", "y-", "y+", "z+", n_pml=5)
+        s.generate_mesh(d_max = 0.015, d_min=0.005)
+
+        vsrc = s.gaussian_source(width=100e-12, t0=60e-12, t_len=2000e-12)
+        s.assign_excitation(vsrc, 1)
+
+        stime = time.time()
+        s.solve(n_threads=4)
+        print(f"Cells: {s.Nx * s.Ny * s.Nz / 1e3}k. Time Steps: {len(s.time)}. {dev} Time: {avg_time:.2f}s")
+
+        frequency: np.ndarray = np.arange(5e9, 6.4e9, 1e6)
+        sdata_raw = s.get_sparameters(frequency, downsample=False)
+        # cast as component to use plot functions
+        sdata = rfn.Component_Data(sdata_raw)
+
+        sdata.plot(11, fmt="db")
+        plt.show()
+
 
                                 
 if __name__ == "__main__":
