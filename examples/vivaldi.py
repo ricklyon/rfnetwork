@@ -170,8 +170,7 @@ s.assign_excitation(vsrc, 1)
 s.solve()
 
 # plot near-field monitor and save as a .gif file
-gif_setup = dict(file = dir_ / "../docs/_static/img/vivaldi.gif", step_ps=12)
+gif_setup = dict(file = dir_ / "../docs/_static/img/vivaldi.gif", step_ps=20)
 p = s.plot_monitor(
     "mon1", opacity="linear", camera_position="xz", vmin=20, vmax=60, gif_setup=gif_setup
 )
-# p.show()
