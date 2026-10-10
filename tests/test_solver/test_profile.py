@@ -153,7 +153,9 @@ class TestDipoleProf(unittest.TestCase):
         # # Set theta labels
         # ax.set_xticks(np.linspace(0, 2 * np.pi, 8, endpoint=False))
 
-    def profile_patch(self):
+    @pytest.mark.skip()
+    def test_profile_patch(self):
+
         solve_w = conv.in_mm(35)
         solve_len = conv.in_mm(38)
         solve_h = conv.in_mm(10)
@@ -198,7 +200,7 @@ class TestDipoleProf(unittest.TestCase):
         s.add_lumped_port(1, port1_face, "z-")
 
         # PML boundaries are required on all sides to add a far-field monitor
-        s.add_PML("x-", "x+", "y-", "y+", "z+", n_pml=5)
+        s.add_PML("z+", n_pml=3)
         s.generate_mesh(d_max = 0.015, d_min=0.005)
 
         vsrc = s.gaussian_source(width=100e-12, t0=60e-12, t_len=2000e-12)
@@ -206,7 +208,8 @@ class TestDipoleProf(unittest.TestCase):
 
         stime = time.time()
         s.solve(n_threads=4)
-        print(f"Cells: {s.Nx * s.Ny * s.Nz / 1e3}k. Time Steps: {len(s.time)}. {dev} Time: {avg_time:.2f}s")
+        avg_time = time.time() - stime
+        print(f"Cells: {s.Nx * s.Ny * s.Nz / 1e3}k. Time Steps: {len(s.time)}. Time: {avg_time:.2f}s")
 
         frequency: np.ndarray = np.arange(5e9, 6.4e9, 1e6)
         sdata_raw = s.get_sparameters(frequency, downsample=False)
@@ -214,9 +217,8 @@ class TestDipoleProf(unittest.TestCase):
         sdata = rfn.Component_Data(sdata_raw)
 
         sdata.plot(11, fmt="db")
-        plt.show()
+        # plt.show()
 
-
-                                
+                      
 if __name__ == "__main__":
     unittest.main()
