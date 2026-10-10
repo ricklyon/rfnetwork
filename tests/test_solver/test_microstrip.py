@@ -91,7 +91,7 @@ class TestMicroStrip(unittest.TestCase):
         s.add_lumped_port(1, port1_face, integration_line=int_axis)
 
         pml_side = ["x", "y", "z"][len_axis]
-        s.assign_PML_boundaries(f"{pml_side}+", n_pml=10)
+        s.add_PML(f"{pml_side}+", n_pml=10)
 
         s.generate_mesh(d_max = 0.02)
         

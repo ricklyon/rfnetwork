@@ -77,7 +77,7 @@ s.add_conductor(ms1_trace, style=dict(color="gold"))
 s.add_lumped_port(1, port1_face, "z+")
 s.add_lumped_port(2, port2_face, "z+")
 
-s.assign_PML_boundaries("z+", n_pml=7)
+s.add_PML("z+", n_pml=7)
 
 s.generate_mesh(d_max = 0.02, d_min=0.005)
 

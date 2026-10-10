@@ -352,7 +352,7 @@ class FDTD_Solver():
             style={**style, "cmap":cmap} # add cmap to style so it's passed to add_mesh
         )
 
-    def assign_PML_boundaries(self, *sides: str, n_pml: float = 10):
+    def add_PML(self, *sides: str, n_pml: float = 10):
         """
         Assign a PML boundary to sides of the solve box. All sides must have the same number of PML cells.
 

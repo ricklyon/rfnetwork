@@ -148,7 +148,7 @@ port2_face = pv.Rectangle([(-w_ms/2, port_y, 0), (w_ms/2, port_y, 0), (w_ms/2, p
 s.add_lumped_port(2, port2_face, "z-")
 
 # PML boundaries on all sides of the solve box, 5 cells wide.
-s.assign_PML_boundaries("x-", "x+", "y-", "y+", "z+", "z-", n_pml=5)
+s.add_PML("x-", "x+", "y-", "y+", "z+", "z-", n_pml=5)
 
 # build mesh with a minimum cell size near feature edges of 0.02in, and a maximum size of 0.08in
 s.generate_mesh(d_max=0.08, d_min=0.02)

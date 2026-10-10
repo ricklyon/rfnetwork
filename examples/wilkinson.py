@@ -128,7 +128,7 @@ resistor = pv.Rectangle([
 s.add_resistor(resistor, 100, integration_line="y+")
 
 # assign PML boundary on top face
-s.assign_PML_boundaries("z+", n_pml=5)
+s.add_PML("z+", n_pml=5)
 
 # create mesh with a nominal width of 20mils far from geometry edges, and 5mils near edges.
 s.generate_mesh(d_max=0.02, d_min=0.005)

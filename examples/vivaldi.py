@@ -74,7 +74,7 @@ port_face = pv.Rectangle(((port_x, -sub_h, port_y0), (port_x, -sub_h, port_y1), 
 s.add_lumped_port(1, port_face, "y+")
 
 # Assign PML layers on all sides, including the bottom
-s.assign_PML_boundaries("x-", "x+", "y-", "y+", "z+", "z-", n_pml=5)
+s.add_PML("x-", "x+", "y-", "y+", "z+", "z-", n_pml=5)
 s.generate_mesh(0.06, 0.01)
 
 fig, ax = plt.subplots()

@@ -71,7 +71,7 @@ class TestCoupledStripline(unittest.TestCase):
 
 
         # assign PML layers, omitting the x- side near the ports
-        s.assign_PML_boundaries("x+", n_pml=5)
+        s.add_PML("x+", n_pml=5)
 
         # create mesh with a nominal width of 20mils far from geometry edges, and 2.5mils near edges.
         # cell widths are tapered to minimize errors
