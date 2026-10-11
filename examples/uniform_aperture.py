@@ -2,7 +2,7 @@
 Uniform Aperture Antenna
 ============
 
-Generate Far-field pattern for a uniform aperture antenna.
+Generate far-field pattern for a uniform aperture antenna.
 """
 
 # sphinx_gallery_thumbnail_number = -2
