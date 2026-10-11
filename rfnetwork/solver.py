@@ -1714,7 +1714,10 @@ class FDTD_Solver():
         show_progress : bool, default: True
             print solver progress to stdout.
         gpu : bool, default: False
-            runs the solver on a NVIDIA GPU, if available. 
+            runs the solver on a NVIDIA GPU, if available. (Not supported on this branch)
+        max_tile : int, default: 128
+            maximum tile size along y axis that is loaded into Eigen at a time. For CPUs with small cache sizes,
+            performance may be improved by lower this to 64. 
         """
         self.check_mesh()
 
@@ -1795,12 +1798,8 @@ class FDTD_Solver():
         else:
             update_interval = 0
 
-        if gpu:
-            solver_func = core.cuda_func.solver_run_cu
-        else:
-            solver_func = core.core_func.solver_run
-
-        ret_val = solver_func(
+        # run solver
+        ret_val = core.core_func.solver_run(
             self.fields, 
             self.coefficients, 
             self.pml_data, 
@@ -2558,39 +2557,30 @@ class FDTD_Solver():
             For E-fields, one of "ex_y", "ex_z", "ey_z", "ey_x", "ez_x", "ez_y". Replace e with h for H-fields.
             The H-field b coefficients are split to support edge correction techniques, and and 1 or 2 must be 
             appended to the field name: "hx_y1", "hx_y2".
-
         value : str, {"a", "b"}
             "a" specifies the Ca or Da coefficients, "b" selects the Cb or Db coefficients.
-
         axis : str, {"x", "y", "z"}
             Cartesian axis normal to the surface on which the coefficients will be plotted.
-
         position : float
             position along axis of surface where the coefficients will be plotted.
-
         normalization : bool | float, optional
-            By default, "b" coefficents are divided by dt / e0 (for E) or dt / u0 (for H) to avoid very small values.
-            A float can be passed in to normalize by another value, to turn off normalization set to False.
-
+            By default, the coefficients do not depend on the cell width. Setting this to False will leave the
+            cell width dependance in the plotted coefficients. A float value can also be provided to normalize
+            the coefficients by an arbitrary values. For example, "b" coefficents can be divided by dt / e0 (for E)
+            or dt / u0 (for H) .
         opacity : str | list, default: 1
             Opacity of the coefficent plot.
-        
         vmin : float, optional
             minimum coefficient value shown on the colormap
-        
         vmax : float, optional
             maximum coefficient value shown on the colormap
-
         point_size : float, default: 10
             size of points representing coefficient values
-
         axes : matplotlib.axes.Axes
             matplotlib axes object. If provided, a screenshot is taken of the rendered image and 
             drawn in the the axes. 
-
         plotter : pv.Plotter, optional
             pyvista Plotter object
-
         **kwargs :
             remaining kwargs are passed to render().
 
@@ -2617,6 +2607,7 @@ class FDTD_Solver():
         idx = [slice(None)] * 3
         idx[axis_i] = self.field_pos_to_idx(full_pos, field[:2])[axis_i]
 
+        # allow custom coefficients for debugging purposes, shapes must match exactly.
         if coefficients is not None:
             values = dcopy(coefficients[name])
         else:
@@ -2647,7 +2638,7 @@ class FDTD_Solver():
                     values[tuple(f_corr["idx"])] = f_corr["values"][coeff_idx]
 
         # remove cell width scaling
-        if normalization:
+        if normalization is True:
             dx, dy, dz = [conv.m_in(d).astype(self.dtype_) for d in self.d_cells]
             dx_h, dy_h, dz_h = [conv.m_in(d).astype(self.dtype_) for d in self.dh_cells]
 
@@ -2684,14 +2675,14 @@ class FDTD_Solver():
             if name[:7] in norm_corrections.keys():
                 values = values / norm_corrections[name[:7]]
 
+        elif not isinstance(normalization, bool):
+            values = values / normalization
+
         # apply default normalization to b coefficients
         # if normalization is True:
         #     if value == "b":
         #         # divide by dt / e0 (if E) or dt / u0 (if H)
         #         values = values / (self.dt / e0) if field[0] == "e" else values / (self.dt / u0) 
-        # # apply custom normalization
-        # elif not isinstance(normalization, bool):
-        #     values = values / normalization
 
         if vmax is None:
             vmax = np.nanmax(values)
@@ -2732,7 +2723,7 @@ class FDTD_Solver():
 
     def get_probes(self, name: str) -> dict:
         """
-        Get probe names that match name. Voltage probes and current probes are made up of several component probes,
+        Get probe that match name. Voltage probes and current probes are made up of several component probes,
         each with the same base name followed by an underscore.
         """
         return {k: v for k, v in self.probes.items() if k == name or k[:len(name) + 1] == name + "_"}
@@ -3277,10 +3268,13 @@ class FDTD_Solver():
 
     def get_applied_power(self, frequency: np.ndarray, normalization: str = "applied"):
         """
-        Get the amount of applied power to the grid in the frequency domain.
+        Compute the amount of applied power to the grid, in the frequency domain.
 
         Parameters
         ----------
+        frequency : np.ndarray
+            frequencies in Hz to compute total power.
+
         normalization : {"applied", "accepted"}
             By default, gain is normalized by the applied power to all lumped ports in the simulation.
             "accepted" normalizes the gain by the combined accepted power from all ports. This removes the effect
