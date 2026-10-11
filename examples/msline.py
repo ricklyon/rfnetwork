@@ -6,7 +6,7 @@ Simple microstrip example showing basic usage of solver.
 
 """
 
-# sphinx_gallery_thumbnail_number = 1
+# sphinx_gallery_thumbnail_number = -1
 
 import numpy as np 
 import matplotlib.pyplot as plt 

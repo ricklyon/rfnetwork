@@ -7,7 +7,7 @@ Phased Array
 Demonstrate a small phased array from microstrip patch antennas.
 """
 
-# sphinx_gallery_thumbnail_number = -2
+# sphinx_gallery_thumbnail_number = -3
 
 import numpy as np 
 import matplotlib.pyplot as plt 
