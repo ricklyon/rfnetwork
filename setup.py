@@ -48,7 +48,7 @@ def find_cuda_lib() -> Path:
     else:
         return cuda_home / "lib64"
 
-cuda_path = find_cuda_lib()
+cuda_path = None #find_cuda_lib()
 
 
 class build(_build):
@@ -99,6 +99,8 @@ core_ext = Extension(
     sources=core_cpp,
     include_dirs=["rfnetwork/core/inc", "rfnetwork/core/lib/eigen", np.get_include()],
     optional=False,
+    # extra_compile_args=["-g", "-O0"], # enable debugging
+    # extra_compile_args=["-O3"], 
 )
 
 cuda_ext = Extension(

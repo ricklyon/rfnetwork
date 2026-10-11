@@ -1,5 +1,7 @@
 
 #define PY_SSIZE_T_CLEAN
+#define NPY_NO_DEPRECATED_API NPY_1_7_API_VERSION
+
 #include <Python.h>
 #include <numpy/arrayobject.h>
 
@@ -349,22 +351,37 @@ static PyObject * cascade_self_ndata_bind(PyObject *self, PyObject *args)
 
 static PyObject* solver_run(PyObject* self, PyObject* args) {
 
+    PyObject *fields;
+    PyObject *pml_data;
     PyObject *coefficients;
     PyObject *probes;
     PyObject *monitors;
-    PyObject *mem;
+    PyObject *corrections;
+    PyObject *N_pml;
     
     int Nx;
     int Ny;
     int Nz;
     int Nt;
+    
     int n_threads;
     int update_interval;
+    int max_tile;
 
     // Parse arguments: expecting a single Python object
     if (!PyArg_ParseTuple(
-        args, "OOOOIIIIII", &coefficients, &probes, &monitors, &mem, &Nx, &Ny, &Nz, &Nt, &n_threads, &update_interval
+        args, "OOOOOOIIIIIII", &fields, &coefficients, &pml_data, &probes, &monitors, &corrections, &Nx, &Ny, &Nz, &Nt, &n_threads, &update_interval, &max_tile
     )) {
+        return PyLong_FromLong(1);
+    }
+
+    if (!PyDict_Check(fields)) {
+        PyErr_SetString(PyExc_TypeError, "Expected a fields dictionary");
+        return PyLong_FromLong(1);
+    }
+
+    if (!PyDict_Check(pml_data)) {
+        PyErr_SetString(PyExc_TypeError, "Expected a fields_pml dictionary");
         return PyLong_FromLong(1);
     }
 
@@ -383,12 +400,29 @@ static PyObject* solver_run(PyObject* self, PyObject* args) {
         return PyLong_FromLong(1);
     }
 
-    SolverFDTD s;
-    s.solver_init_fields(mem, coefficients, Nx, Ny, Nz, 0);
-    s.solver_init_monitors(monitors, Nt, 0);
-    s.solver_init_probes(probes, Nt);
+    if (!PyList_Check(corrections)) {
+        PyErr_SetString(PyExc_TypeError, "Expected a corrections list");
+        return PyLong_FromLong(1);
+    }
 
-    s.solver_run(Nt, n_threads, update_interval);
+    SolverFDTD s;
+
+    try 
+    {
+        s.solver_init_fields(fields, coefficients, pml_data, Nx, Ny, Nz, 0, max_tile);
+        s.solver_init_monitors(monitors, Nt, 0);
+        s.solver_init_probes(probes, Nt);
+        s.solver_init_corrections(corrections);
+
+        s.solver_run(Nt, n_threads, update_interval);
+    }
+    
+    catch (const std::exception& e) {
+        PyErr_SetString(PyExc_RuntimeError, e.what());
+        return NULL;
+    }
+
+
 
     return PyLong_FromLong(0);
 }

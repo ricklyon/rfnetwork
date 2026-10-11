@@ -26,6 +26,8 @@ is the [MS C++ Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-
 In addition,`nvcc` must be present if compiling the GPU accelerated solver. The CPU solver will still compile if `nvcc`
 is not found, but the GPU solver will not be available.
 
+The GPU accelerated solver is available in the `full_gpu` branch. 
+
 Features
 ========
 
@@ -49,9 +51,9 @@ Model is simulated over a time span of 400ps.
 
 | Cells | Time Steps | Grid Cell Max/Min [in]| CPU | GPU | 
 |------ |------------|-----|------|-----|
-| 156k | 860  |  0.02 / 0.01| 2.46s  | 1.06s   |
-| 431k | 1721 | 0.015 / 0.005| 12.39s | 5.32s |
-
+| 156k | 860  |  0.02 / 0.01 | 0.81s  | 1.06s   |
+| 431k | 1721 | 0.015 / 0.005 | 6.94s | 5.32s |
+| 329k | 8735 | 0.015 / 0.005 | 16.7s | -- |
 
 Documentation
 =============

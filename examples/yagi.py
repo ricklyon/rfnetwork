@@ -83,7 +83,7 @@ port1_face = pv.Rectangle([
 s.add_lumped_port(1, port1_face, "z-")
 
 # PML boundaries are required on all sides to add a far-field monitor
-s.assign_PML_boundaries("x-", "x+", "y-", "y+", "z+", "z-", n_pml=5)
+s.add_PML("x-", "x+", "y-", "y+", "z+", "z-", n_pml=5)
 s.generate_mesh(d_max = 0.5, d_min=0.1)
 
 # setup far-field monitor
@@ -112,34 +112,15 @@ s.solve(n_threads=4)
 # ------------------------
 # This plot shows realized gain
 
-phi_cut = rfn.conv.db20_lin(
-    s.get_farfield_gain(phi=np.arange(-180, 182, 2), theta=90).sel(polarization="thetapol")
-)
+phi_cut = s.get_farfield_gain(phi=np.arange(-180, 182, 2), theta=90).sel(polarization="thetapol")
 
-theta_cut = rfn.conv.db20_lin(
-    s.get_farfield_gain(theta=np.arange(-180, 181, 2), phi=0).sel(polarization="thetapol")
-)
+theta_cut = s.get_farfield_gain(theta=np.arange(-180, 181, 2), phi=0).sel(polarization="thetapol")
 
 fig1, ax1 = plt.subplots(subplot_kw=dict(projection="polar"))
 fig2, ax2 = plt.subplots(subplot_kw=dict(projection="polar"))
 
-theta_rad = np.deg2rad(theta_cut.coords["theta"])
-phi_rad = np.deg2rad(phi_cut.coords["phi"])
-
-ax1.plot(theta_rad, theta_cut.squeeze())
-ax2.plot(phi_rad, phi_cut.squeeze())
-
-for ax in (ax1, ax2):
-    ax.set_theta_zero_location('N') 
-    ax.set_theta_direction(-1) 
-    ax.set_ylim([-20, 10])
-    ax.set_yticks(np.arange(-20, 15, 5))
-    ax.set_yticklabels(["", "-15", "-10", "-5", "0", "5", "10dBi"])
-
-    # Set theta labels
-    ax.set_xticks(np.linspace(0, 2 * np.pi, 8, endpoint=False))
-    labels = [f"{d}°" for d in [0, 45, 90, 135, 180, -135, -90, -45]]
-    ax.set_xticklabels(labels)
+theta_cut.plot("theta", xfmt=np.deg2rad, yfmt="db20", ax=ax1)
+phi_cut.plot("phi", xfmt=np.deg2rad, yfmt="db20", ax=ax2)
 
 ax1.set_xlabel(r"$\theta$ [deg], $\phi$=0°")
 ax2.set_xlabel(r"$\phi$ [deg], $\theta$=90°")
@@ -162,3 +143,4 @@ ax.set_ylabel("[dB]")
 
 mplm.line_marker(x=f0 / 1e6, ylabel=False)
 plt.show()
+# %%

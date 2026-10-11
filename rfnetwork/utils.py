@@ -13,7 +13,7 @@ from .core.units import const, conv
 
 def dtft(xn: np.ndarray, frequency: np.ndarray, fs: float, downsample: bool = False) -> np.ndarray:
     """
-    Compute the DTFT of the discrete time signal x[n] over a frequency range (cycles per second),
+    Compute the DTFT of the discrete time signal x[n] over a frequency range (cycles per second).
 
     Parameters
     ----------
@@ -37,7 +37,7 @@ def dtft(xn: np.ndarray, frequency: np.ndarray, fs: float, downsample: bool = Fa
     # number of samples in xn between each sample of frs
     downsample_factor = int(fs / frs)
     # determine whether downsample can be used. The sampling rate must be at least twice the downsampled rate
-    downsample_apply = downsample and (len(xn) / downsample_factor) > 100 and fs > (frs * 2)
+    downsample_apply = downsample and (xn.shape[-1] / downsample_factor) > 100 and fs > (frs * 2)
 
     # In most cases 1 / dt is much greater than the highest frequency of interest and the DTFT can be made faster
     # by down-sampling. 
@@ -45,7 +45,7 @@ def dtft(xn: np.ndarray, frequency: np.ndarray, fs: float, downsample: bool = Fa
         # create lowpass filter that removes all frequency content above frs/2
         sos = signal.butter(20, frs / 2.5, btype="lowpass", output="sos", fs = fs)
         # apply filter, then downsample the signal. 
-        xn = signal.sosfiltfilt(sos, xn)[::downsample_factor]
+        xn = signal.sosfiltfilt(sos, xn)[..., ::downsample_factor]
         fs = frs
 
     # convert the continuous time frequency into a discrete frequency range. The discrete frequencies
@@ -56,13 +56,13 @@ def dtft(xn: np.ndarray, frequency: np.ndarray, fs: float, downsample: bool = Fa
     fn = frequency / fs
     omega = 2 * np.pi * fn
     
-    n = np.arange(len(xn))
+    n = np.arange(xn.shape[-1])
     omega_mesh, n_mesh = np.meshgrid(omega, n)
 
     # broadcast input sequence across all omega
     # x_b = np.broadcast_to(xn[..., None], (len(n), len(omega)))
     # sum across all non-zero n
-    Xw = np.sum(xn[..., None] * np.exp(-1j * omega_mesh * n_mesh), axis=0)
+    Xw = np.sum(xn[..., None] * np.exp(-1j * omega_mesh * n_mesh), axis=-2)
 
     # scale the DTFT so it's identical to the non-downsampled version
     if downsample_apply:
@@ -776,4 +776,16 @@ def setup_pv_plotter(p: pv.Plotter):
     p.add_key_event("n", lambda: p.disable_parallel_projection())
 
     p.track_click_position(callback, side="left")
+
+def phase_delay_signal(signal: ldarray, phase: float, f0: float):
+    """ 
+    Apply a phase delay [radians] at f0 to time domain signal. 
+    """
+
+    t_delay = phase / (2 * np.pi * f0)
+    # number of steps that fit in the delay (rounded, no interpolation)
+    dt = signal.coords["time"][1] - signal.coords["time"][0]
+    n_delay = int(np.around(t_delay / dt))
+
+    return ldarray(np.roll(signal, n_delay, axis="time"), coords=signal.coords)
 
