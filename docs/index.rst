@@ -31,16 +31,16 @@ Installation
 To build from source on Windows or Linux, 
 
 .. code-block:: bash
+   
    git clone https://github.com/ricklyon/rfnetwork.git
    cd rfnetwork
    git submodule update --init --recursive
    pip install -e .
 
-
 If building from source, a C++ compiler must be available on the system. On Windows systems the 
 recommended compiler is the `MS C++ Build Tools <https://visualstudio.microsoft.com/visual-cpp-build-tools/>`_ .   
 
-The GPU accelerated solver is available in the `full_gpu` branch. 
+The GPU accelerated solver is available in the ``full_gpu`` branch. 
 ``nvcc`` must be present if compiling the GPU accelerated solver. The CPU solver will still 
 compile if ``nvcc`` is not found, but the GPU solver will not be available.
 

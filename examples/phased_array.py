@@ -7,13 +7,14 @@ Phased Array
 Demonstrate a small phased array from microstrip patch antennas.
 """
 
-# sphinx_gallery_thumbnail_number = -3
+# sphinx_gallery_thumbnail_number = 1
 
 import numpy as np 
 import matplotlib.pyplot as plt 
 from rfnetwork import const, conv
 import pyvista as pv
 from np_struct import ldarray
+from pathlib import Path
 
 import rfnetwork as rfn
 import mpl_markers as mplm
@@ -24,7 +25,10 @@ plt.style.use(rfn.DEFAULT_STYLE)
 
 import pyvista as pv
 
-# pv.set_jupyter_backend("trame")
+try:
+    dir_ = Path(__file__).parent
+except:
+    dir_ = Path().cwd()
 
 # %%
 # User Defined Parameters 
@@ -37,7 +41,7 @@ spacing = lam0 / 2
 # element positions normalized by the spacing
 ele_x, ele_y = np.meshgrid([0, 1, 2, 3], [0, 1, 2, 3], indexing="ij")
 ele_z = np.zeros_like(ele_x)
-# Nx3 grid of element locations
+# grid of element locations
 ele_pos = np.array((ele_x.flatten(), ele_y.flatten(), ele_z.flatten())).T
 # add coordinates
 N = len(ele_pos)
@@ -92,11 +96,11 @@ port_face = pv.Rectangle([
 ])
 
 port_faces = [port_face.translate(p) for p in ele_pos]
-s.add_conductor(*patches, style=dict(color="gold", opacity=1))
+s.add_conductor(*patches, style=dict(color="silver", opacity=1))
 
 # add PCB substrate
 substrate = pv.Box((-pad, np.max(ele_x) + pad, -pad, np.max(ele_y) + pad, 0, sub_h))
-s.add_dielectric(substrate, er=4.3, loss_tan=0.02, f0 = 5e9, style=dict(opacity=0.3))
+s.add_dielectric(substrate, er=4.3, loss_tan=0.02, f0 = 5e9, style=dict(opacity=0.2, color="green"))
 
 # define lumped ports
 for i, face in enumerate(port_faces):
@@ -114,13 +118,14 @@ plotter = pv.Plotter(off_screen=True)
 fig, ax = plt.subplots()
 plotter.add_points(ele_pos, render_points_as_spheres=True, point_size=15)
 plotter.add_point_labels(ele_pos, np.arange(1, N+1), always_visible=True)
-s.render(show_mesh=False, zoom=1.5, plotter=plotter, axes=ax)
+s.render(show_mesh=False, zoom=1.4, plotter=plotter, axes=ax)
 
 
 # %%
 # Plot Array Factor
-# -----------------
+# ---------------
 
+# azimuth and elevation coordinates for far-field plot
 az = np.arange(-90, 92, 2)
 el = np.arange(-90, 92, 2)
 
@@ -135,7 +140,7 @@ array_model = rfn.antennas.translate(iso_pattern, rfn.conv.m_in(ele_pos))
 # compute element weights for steered beam
 beam_az, beam_el = 30, 0
 weights = np.conjugate(array_model.sel(az=beam_az, el=beam_el))
-# use phase only 
+# use phase only weights
 weights = weights / np.abs(weights)
 # apply weights to generate estimated beam pattern
 array_factor = np.sum(array_model * weights, axis="element") / np.sqrt(N)
@@ -145,24 +150,31 @@ array_factor.pcolormesh("az", "el", zfmt="db20", vmin=-25, vmax=15, cmap="jet")
 plt.title(f"Array Factor, L2y, {f0/1e9:.1f}GHz")
 
 # %%
-# Solve Beam Pattern
-# -----------------
+# Solve Model
+# ------------
+# 
+# .. image:: ../_static/img/phased_array.gif
 
-# phase delay excitation
+# convert phase delays into time delayed excitations
 vsrc = s.gaussian_source(width=100e-12, t0=160e-12, t_len=2000e-12)
 exc = [rfn.utils.phase_delay_signal(vsrc, -np.angle(w), f0=f0) for w in weights.squeeze()]
 exc = ldarray(exc, coords=dict(element=np.arange(N), time=vsrc.time))
 
 # add field monitor
-s.add_field_monitor("mon1", "ey", axis="y", position=spacing, n_step=5)
+s.add_field_monitor("mon1", "ey", axis="y", position=spacing, n_step=10)
 
 # apply excitation to all elements and solve
 [s.assign_excitation(exc[i], i+1) for i in range(N)]
 s.solve(n_threads=4)
 
+# show near-field monitor
 cpos = pv.CameraPosition(position=(1.5, 0.5, 1.3), focal_point=(1.8, 1.5, 0.3), viewup=(0, 0.0, 1.0))
-fig, ax = plt.subplots(constrained_layout=True)
-s.plot_monitor("mon1", opacity=1, init_time=800, camera_position=cpos, axes=ax)
+gif_setup = dict(file = dir_ / "../docs/_static/img/phased_array.gif", fps=15, step_ps=10, end_ps=1500)
+s.plot_monitor("mon1", opacity=1, init_time=800, camera_position=cpos, gif_setup=gif_setup)
+
+# %%
+# Plot Beam Pattern
+# -----------------
 
 # get far-field pattern in spherical coordinates
 pattern = s.get_farfield_gain(theta=np.arange(0, 92, 2), phi=np.arange(-180, 182, 2))
