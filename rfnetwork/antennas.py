@@ -12,7 +12,14 @@ def translate(pattern: ldarray, position: np.ndarray) -> ldarray:
     pattern : ldarray
         Pattern in spherical coordinates. Must have a frequency coordinate in Hz.
     positions : ldarray
-        Element positions in meters. Positions can have more than one dimension if provided as a ldarray.
+        Element positions in meters. Positions can have more than one dimension if provided as a ldarray,
+        "axis" dimension must be present with labels "x", "y" and "z".
+
+    Returns
+    -------
+    pattern
+        Labeled array of the pattern data translated to the new location.
+        
     """
 
     # convert pattern coordinates to uvw
@@ -74,6 +81,7 @@ def uvw_phitheta(phi: np.ndarray, theta: np.ndarray, deg: bool = True):
     u, v, w : np.ndarray
         Tuple of three values, each is a 2D meshgrid of u, v, w values at each phi, theta angle. 
     """
+
     phi, theta = np.atleast_1d(phi), np.atleast_1d(theta)
     # form into a meshgrid
     phi_m, theta_m = _create_meshgrid(phi, theta)
@@ -110,6 +118,7 @@ def phitheta_uvw(u: np.ndarray, v: np.ndarray, w: np.ndarray, deg: bool = True):
     phi, theta : np.ndarray
         Tuple of 2 values, each is a 2D meshgrid of phi, theta angles at each u, v coordinate
     """
+
     u, v, w = np.atleast_1d(u), np.atleast_1d(v), np.atleast_1d(w)
     # form into a meshgrid
     u_m, v_m = _create_meshgrid(u, v)
@@ -147,6 +156,7 @@ def phitheta_uv(u: np.ndarray, v: np.ndarray, deg: bool = True):
     phi, theta : np.ndarray
         Tuple of 2 values, each is a 2D meshgrid of phi, theta angles at each u, v coordinate
     """
+
     u, v = np.atleast_1d(u), np.atleast_1d(v)
     # form into a meshgrid
     u_m, v_m = _create_meshgrid(u, v)
@@ -185,6 +195,7 @@ def uvw_azel(az: np.ndarray, el: np.ndarray, flat: bool = False):
     w : ldarray
         w coordinate
     """
+
     az, el = np.atleast_1d(az), np.atleast_1d(el)
 
     if not flat:
@@ -224,6 +235,7 @@ def azel_uvw(u: np.ndarray, v: np.ndarray, w: np.ndarray, flat: bool = False):
         elevation coordinate
 
     """
+
     u, v, w = np.atleast_1d(u), np.atleast_1d(v), np.atleast_1d(w)
     # form into a meshgrid
     if not flat:
@@ -264,6 +276,7 @@ def uvw_uv(u: np.ndarray, v: np.ndarray):
     w : ldarray
         w coordinate
     """
+
     phi, theta = phitheta_uv(u, v)
     u_new, v_new, w_new = uvw_phitheta(phi, theta)
 
@@ -336,7 +349,7 @@ def pattern_spherical2rectangular(pattern: ldarray):
 
 
 def pattern_rectangular2spherical(pattern: ldarray):
-    r"""
+    """
     Project pattern from cartesian polarization vectors to spherical polarization.
 
     """
@@ -392,7 +405,7 @@ def pattern_spherical2cp(pattern: ldarray):
     )
 
 def pattern_spherical2azel(pattern: ldarray):
-    r"""
+    """
     Project pattern from spherical polarization to Ludwig's II definition.
     """
     if not all(pattern.polarization == ("thetapol", "phipol")):
@@ -423,7 +436,7 @@ def pattern_spherical2azel(pattern: ldarray):
     )
 
 def pattern_azel2spherical(pattern: ldarray):
-    r"""
+    """
     Project pattern from Ludwig's II definition to spherical polarization.
     """
     if not all(pattern.polarization == ("l2_az", "l2_el")):

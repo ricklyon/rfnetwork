@@ -7,6 +7,7 @@ API Reference
 
    rfnetwork.component
    rfnetwork.elements
+   rfnetwork.antennas
    rfnetwork.network.Network
    rfnetwork.solver.FDTD_Solver
    rfnetwork.plots.plot
