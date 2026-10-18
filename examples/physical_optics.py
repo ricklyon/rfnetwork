@@ -136,6 +136,8 @@ def get_farfield_rE(
     frequency = np.atleast_1d(frequency)
 
     cell_pos = np.array(obj.cell_centers().points.T, order="C", dtype=np.float32)
+    # compute pattern centered with the scatterer at the origin
+    cell_pos -= np.average(cell_pos, axis=-1)[..., None]
 
     # area of each face
     sized = obj.compute_cell_sizes(length=False, area=True, volume=False)
@@ -181,17 +183,17 @@ tx_pin = 1 # input power in watts
 # scatterer1 = pv.Rectangle(
 #     ((-1, -1, 0), (-1, 1, 0), (1, 1, 0))
 # )
+
 # # subdivide so that no face edge is longer than lambda/6, keeps the phase variation across each face small.
 # # the scattered field at the antenna converges to within 0.1 dB and 0.5 deg at this density.
-# scatterer1 = scatterer1.triangulate().subdivide(7)#.subdivide_adaptive(max_edge_len=lam0 / 4, max_tri_area=(lam0 / 4) ** 2)
-
+# scatterer1 = scatterer1.triangulate().subdivide_adaptive(max_edge_len=lam0 / 4, max_tri_area=(lam0 / 4) ** 2)
 
 scatterer1 = pv.Sphere(radius=1, theta_resolution=100, phi_resolution=100)
 
 # normalize size to 1m
 scatterer1.points /= np.max(np.abs(scatterer1.points))
 # scale to desired size
-scatterer1.points *= 0.6
+scatterer1.points *= 0.4
 # center at 0
 scatterer1.points -= [np.average(scatterer1.points[:, i]) for i in range(3)]
 
@@ -200,15 +202,15 @@ rot = Rotation.from_euler("x", -30, degrees=True).as_matrix()
 scatterer1.points = np.einsum("ij, ...j->...i", rot, scatterer1.points)
 
 # move to desired location
-scatterer1.points += (0, 0, 1)
+scatterer1.points += (-1, 0.8, 4)
 
 # move the tx pattern to the source position, currently centered at the origin
-antenna_height = 0
+antenna_height = 1.5
 source_pos = (0, antenna_height, 0)
 src_patt = rfn.antennas.translate(tx_patt, source_pos)
 
 # add antenna rendering
-antenna = pv.Cube(x_length=0.3, y_length=0.3, z_length=0.1)
+antenna = pv.Cube(x_length=0.3, y_length=0.4, z_length=0.1)
 antenna.points += source_pos
 
 obj = scatterer1
@@ -219,28 +221,46 @@ ray_trace = False
 
 
 
-J_xyz, M_xyz = illuminate_object(scatterer1, source_pos, tx_patt, 1, frequency)
+J_xyz_dir, M_xyz_dir = illuminate_object(scatterer1, source_pos, tx_patt, 1, frequency)
+J_xyz_im, M_xyz_im = illuminate_object(scatterer1, source_pos, tx_patt, 1, frequency, image=True)
+
+J_xyz = J_xyz_dir + J_xyz_im
+M_xyz = M_xyz_dir + M_xyz_im
 
 plotter = pv.Plotter()
-scatterer1.cell_data["Ms (dB)"] = np.abs(M_xyz[..., 0])
-scatterer1.cell_data["Ms (ang)"] = np.angle(M_xyz[..., 1], deg=True)
+scatterer1.cell_data["Js"] = np.linalg.norm(J_xyz, axis=-1) #np.abs(J_xyz[..., 1])
+scatterer1.cell_data["Ms"] = np.linalg.norm(M_xyz, axis=-1) 
 
-plotter.add_mesh(antenna)
-plotter.add_mesh(scatterer1, cmap="jet", scalars="Ms (dB)")
+# ground plane
+gnd = pv.Rectangle(((-2, 0, -1), (2, 0, -1), (2, 0, 5)))
+
+plotter.add_mesh(antenna, color="tan")
+plotter.add_mesh(gnd, color="k", opacity=0.2)
+plotter.add_mesh(scatterer1, cmap="jet", scalars="Js")
 plotter.add_axes()
-plotter.camera_position = "iso"
+plotter.show_bounds(bounds=(-2, 2, 0, 3, -1, 5), show_zlabels=False, show_xlabels=False, show_ylabels=False, xtitle=" ", ytitle=" ", ztitle=" ")
+plotter.add_bounding_box()
+
+cpos = pv.CameraPosition(position=(-8.8009, 4.3099, -4.0316), focal_point=(0.3379, 0.8740, 2.0679), viewup=(0, 1, 0))
+plotter.camera_position = cpos
 plotter.show()
 
 
 obj = scatterer1
 theta = np.arange(-180, 182, 2)
-phi = 90
+phi = 0
 n_threads = 4
 
 rE = get_farfield_rE(J_xyz, M_xyz, theta, phi, frequency)
 
+scatterer1_center = np.average(scatterer1.cell_centers().points, axis=0)
+# vector from center of scatterer to antenna
+obj_src_p = source_pos - scatterer1_center
+obj_src_r = np.linalg.norm(obj_src_p)
+# scale rE to get power at source
+Pr = rE * np.exp(1j * beta * obj_src_r) / obj_src_r
+
 fig, ax = plt.subplots(subplot_kw=dict(projection="polar"))
 
-rE.plot("theta", xfmt=np.deg2rad, yfmt="db20")
+Pr.plot("theta", xfmt=np.deg2rad, yfmt="db20")
 plt.show()
-
