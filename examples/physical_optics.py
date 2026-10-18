@@ -177,6 +177,19 @@ pv.set_jupyter_backend("trame")
 tx_patt = ldarray.load(dir_ / "data/vivaldi_antenna_patt.npy")
 tx_pin = 1 # input power in watts
 
+# move the tx pattern to the source position, currently centered at the origin
+antenna_height = 1.5
+source_pos = (0, antenna_height, 0)
+src_patt = rfn.antennas.translate(tx_patt, source_pos)
+
+# rx antenna pattern
+rx_pos = (0, antenna_height - 0.1, 0)
+rx_patt = rfn.antennas.translate(tx_patt, rx_pos)
+
+# add antenna rendering
+antenna = pv.Cube(x_length=0.3, y_length=0.4, z_length=0.1)
+antenna.points += source_pos
+
 # build scene, dimensions in meters
 # z points out from antenna, x is azimuth, y is elevation (antenna centered coordinate frame)
 # scatterer1 = pv.read(pv.examples.planefile)
@@ -198,27 +211,17 @@ scatterer1.points *= 0.4
 scatterer1.points -= [np.average(scatterer1.points[:, i]) for i in range(3)]
 
 # # rotate to desired orientation with center at origin
-rot = Rotation.from_euler("x", -30, degrees=True).as_matrix()
-scatterer1.points = np.einsum("ij, ...j->...i", rot, scatterer1.points)
+# rot = Rotation.from_euler("x", -30, degrees=True).as_matrix()
+# scatterer1.points = np.einsum("ij, ...j->...i", rot, scatterer1.points)
 
 # move to desired location
 scatterer1.points += (-1, 0.8, 4)
-
-# move the tx pattern to the source position, currently centered at the origin
-antenna_height = 1.5
-source_pos = (0, antenna_height, 0)
-src_patt = rfn.antennas.translate(tx_patt, source_pos)
-
-# add antenna rendering
-antenna = pv.Cube(x_length=0.3, y_length=0.4, z_length=0.1)
-antenna.points += source_pos
 
 obj = scatterer1
 source_pwr = 1
 image = False
 frequency=f0
 ray_trace = False
-
 
 
 J_xyz_dir, M_xyz_dir = illuminate_object(scatterer1, source_pos, tx_patt, 1, frequency)
@@ -232,13 +235,13 @@ scatterer1.cell_data["Js"] = np.linalg.norm(J_xyz, axis=-1) #np.abs(J_xyz[..., 1
 scatterer1.cell_data["Ms"] = np.linalg.norm(M_xyz, axis=-1) 
 
 # ground plane
-gnd = pv.Rectangle(((-2, 0, -1), (2, 0, -1), (2, 0, 5)))
+gnd = pv.Rectangle(((-2, 0, 0), (2, 0, 0), (2, 0, 5)))
 
 plotter.add_mesh(antenna, color="tan")
 plotter.add_mesh(gnd, color="k", opacity=0.2)
 plotter.add_mesh(scatterer1, cmap="jet", scalars="Js")
 plotter.add_axes()
-plotter.show_bounds(bounds=(-2, 2, 0, 3, -1, 5), show_zlabels=False, show_xlabels=False, show_ylabels=False, xtitle=" ", ytitle=" ", ztitle=" ")
+plotter.show_bounds(bounds=(-2, 2, 0, 3, 0, 5), show_zlabels=False, show_xlabels=False, show_ylabels=False, xtitle=" ", ytitle=" ", ztitle=" ")
 plotter.add_bounding_box()
 
 cpos = pv.CameraPosition(position=(-8.8009, 4.3099, -4.0316), focal_point=(0.3379, 0.8740, 2.0679), viewup=(0, 1, 0))
@@ -251,16 +254,37 @@ theta = np.arange(-180, 182, 2)
 phi = 0
 n_threads = 4
 
-rE = get_farfield_rE(J_xyz, M_xyz, theta, phi, frequency)
-
-scatterer1_center = np.average(scatterer1.cell_centers().points, axis=0)
-# vector from center of scatterer to antenna
-obj_src_p = source_pos - scatterer1_center
-obj_src_r = np.linalg.norm(obj_src_p)
-# scale rE to get power at source
-Pr = rE * np.exp(1j * beta * obj_src_r) / obj_src_r
+rE_local = get_farfield_rE(J_xyz, M_xyz, theta, phi, frequency)
 
 fig, ax = plt.subplots(subplot_kw=dict(projection="polar"))
-
-Pr.plot("theta", xfmt=np.deg2rad, yfmt="db20")
+rE_local.plot("theta", xfmt=np.deg2rad, yfmt="db20")
 plt.show()
+
+
+scatterer1_center = np.average(scatterer1.cell_centers().points, axis=0)
+
+# vector from center of scatterer to antenna
+obj_rx_p = rx_pos - scatterer1_center
+# distance from scatterer to antenna
+obj_rx_r = np.linalg.norm(obj_rx_p)
+# normalized uvw position of rx antenna from the local coordinate frame of scatterer
+obj_rx_v = obj_rx_p / np.linalg.norm(obj_rx_p)
+
+# theta and phi angle back to the rx antenna from scatterer
+theta_rx, phi_rx = rfn.antennas.phitheta_uvw(*obj_rx_v)
+rE_at_rx = get_farfield_rE(J_xyz, M_xyz, theta_rx.item(), phi_rx.item(), frequency)
+
+# propagate rE to get e-field at source
+e_backscattered = rE_at_rx * np.exp(1j * beta * obj_rx_r) / obj_rx_r
+# convert to rectangular polarization
+e_backscattered = rfn.antennas.pattern_spherical2rectangular(e_backscattered)
+
+# get incident power E x H = E x (E / eta)
+# s_scattered = e_scattered * np.conjugate(e_scattered) / eta0
+
+# effective voltage area of rx antenna
+# e_eff = G (lam^2 / 4pi)
+eff_area_rx = rx_patt * np.sqrt(lam0**2 / (4 * np.pi))
+# received field at antenna terminals
+rx_e = eff_area_rx * e_backscattered
+

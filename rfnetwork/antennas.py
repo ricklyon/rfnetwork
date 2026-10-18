@@ -121,11 +121,11 @@ def phitheta_uvw(u: np.ndarray, v: np.ndarray, w: np.ndarray, deg: bool = True):
 
     u, v, w = np.atleast_1d(u), np.atleast_1d(v), np.atleast_1d(w)
     # form into a meshgrid
-    u_m, v_m = _create_meshgrid(u, v)
+    u_m, v_m, w_m = _create_meshgrid(u, v, w)
 
     with np.errstate(all='ignore'):
         phi = np.arctan2(v_m, u_m)
-        theta = np.arccos(np.clip(w, -1, 1))
+        theta = np.arccos(np.clip(w_m, -1, 1))
 
     if deg:
         phi, theta = np.rad2deg(phi), np.rad2deg(theta)
