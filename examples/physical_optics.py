@@ -14,57 +14,6 @@ dir_ = Path(__file__).parent
 
 eta0 = 377
 
-f0 = 3e9
-lam0 = rfn.const.c0 / f0
-beta = 2 * np.pi / lam0
-
-pv.set_jupyter_backend("trame")
-
-# TX beam pattern, x-polarization
-tx_patt = ldarray.load(dir_ / "data/vivaldi_antenna_patt.npy")
-tx_pin = 1 # input power in watts
-
-# build scene, dimensions in meters
-# z points out from antenna, x is azimuth, y is elevation (antenna centered coordinate frame)
-# # scatterer1 = pv.read(pv.examples.planefile)
-# scatterer1 = pv.Rectangle(
-#     ((-1, -1, 0), (-1, 1, 0), (1, 1, 0))
-# )
-# subdivide so that no face edge is longer than lambda/6, keeps the phase variation across each face small.
-# the scattered field at the antenna converges to within 0.1 dB and 0.5 deg at this density.
-# scatterer1 = scatterer1.triangulate().subdivide(7)#.subdivide_adaptive(max_edge_len=lam0 / 4, max_tri_area=(lam0 / 4) ** 2)
-
-
-scatterer1 = pv.Sphere(radius=1, theta_resolution=200, phi_resolution=200)
-
-# normalize size to 1m
-scatterer1.points /= np.max(np.abs(scatterer1.points))
-# scale to desired size
-scatterer1.points *= 0.3
-# center at 0
-scatterer1.points -= [np.average(scatterer1.points[:, i]) for i in range(3)]
-
-# # rotate to desired orientation with center at origin
-# rot = Rotation.from_euler("xzx", (90, 180, 0), degrees=True).as_matrix()
-# scatterer1.points = np.einsum("ij, ...j->...i", rot, scatterer1.points)
-
-# move to desired location
-scatterer1.points += (1, 0, 2)
-
-# move the tx pattern to the source position, currently centered at the origin
-antenna_height = 0
-source_pos = (0, antenna_height, 0)
-src_patt = rfn.antennas.translate(tx_patt, source_pos)
-
-# add antenna rendering
-antenna = pv.Cube(x_length=0.3, y_length=0.3, z_length=0.1)
-antenna.points += source_pos
-
-obj = scatterer1
-source_pwr = 1
-image = False
-frequency=f0
-ray_trace = False
 
 def visible_faces(obj: pv.PolyData, source_pos: tuple) -> np.ndarray:
     """
@@ -95,7 +44,7 @@ def visible_faces(obj: pv.PolyData, source_pos: tuple) -> np.ndarray:
     return visible
 
 def illuminate_object(
-        obj: pv.PolyData, source_pos: tuple, src_patt: ldarray, source_pwr: float, image: bool = False, ray_trace: bool = False
+        obj: pv.PolyData, source_pos: tuple, src_patt: ldarray, source_pwr: float, frequency: float, image: bool = False, ray_trace: bool = False
     ):
 
     # flip location of source to the other side of ground plane if computing the image
@@ -126,7 +75,7 @@ def illuminate_object(
         obj_el = -obj_el
 
     # evaluate tx pattern at scatterer faces, remove frequency axis
-    gain_at_faces = src_patt.sel(frequency=f0).interpolate(az=obj_az, el=obj_el, flat=True)
+    gain_at_faces = src_patt.sel(frequency=frequency).interpolate(az=obj_az, el=obj_el, flat=True)
 
     # the gain is related to the e-field strength by
     # G = (4pi / 2 eta0) (|rE|^2 / Pin)
@@ -136,7 +85,8 @@ def illuminate_object(
     e_inc = gain_at_faces * np.sqrt(source_pwr * (2 * eta0 / (4 * np.pi * obj_src_r**2))) * np.exp(-1j * beta * obj_src_r)
     e_inc = e_inc.transpose(("azel", "polarization"))
     # cross product with propagation direction vector to get incident h field
-    h_inc = np.cross(poynting_v, e_inc) / eta0
+    # TODO: I think this should be k X E, not -k X E. This is probably correcting a sign flip somewhere downstream
+    h_inc = np.cross(-poynting_v, e_inc) / eta0
 
     # compute intercepted field using the dot product of face normal with position vector
     eff_area = np.einsum("ij,ij->i", obj_face_normals, poynting_v)
@@ -146,8 +96,8 @@ def illuminate_object(
 
     # compute surface currents on each face
     # physical optics electric surface current on the PEC scatterer, Js = 2 n^ x H_inc on lit faces
-    js_at_faces = 2 * np.cross(obj_face_normals, h_inc) * eff_area[..., None]
-    ms_at_faces = -2 * np.cross(obj_face_normals, e_inc) * eff_area[..., None]
+    js_at_faces = np.cross(obj_face_normals, h_inc) * eff_area[..., None]
+    ms_at_faces = np.cross(-obj_face_normals, e_inc) * eff_area[..., None]
 
     # A face is lit if it points towards the source
     # and no other part of the object blocks the line of sight to it.
@@ -215,8 +165,61 @@ def get_farfield_rE(
     )
 
 
+f0 = 3e9
+lam0 = rfn.const.c0 / f0
+beta = 2 * np.pi / lam0
 
-J_xyz, M_xyz = illuminate_object(scatterer1, source_pos, tx_patt, 1)
+pv.set_jupyter_backend("trame")
+
+# TX beam pattern, x-polarization
+tx_patt = ldarray.load(dir_ / "data/vivaldi_antenna_patt.npy")
+tx_pin = 1 # input power in watts
+
+# build scene, dimensions in meters
+# z points out from antenna, x is azimuth, y is elevation (antenna centered coordinate frame)
+# scatterer1 = pv.read(pv.examples.planefile)
+# scatterer1 = pv.Rectangle(
+#     ((-1, -1, 0), (-1, 1, 0), (1, 1, 0))
+# )
+# # subdivide so that no face edge is longer than lambda/6, keeps the phase variation across each face small.
+# # the scattered field at the antenna converges to within 0.1 dB and 0.5 deg at this density.
+# scatterer1 = scatterer1.triangulate().subdivide(7)#.subdivide_adaptive(max_edge_len=lam0 / 4, max_tri_area=(lam0 / 4) ** 2)
+
+
+scatterer1 = pv.Sphere(radius=1, theta_resolution=100, phi_resolution=100)
+
+# normalize size to 1m
+scatterer1.points /= np.max(np.abs(scatterer1.points))
+# scale to desired size
+scatterer1.points *= 0.6
+# center at 0
+scatterer1.points -= [np.average(scatterer1.points[:, i]) for i in range(3)]
+
+# # rotate to desired orientation with center at origin
+rot = Rotation.from_euler("x", -30, degrees=True).as_matrix()
+scatterer1.points = np.einsum("ij, ...j->...i", rot, scatterer1.points)
+
+# move to desired location
+scatterer1.points += (0, 0, 1)
+
+# move the tx pattern to the source position, currently centered at the origin
+antenna_height = 0
+source_pos = (0, antenna_height, 0)
+src_patt = rfn.antennas.translate(tx_patt, source_pos)
+
+# add antenna rendering
+antenna = pv.Cube(x_length=0.3, y_length=0.3, z_length=0.1)
+antenna.points += source_pos
+
+obj = scatterer1
+source_pwr = 1
+image = False
+frequency=f0
+ray_trace = False
+
+
+
+J_xyz, M_xyz = illuminate_object(scatterer1, source_pos, tx_patt, 1, frequency)
 
 plotter = pv.Plotter()
 scatterer1.cell_data["Ms (dB)"] = np.abs(M_xyz[..., 0])
@@ -225,7 +228,7 @@ scatterer1.cell_data["Ms (ang)"] = np.angle(M_xyz[..., 1], deg=True)
 plotter.add_mesh(antenna)
 plotter.add_mesh(scatterer1, cmap="jet", scalars="Ms (dB)")
 plotter.add_axes()
-plotter.camera_position = "xz"
+plotter.camera_position = "iso"
 plotter.show()
 
 
@@ -238,5 +241,6 @@ rE = get_farfield_rE(J_xyz, M_xyz, theta, phi, frequency)
 
 fig, ax = plt.subplots(subplot_kw=dict(projection="polar"))
 
-rE.plot("theta", xfmt=np.deg2rad, yfmt="db20", ax=ax)
+rE.plot("theta", xfmt=np.deg2rad, yfmt="db20")
+plt.show()
 

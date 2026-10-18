@@ -1025,8 +1025,8 @@ int postprocess_nf2ff_triangulated_thread(
         // cell positions, cell centers
         MatrixFloatType r_pos (cell_pos_p, 3, n_cells);
         auto rx = r_pos.row(0);
-        auto ry = r_pos.row(0);
-        auto rz = r_pos.row(0);
+        auto ry = r_pos.row(1);
+        auto rz = r_pos.row(2);
 
         // loop over theta
         for (int th = theta_start; th < theta_stop; th++)
@@ -1052,15 +1052,9 @@ int postprocess_nf2ff_triangulated_thread(
                 sin_ph_c = (std::complex<float>) sin_ph;
                 sin_th_c = (std::complex<float>) sin_th;
 
-                // reset N and L at each frequency/theta/phi, values from all faces are summed into a single value
-                N_theta = zero_c;
-                N_phi = zero_c;
-                L_theta = zero_c;
-                L_phi = zero_c;
-
                 // phase term for integrand
                 MatrixFloatType r_dot (working_grid_float_p, 1, n_cells);
-                r_dot = ((rx * u).array() + ((ry * v).array() + (rz * w).array()).array());
+                r_dot = ((rx * u).array() + (ry * v).array() + (rz * w).array()).array();
                         
                 // msg.str("");
                 // msg.clear();
@@ -1080,7 +1074,7 @@ int postprocess_nf2ff_triangulated_thread(
                 // N_theta
                 // N_theta_intg = (Jx * cos_th * cos_ph) + (Jy * cos_th * sin_ph) - (Jz * sin_th)
                 // N_theta += np.sum(N_theta_intg * dS)
-                N_theta += (
+                N_theta = (
                     (
                         (Jx.array() * (cos_th_c * cos_ph_c)) + 
                         (Jy.array() * (cos_th_c * sin_ph_c)) -
@@ -1091,7 +1085,7 @@ int postprocess_nf2ff_triangulated_thread(
                 // N_phi
                 // N_phi_intg = (-Jx * sin_ph) + (Jy * cos_ph)
                 // N_phi += np.sum(N_phi_intg * dS)
-                N_phi += (
+                N_phi = (
                     (
                         (-Jx.array() * (sin_ph_c)) + 
                         (Jy.array() * (cos_ph_c))
@@ -1101,7 +1095,7 @@ int postprocess_nf2ff_triangulated_thread(
                 // # L_theta 
                 // L_theta_intg = (Mx * cos_th * cos_ph) + (My * cos_th * sin_ph) - (Mz * sin_th)
                 // L_theta += np.sum(L_theta_intg * dS)
-                L_theta += (
+                L_theta = (
                     (
                         (Mx.array() * (cos_th_c * cos_ph_c)) + 
                         (My.array() * (cos_th_c * sin_ph_c)) -
@@ -1112,7 +1106,7 @@ int postprocess_nf2ff_triangulated_thread(
                 // # L_phi
                 // L_phi_intg = (-Mx * sin_ph) + (My * cos_ph)
                 // L_phi += np.sum(L_phi_intg * dS)
-                L_phi += (
+                L_phi = (
                     (
                         (-Mx.array() * (sin_ph_c)) + 
                         (My.array() * (cos_ph_c))
