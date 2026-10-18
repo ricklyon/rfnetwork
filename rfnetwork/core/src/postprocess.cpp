@@ -738,3 +738,406 @@ int postprocess_nf2ff_thread(
 
     return 0;
 }
+
+
+/**
+ * @brief Integrate J and M equivalent surface currents on a rectangular box to produce the far-field electric field values.
+ * See Section 6.8.2 in Balanis Advanced Engineering Electromagnetics 2nd Edition.
+ * 
+ * @param J_xyz_py
+ *      Python list object containing the equivalent electric current (Js = n X Hs) on each of the 6 faces of a closed box.
+ *      Object must contain three sub-lists, each of length 2, (3 axes, 2 faces on each axis). Each item in the length 
+ *      2 lists are numpy arrays of type float32.
+ * 
+  * @param M_xyz_py
+ *      Python list object containing the equivalent magnetic current (Ms = -n X Es) on each of the 6 faces of a closed box.
+ *      Object must contain three sub-lists, each of length 2, (3 axes, 2 faces on each axis). Each item in the length 
+ *      2 lists are numpy arrays of type float32.
+ * 
+ *  @param r_grid_py
+ *      Python list object of the xyz positions of each cell of the grid. List contains three sub-lists for each 
+ *      axis, each containing two 2D matrices of the grid cell center locations, in meters. For the x-axis, the
+ *      two matrices hold the cell positions along the yz plane. For y-axis, the cell positions are on the xz plane. 
+ *      For the z-axis, cell positions are on the xy plane. The dtype is float32.
+ * 
+ *  @param ds_grid_py
+ *      Python list object of the area of each grid cell. List contains three sub-lists for each 
+ *      axis, each item in the list is a 2D matrix of the grid cell area, in m^2. The dtype of these arrays
+ *      is complex64 (avoids a re-cast in c++)
+ * 
+ *  @param surf_pos_py
+ *      Python list object of the location of the surfaces for each axis. List contains three sub-lists, one for
+ *      each axis. Each sub-list contains two float32 values that store the location of the surface on each side of the 
+ *      box, in meters. 
+ * 
+ *  @param ff_data_py
+ *      Python dictionary objecting containing the following Python array objects:
+ *       
+ *      - beta : wavenumber for each frequency, float32
+ * 
+ *      - phi : phi angles in radians, float32
+ *
+ *      - data : Empty 2xFxTxP matrix where far-field data will be written to. F is the number of frequencies,
+ *                  T is the number of theta points, P is the number of phi points,
+ *
+ *      - working_grid_cmplx : Empty matrix used as temporary working memory. Must be large enough to hold
+ *                                a full grid of values for the largest of the box faces, for each thread. dtype is
+ *                                complex64. *
+ *      - working_grid_float : Empty matrix used as temporary working memory. Must be large enough to hold
+ *                                a full grid of values for the largest of the box faces, for each thread. dtype is
+ *                                float32.
+ * 
+ * @param n_threads
+ *      Number of parallel threads to run computation in. The theta values are split evenly across the threads,
+ *      each thread will compute the same number of frequencies and phi values.
+ * 
+ * @return 0 if successful.
+ */
+int postprocess_nf2ff_triangulated(
+    PyObject * J_xyz_py, 
+    PyObject * M_xyz_py, 
+    PyObject * cell_pos_py, 
+    PyObject * cell_ds_py, 
+    PyObject * ff_data_py,
+    int n_threads
+)
+{
+    npy_intp * npy_shape;
+
+    // get the result data array where the E-fields will be held.
+    PyObject* py_data = PyDict_GetItemString(ff_data_py, "data");
+    PyArrayObject* py_data_arr = (PyArrayObject*) py_data;
+
+    if (PyArray_NDIM(py_data_arr) != FFDATA_NDIM)
+    {
+        throw std::runtime_error("Invalid far-field data array. Expected four dimensions.");
+    }
+
+    // get temporary working complex array
+    PyObject* working_grid_py = PyDict_GetItemString(ff_data_py, "working_grid_cmplx");
+    PyArrayObject* working_grid_array = (PyArrayObject*) working_grid_py;
+    npy_shape = PyArray_SHAPE(working_grid_array);  
+    std::complex<float> * working_grid_cmplx_p = (std::complex<float> *) PyArray_DATA(working_grid_array);
+
+    if (PyArray_TYPE(working_grid_array) != NPY_CFLOAT)
+    {
+        throw std::runtime_error("Invalid data array. Must be complex float type.");
+    }
+
+    if (npy_shape[0] != n_threads)
+    {
+        throw std::runtime_error("Invalid working array shape.");
+    }
+
+    // get temporary working float array
+    working_grid_py = PyDict_GetItemString(ff_data_py, "working_grid_float");
+    working_grid_array = (PyArrayObject*) working_grid_py;
+    npy_shape = PyArray_SHAPE(working_grid_array); 
+    float * working_grid_float_p = (float *) PyArray_DATA(working_grid_array);
+
+    if (PyArray_TYPE(working_grid_array) != NPY_FLOAT)
+    {
+        throw std::runtime_error("Invalid data array. Must be float type.");
+    }
+
+    if (npy_shape[0] != n_threads)
+    {
+        throw std::runtime_error("Invalid working array shape.");
+    }
+
+    // get shape of working grid array. The shape of the last dimension is the number of cells
+    int n_cells = npy_shape[1];
+
+    // dimensions are polarization, frequency, theta, phi
+    int data_shape[FFDATA_NDIM];
+    npy_shape = PyArray_SHAPE(py_data_arr); 
+
+    for (int i = 0; i < FFDATA_NDIM; ++i) { 
+        data_shape[i] = (int) npy_shape[i];
+    }
+
+    // result data array
+    std::complex<float> * data_arr = get_complex_array(py_data, data_shape, FFDATA_NDIM);
+
+    // beta (frequency) array
+    int beta_shape[1] = {data_shape[FF_FREQUENCY]};
+    float * beta_arr = get_float_array(
+        PyDict_GetItemString(ff_data_py, "beta"), beta_shape, 1
+    );
+
+    // theta array, in radius
+    int theta_shape[1] = {data_shape[FF_THETA]};
+    float * theta_arr = get_float_array(
+        PyDict_GetItemString(ff_data_py, "theta"), theta_shape, 1
+    );
+
+    // phi array, in radius
+    int phi_shape[1] = {data_shape[FF_PHI]};
+    float * phi_arr = get_float_array(
+        PyDict_GetItemString(ff_data_py, "phi"), phi_shape, 1
+    );
+    
+    // array pointers for J currents
+    int grid_shape[2] = {3, n_cells};
+    std::complex<float> * J_xyz_p = get_complex_array(J_xyz_py, grid_shape, 2);
+    // array pointers for M currents
+    std::complex<float> * M_xyz_p = get_complex_array(M_xyz_py, grid_shape, 2);
+
+    // get array of cell positions
+    float * cell_pos_p = get_float_array(cell_pos_py, grid_shape, 2);
+    // cell area
+    int cell_shape[1] = {n_cells};
+    float * cell_ds_p = get_float_array(cell_ds_py, cell_shape, 1);
+
+    std::thread threads[MAX_THREADS];
+
+    // number of theta points in each batch
+    int n_batch = data_shape[FF_THETA] / n_threads;
+    // remainder of batch size
+    int r_batch = data_shape[FF_THETA] % n_threads;
+
+    // index of start/stop theta point for a given thread
+    int theta_start = 0;
+    int theta_stop = 0;
+
+    for (int t = 0; t < n_threads; t++)
+    {
+        theta_start = theta_stop;
+        
+        // add 1 to the batch size until the remainder is removed
+        if (r_batch > 0)
+        {
+            theta_stop =  theta_start + n_batch + 1;
+            r_batch -= 1;
+        }
+        else
+        {
+            theta_stop =  theta_start + n_batch;
+        }
+
+        // assign thread a unique section of the theta vector
+        threads[t] = std::thread(
+            postprocess_nf2ff_triangulated_thread, 
+            data_arr,
+            beta_arr,
+            theta_arr,
+            phi_arr,
+            cell_pos_p,
+            cell_ds_p,
+            data_shape,
+            M_xyz_p,
+            J_xyz_p,
+            // assign thread a unique working array
+            working_grid_cmplx_p + (n_cells * t),
+            working_grid_float_p + (n_cells * t),
+            theta_start,
+            theta_stop,
+            n_cells
+        );
+    }
+
+    // wait for all threads to complete
+    for (int t = 0; t < n_threads; t++)
+    {
+        threads[t].join();
+    }
+
+    return 0;
+}
+
+int postprocess_nf2ff_triangulated_thread(
+    std::complex<float> * data_array,
+    float * beta_arr,
+    float * theta_arr,
+    float * phi_arr,
+    float * cell_pos_p,
+    float * cell_ds_p,
+    int * data_shape,
+    std::complex<float> * M_xyz_p,
+    std::complex<float> * J_xyz_p,
+    std::complex<float> * working_grid_cmplx_p,
+    float * working_grid_float_p,
+    int theta_start,
+    int theta_stop,
+    int n_cells
+)
+{
+
+    // theta_stop is non-inclusive
+    
+    // variables for N and L auxilary fields
+    std::complex<float> N_theta, N_phi, L_theta, L_phi;
+    // pointers into the result data array for both polarizations
+    std::complex<float> * thetapol_p;
+    std::complex<float> * phipol_p;
+
+    // variables for the current frequency, theta and phi values in the loops
+    float beta, theta, phi;
+    // working variables for cos(theta), sin(theta), etc...
+    float cos_th, cos_ph, sin_th, sin_ph;
+    // cos/sin terms cast as complex values
+    std::complex<float> cos_th_c, cos_ph_c, sin_th_c, sin_ph_c;
+    std::complex<float> beta_c;
+
+    // 4 * PI as a complex number
+    std::complex<float> pi4_c = (std::complex<float>) (4 * M_PI);
+    // Impedance of free space as a complex number
+    std::complex<float> eta0_c = (std::complex<float>) (ETA0);
+
+    // variables for current uv values in the loop
+    float u, v, w;
+
+    // constant -1j, 1j and 0 as complex numbers
+    std::complex<float> n1J = std::complex<float>(0, -1);
+    std::complex<float> p1J = std::complex<float>(0, 1);
+    std::complex<float> zero_c = std::complex<float>(0, 0);
+
+    // loop over frequency
+    for (int f = 0; f < data_shape[FF_FREQUENCY]; f++)
+    {   
+        beta = beta_arr[f];
+        beta_c = (std::complex<float>) beta;
+        
+        // pointers to J and M currents for this frequency
+        int f_offset = (f * 3 * n_cells);
+        std::complex<float> * J_xyz_f = J_xyz_p + f_offset;
+        std::complex<float> * M_xyz_f = M_xyz_p + f_offset;
+
+        std::stringstream msg;
+
+        // Jx current grid
+        MatrixComplexType Jxyz (J_xyz_f, 3, n_cells);
+        MatrixComplexType Mxyz (M_xyz_f, 3, n_cells);
+        
+        // Jy current grid
+        auto Jx = Jxyz.row(0);
+        auto Jy = Jxyz.row(1);
+        auto Jz = Jxyz.row(2);
+
+        // Jy current grid
+        auto Mx = Mxyz.row(0);
+        auto My = Mxyz.row(1);
+        auto Mz = Mxyz.row(2);
+
+        // cell area
+        MatrixFloatType ds (cell_ds_p, 1, n_cells);
+
+        // cell positions, cell centers
+        MatrixFloatType r_pos (cell_pos_p, 3, n_cells);
+        auto rx = r_pos.row(0);
+        auto ry = r_pos.row(0);
+        auto rz = r_pos.row(0);
+
+        // loop over theta
+        for (int th = theta_start; th < theta_stop; th++)
+        {
+            theta = theta_arr[th];
+            // loop over phi
+            for (int ph = 0; ph < data_shape[FF_PHI]; ph++)
+            {
+                phi = phi_arr[ph];
+                
+                cos_ph = (float) std::cos((float) phi);
+                cos_th = (float) std::cos((float) theta);
+                sin_ph = (float) std::sin((float) phi);
+                sin_th = (float) std::sin((float) theta);
+                
+                // covert to uvw
+                u = sin_th * cos_ph;
+                v = sin_th * sin_ph;
+                w = cos_th;
+
+                cos_ph_c = (std::complex<float>) cos_ph;
+                cos_th_c = (std::complex<float>) cos_th;
+                sin_ph_c = (std::complex<float>) sin_ph;
+                sin_th_c = (std::complex<float>) sin_th;
+
+                // reset N and L at each frequency/theta/phi, values from all faces are summed into a single value
+                N_theta = zero_c;
+                N_phi = zero_c;
+                L_theta = zero_c;
+                L_phi = zero_c;
+
+                // phase term for integrand
+                MatrixFloatType r_dot (working_grid_float_p, 1, n_cells);
+                r_dot = ((rx * u).array() + ((ry * v).array() + (rz * w).array()).array());
+                        
+                // msg.str("");
+                // msg.clear();
+                // msg << "theta " << theta << "phi " << phi << " " << grid_shape[axis][0] << " " << grid_shape[axis][1] << "\n";
+                
+                // std::cout << msg.str();
+                
+                // integrand term, same memory used for exponential phase term exp(1j * beta.item() * r_dot)
+                // and the differential dS.
+                MatrixComplexType intg (working_grid_cmplx_p, 1, n_cells);
+
+                // phs_term = exp(1j * beta.item() * r_dot)
+                intg = exp((p1J * beta_c) * r_dot.array().cast<std::complex<float>>());
+                // dS = phs_term * d1 * d2
+                intg = intg.array() * (ds.array());
+
+                // N_theta
+                // N_theta_intg = (Jx * cos_th * cos_ph) + (Jy * cos_th * sin_ph) - (Jz * sin_th)
+                // N_theta += np.sum(N_theta_intg * dS)
+                N_theta += (
+                    (
+                        (Jx.array() * (cos_th_c * cos_ph_c)) + 
+                        (Jy.array() * (cos_th_c * sin_ph_c)) -
+                        (Jz.array() * sin_th_c)
+                    ).array() * intg.array()
+                ).sum();
+                    
+                // N_phi
+                // N_phi_intg = (-Jx * sin_ph) + (Jy * cos_ph)
+                // N_phi += np.sum(N_phi_intg * dS)
+                N_phi += (
+                    (
+                        (-Jx.array() * (sin_ph_c)) + 
+                        (Jy.array() * (cos_ph_c))
+                    ).array() * intg.array()
+                ).sum();
+
+                // # L_theta 
+                // L_theta_intg = (Mx * cos_th * cos_ph) + (My * cos_th * sin_ph) - (Mz * sin_th)
+                // L_theta += np.sum(L_theta_intg * dS)
+                L_theta += (
+                    (
+                        (Mx.array() * (cos_th_c * cos_ph_c)) + 
+                        (My.array() * (cos_th_c * sin_ph_c)) -
+                        (Mz.array() * sin_th_c)
+                    ).array() * intg.array()
+                ).sum();
+
+                // # L_phi
+                // L_phi_intg = (-Mx * sin_ph) + (My * cos_ph)
+                // L_phi += np.sum(L_phi_intg * dS)
+                L_phi += (
+                    (
+                        (-Mx.array() * (sin_ph_c)) + 
+                        (My.array() * (cos_ph_c))
+                    ).array() * intg.array()
+                ).sum();
+
+
+                // pointer to thetapol result
+                thetapol_p = (data_array + get_pointer_index_4(data_shape, {0, f, th, ph}));
+
+                // pointer to phipol result
+                phipol_p = (data_array + get_pointer_index_4(data_shape, {1, f, th, ph}));
+
+                // contributions to N and L have been summed from all faces by this point. Calculate far-field
+                // # electric field for thetapol and phipol
+                // E_theta[i] = (-j * beta / (4 * np.pi)) * (L_phi + eta0 * N_theta)
+                *thetapol_p = ((n1J * beta_c / pi4_c) * (L_phi + (eta0_c * N_theta)));
+                // E_phi[i] = (j * beta / (4 * np.pi)) * (L_theta - eta0 * N_phi)
+                *phipol_p = ((p1J * beta_c / pi4_c) * (L_theta - (eta0_c * N_phi)));
+
+            } // end phi loop
+
+        } // end theta loop
+
+    } // end frequency loop 
+
+    return 0;
+}

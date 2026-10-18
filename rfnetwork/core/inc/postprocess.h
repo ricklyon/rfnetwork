@@ -36,4 +36,30 @@ int postprocess_nf2ff_thread(
     int theta_stop
 );
 
+int postprocess_nf2ff_triangulated(
+    PyObject * J_xyz_py, 
+    PyObject * M_xyz_py, 
+    PyObject * cell_pos_py, 
+    PyObject * cell_ds_py, 
+    PyObject * ff_data_py,
+    int n_threads
+);
+
+int postprocess_nf2ff_triangulated_thread(
+    std::complex<float> * data_array,
+    float * beta_arr,
+    float * theta_arr,
+    float * phi_arr,
+    float * cell_pos_p,
+    float * cell_ds_p,
+    int * data_shape,
+    std::complex<float> * M_xyz_p,
+    std::complex<float> * J_xyz_p,
+    std::complex<float> * working_grid_cmplx_p,
+    float * working_grid_float_p,
+    int theta_start,
+    int theta_stop,
+    int n_cells
+);
+
 #endif /* POSTPROCESS_H */
