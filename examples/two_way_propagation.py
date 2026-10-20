@@ -111,7 +111,8 @@ def illuminate_object(
 
 
 def get_farfield_rE(
-        J_xyz, M_xyz, theta: np.ndarray, phi: np.ndarray, frequency: np.ndarray = None, n_threads: int = 4) -> ldarray:
+    obj: pv.PolyData, J_xyz, M_xyz, theta: np.ndarray, phi: np.ndarray, frequency: np.ndarray = None, n_threads: int = 4
+) -> ldarray:
     """
     Compile E-field monitor data from the farfield monitor attached to the solver.
 
@@ -180,8 +181,8 @@ def polar_dir(theta, phi):
 def add_polar_lines(plotter: pv.Plotter, J_xyz, M_xyz, frequency):
 
     theta = np.arange(-180, 182, 2)
-    rE_local_phi0 = get_farfield_rE(J_xyz, M_xyz, theta, np.ones_like(theta) * 0, frequency).squeeze()
-    rE_local_phi90 = get_farfield_rE(J_xyz, M_xyz, theta, np.ones_like(theta) * 90, frequency).squeeze()
+    rE_local_phi0 = get_farfield_rE(scatterer1, J_xyz, M_xyz, theta, np.ones_like(theta) * 0, frequency).squeeze()
+    rE_local_phi90 = get_farfield_rE(scatterer1, J_xyz, M_xyz, theta, np.ones_like(theta) * 90, frequency).squeeze()
 
     # 2D polar patterns of the scattered field, drawn in the scene around the scatterer.
     # total field magnitude (thetapol and phipol combined), both cuts normalized to the common peak
@@ -213,8 +214,63 @@ def add_polar_lines(plotter: pv.Plotter, J_xyz, M_xyz, frequency):
         plotter.add_mesh(line, color=color, line_width=2, opacity=0.5)
     plotter.add_mesh(pv.merge(polar_grids), color="gray", opacity=0.2, line_width=1)
 
-f0 = 3e9
-lam0 = rfn.const.c0 / f0
+def add_ground_plane(plotter, width, length):
+    # --- Create a ground plane ---
+    plane = pv.Plane(
+        center=(0, 0, length/2),
+        direction=(0, 1, 0),
+        i_size=length,
+        j_size=width,
+        i_resolution=1,
+        j_resolution=1,
+    )
+
+    # Generate planar texture coordinates
+    plane.texture_map_to_plane(inplace=True)
+
+    # --- Generate a procedural dirt texture ---
+    rng = np.random.default_rng(42)
+    size = 256
+
+    # Smooth, mottled noise
+    noise = rng.random((size, size))
+    for _ in range(4):
+        noise = (
+            noise
+            + np.roll(noise, 1, axis=0)
+            + np.roll(noise, -1, axis=0)
+            + np.roll(noise, 1, axis=1)
+            + np.roll(noise, -1, axis=1)
+        ) / 5
+
+    # Add fine-grained variation
+    noise = 0.75 * noise + 0.25 * rng.random((size, size))
+    noise = (noise - noise.min()) / (noise.max() - noise.min())
+
+    # Convert noise into earthy RGB colors
+    dark = np.array([85, 65, 43])
+    light = np.array([160, 133, 95])
+
+    texture_image = (
+        dark[None, None, :]
+        + noise[:, :, None] * (light - dark)[None, None, :]
+    ).clip(0, 255).astype(np.uint8)
+
+    texture = pv.Texture(texture_image)
+    texture.repeat = True
+
+    plotter.add_mesh(
+        plane,
+        texture=texture,
+        show_edges=False,
+        opacity=0.5
+    )
+
+##############################
+# Build Scene
+##############################
+frequency = 3e9
+lam0 = rfn.const.c0 / frequency
 beta = 2 * np.pi / lam0
 
 pv.set_jupyter_backend("trame")
@@ -263,13 +319,10 @@ scatterer1.points = np.einsum("ij, ...j->...i", rot, scatterer1.points)
 # move to desired location
 scatterer1.points += (-1, 1.5, 10)
 
-obj = scatterer1
-source_pwr = 1
-image = False
-frequency=f0
-ray_trace = False
 
-
+##############################
+# Illuminate scene from transmitter
+##############################
 J_xyz_dir, M_xyz_dir = illuminate_object(scatterer1, source_pos, tx_patt, 1, frequency, ray_trace=True)
 J_xyz_im, M_xyz_im = illuminate_object(scatterer1, source_pos, tx_patt, 1, frequency, image=True, ray_trace=True)
 
@@ -284,20 +337,23 @@ scatterer1.cell_data["Js"] = rfn.conv.db20_lin(np.linalg.norm(J_xyz, axis=-1)) #
 scatterer1.cell_data["Ms"] = rfn.conv.db20_lin(np.linalg.norm(M_xyz, axis=-1))
 
 # ground plane
-gnd = pv.Rectangle(((-2.5, 0, 0), (2.5, 0, 0), (2.5, 0, 12)))
+# gnd = pv.Rectangle(((-2.5, 0, 0), (2.5, 0, 0), (2.5, 0, 12)))
+add_ground_plane(plotter, 5, 12)
 
 plotter.add_mesh(antenna, color="tan")
-plotter.add_mesh(gnd, color="k", opacity=0.2)
+# plotter.add_mesh(gnd, color="k", opacity=0.2)
 plotter.add_mesh(scatterer1, cmap="jet", scalars="Ms", clim=(-30, 20))
 add_polar_lines(plotter, J_xyz, M_xyz, frequency)
 plotter.add_axes()
-plotter.show_bounds(bounds=(-2.5, 2.5, 0, 3.5, 0, 12), show_zlabels=False, show_xlabels=False, show_ylabels=False, xtitle=" ", ytitle=" ", ztitle=" ")
-plotter.add_bounding_box()
+# plotter.show_bounds(bounds=(-2.5, 2.5, 0, 3.5, 0, 12), show_zlabels=False, show_xlabels=False, show_ylabels=False, xtitle=" ", ytitle=" ", ztitle=" ")
+# plotter.show_grid()
+
+# plotter.add_bounding_box()
+
 
 cpos = pv.CameraPosition(position=(-7, 6, 6), focal_point=(0.3379, 0.8740, 10), viewup=(0, 1, 0))
 plotter.camera_position = cpos
 plotter.show()
-
 
 # fig, ax = plt.subplots(subplot_kw=dict(projection="polar"))
 # rE_local_phi0.plot("theta", xfmt=np.deg2rad, yfmt="db20")
@@ -314,7 +370,7 @@ rx_pos = [
     (0.1, antenna_height + 0.1, 0)
 ]
 
-rx_pos = ldarray(rx_pos, coords=dict(ch=range(4), axis=("x", "y", "z")))
+rx_pos = ldarray(rx_pos, coords=dict(ele=range(4), axis=("x", "y", "z")))
 rx_patt = rfn.antennas.translate(tx_patt, rx_pos)
 
 # vector from center of scatterer to rx antenna
@@ -327,26 +383,54 @@ obj_rx_v = obj_rx_p / obj_rx_r
 # theta and phi angle back to the rx antenna from scatterer
 phi_rx, theta_rx = rfn.antennas.phitheta_uvw(*(obj_rx_v.T), flat=True)
 
-rE_at_rx = get_farfield_rE(J_xyz, M_xyz, theta_rx, phi_rx, frequency)
+rE_at_rx = get_farfield_rE(scatterer1, J_xyz, M_xyz, theta_rx, phi_rx, frequency)
 # convert to rectangular polarization
-rE_at_rx = rfn.antennas.pattern_spherical2rectangular(rE_at_rx).squeeze().rename(phitheta="ch")
+rE_at_rx = rfn.antennas.pattern_spherical2rectangular(rE_at_rx).squeeze().rename(phitheta="ele")
 
 # propagate rE to get e-field at source
 e_inc_rx = rE_at_rx * np.exp(1j * beta * obj_rx_r) / obj_rx_r
-
 
 # get incident power E x H = E x (E / eta)
 # s_scattered = e_scattered * np.conjugate(e_scattered) / eta0
 
 # gain of rx pattern at incident direction from scatterer
 rx_az, rx_el = rfn.antennas.azel_uvw(*(-obj_rx_v.T), flat=True)
-rx_patt_inc = rx_patt.sel(frequency=frequency).interpolate(az=rx_az, el=rx_el, ch=np.arange(4), flat=True).squeeze()
+rx_patt_inc = rx_patt.sel(frequency=frequency).interpolate(az=rx_az, el=rx_el, ele=np.arange(4), flat=True).squeeze()
 # effective voltage area of rx antenna
 # e_eff = G (lam^2 / 4pi)
-eff_area_rx = rx_patt_inc * np.sqrt(lam0**2 / (4 * np.pi))
+eff_area_rx = np.abs(rx_patt_inc).rename(azelele="ele") * np.sqrt(lam0**2 / (4 * np.pi))
 # received field at antenna terminals.
 # divide by eta0 so when the result is squared it's equal to the power
 # at the terminals, E x H = E x E* / eta0
-e_rx_terminal = eff_area_rx.rename(azelch="ch") * e_inc_rx / np.sqrt(eta0)
+e_rx_terminal = eff_area_rx * e_inc_rx / np.sqrt(eta0)
 
-e_rx_terminal.plot("ch", yfmt="deg", polarization="y", marker="o")
+################
+# solve radar equation for radar cross section
+################
+#  {P_{r}={{P_{t}G_{t}} \over {4\pi r^{2}}}\sigma {{1} \over {4\pi r^{2}}}A_{\mathrm {eff} }}
+
+# power received
+pwr_rx = np.abs(e_rx_terminal)**2
+
+# tx antenna gain pointing towards object
+tx_obj_p = scatterer1_center - source_pos
+tx_obj_r = np.linalg.norm(tx_obj_p)
+tx_obj_v = tx_obj_p / tx_obj_r
+tx_az, tx_el = rfn.antennas.azel_uvw(*tx_obj_v, flat=True)
+tx_gain_v = tx_patt.interpolate(az=tx_az, el=tx_el).sel(frequency=frequency).squeeze()
+
+# radar range equation for each polarization, first rx antenna
+sig_rcs = (pwr_rx / (tx_pin * np.abs(tx_gain_v)**2 * eff_area_rx)) * ((4 * np.pi * tx_obj_r**2)**2) 
+
+fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(5, 8))
+e_rx_terminal.plot("ele", yfmt="db20", marker="o", ax=ax1)
+e_rx_terminal.plot("ele", yfmt="deg", marker="o", ax=ax2)
+sig_rcs.plot("ele", yfmt="db10", polarization="y", marker="o", ax=ax3, linestyle="none")
+ax1.set_title("|Er|")
+ax2.set_title("|Er|")
+ax3.set_title("rcs, y-pol")
+ax1.set_ylim([-150, -50])
+ax3.set_ylim([-50, 0])
+ax3.set_ylabel("dBsm")
+fig.tight_layout()
+plt.show()
