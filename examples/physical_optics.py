@@ -109,6 +109,67 @@ def illuminate_object(
     return js_at_faces, ms_at_faces
 
 
+def get_farfield_rE(
+        J_xyz, M_xyz, theta: np.ndarray, phi: np.ndarray, frequency: np.ndarray = None, n_threads: int = 4) -> ldarray:
+    """
+    Compile E-field monitor data from the farfield monitor attached to the solver.
+
+    E-field values are returned for thetapol and phipol, and are normalized by (exp(1j * beta * r) / r).
+
+    Parameters
+    ----------
+    theta : np.ndarray | float
+        spatial theta values in degrees
+
+    phi : np.ndarray | float
+        spatial phi values in degrees
+
+    Returns
+    -------
+    ldarray
+        rE field values. labeled numpy array with dimensions (polarization, frequency, theta, phi)
+    """
+
+    theta = np.atleast_1d(theta)
+    phi = np.atleast_1d(phi)
+
+    theta_m, phi_m = np.meshgrid(theta, phi, indexing="ij")
+    theta_flat, phi_flat = theta_m.flatten(), phi_m.flatten()
+
+    frequency = np.atleast_1d(frequency)
+
+    cell_pos = np.array(obj.cell_centers().points.T, order="C", dtype=np.float32)
+    # compute pattern centered with the scatterer at the origin
+    cell_pos -= np.average(cell_pos, axis=-1)[..., None]
+
+    # area of each face
+    sized = obj.compute_cell_sizes(length=False, area=True, volume=False)
+    cell_ds = np.array(sized.cell_data["Area"], order="C", dtype=np.float32)   # n_cells
+
+    # max grid length for temporary working grid
+    n_cells = obj.n_cells
+
+    ff_data = dict(
+        beta = np.array(2 * np.pi * frequency / rfn.const.c0, dtype=np.float32, order="C"),
+        theta = np.array(np.deg2rad(theta_flat), dtype=np.float32, order="C"),
+        phi = np.array(np.deg2rad(phi_flat), dtype=np.float32, order="C"),
+        data = np.zeros((2, 1, len(theta)), dtype=np.complex64, order="C"),
+        working_grid_cmplx = np.zeros((n_threads, n_cells), dtype=np.complex64, order="C"),
+        working_grid_float = np.zeros((n_threads, n_cells), dtype=np.float32, order="C")
+    )
+
+    J_xyz_t = np.array(J_xyz.T, order="C", dtype=np.complex64)
+    M_xyz_t = np.array(M_xyz.T, order="C", dtype=np.complex64)
+
+    core.core_func.nf2ff_flat(J_xyz_t, M_xyz_t, cell_pos, cell_ds, ff_data, n_threads)
+
+    # cast as labeled array
+    return ldarray(
+        ff_data["data"].reshape(2, len(frequency), len(theta), len(phi)),
+        coords=dict(polarization=["thetapol", "phipol"], frequency=frequency, theta=theta, phi=phi),
+        attrs=dict(theta=theta, phi=phi)
+    )
+
 
 f0 = 3e9
 lam0 = rfn.const.c0 / f0
