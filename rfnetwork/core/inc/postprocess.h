@@ -36,7 +36,7 @@ int postprocess_nf2ff_thread(
     int theta_stop
 );
 
-int postprocess_nf2ff_triangulated(
+int postprocess_nf2ff_flat(
     PyObject * J_xyz_py, 
     PyObject * M_xyz_py, 
     PyObject * cell_pos_py, 
@@ -45,7 +45,7 @@ int postprocess_nf2ff_triangulated(
     int n_threads
 );
 
-int postprocess_nf2ff_triangulated_thread(
+int postprocess_nf2ff_flat_thread(
     std::complex<float> * data_array,
     float * beta_arr,
     float * theta_arr,

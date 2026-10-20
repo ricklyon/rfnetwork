@@ -481,7 +481,7 @@ static PyObject* nf2ff(PyObject* self, PyObject* args) {
     return PyLong_FromLong(0);
 }
 
-static PyObject* nf2ff_triangulated(PyObject* self, PyObject* args) {
+static PyObject* nf2ff_flat(PyObject* self, PyObject* args) {
 
     PyObject *J_xyz;
     PyObject *M_xyz;
@@ -505,7 +505,7 @@ static PyObject* nf2ff_triangulated(PyObject* self, PyObject* args) {
         return PyLong_FromLong(1);
     }
 
-    postprocess_nf2ff_triangulated(J_xyz, M_xyz, cell_pos, cell_ds, ff_data, n_threads);
+    postprocess_nf2ff_flat(J_xyz, M_xyz, cell_pos, cell_ds, ff_data, n_threads);
 
     return PyLong_FromLong(0);
 }
@@ -517,7 +517,7 @@ static PyMethodDef moduleMethods[] = {
     {"cascade_ndata",  cascade_ndata_bind, METH_VARARGS, ""},
     {"cascade_self_ndata",  cascade_self_ndata_bind, METH_VARARGS, ""},
     {"nf2ff",  nf2ff, METH_VARARGS, ""},
-    {"nf2ff_triangulated",  nf2ff_triangulated, METH_VARARGS, ""},
+    {"nf2ff_flat",  nf2ff_flat, METH_VARARGS, ""},
     {"solver_run",  solver_run, METH_VARARGS, ""},
     {NULL, NULL, 0, NULL}        /* Sentinel */
 };

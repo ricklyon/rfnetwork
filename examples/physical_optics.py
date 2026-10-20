@@ -110,63 +110,6 @@ def illuminate_object(
 
 
 
-def get_farfield_rE(
-        J_xyz, M_xyz, theta: np.ndarray, phi: np.ndarray, frequency: np.ndarray = None, n_threads: int = 4) -> ldarray:
-    """
-    Compile E-field monitor data from the farfield monitor attached to the solver.
-
-    E-field values are returned for thetapol and phipol, and are normalized by (exp(1j * beta * r) / r).
-
-    Parameters
-    ----------
-    theta : np.ndarray | float
-        spatial theta values in degrees
-
-    phi : np.ndarray | float
-        spatial phi values in degrees
-
-    Returns
-    -------
-    ldarray
-        rE field values. labeled numpy array with dimensions (polarization, frequency, theta, phi)
-    """
-
-    theta = np.atleast_1d(theta)
-    phi = np.atleast_1d(phi)
-    frequency = np.atleast_1d(frequency)
-
-    cell_pos = np.array(obj.cell_centers().points.T, order="C", dtype=np.float32)
-    # compute pattern centered with the scatterer at the origin
-    cell_pos -= np.average(cell_pos, axis=-1)[..., None]
-
-    # area of each face
-    sized = obj.compute_cell_sizes(length=False, area=True, volume=False)
-    cell_ds = np.array(sized.cell_data["Area"], order="C", dtype=np.float32)   # n_cells
-
-    # max grid length for temporary working grid
-    n_cells = obj.n_cells
-
-    ff_data = dict(
-        beta = np.array(2 * np.pi * frequency / rfn.const.c0, dtype=np.float32, order="C"),
-        theta = np.array(np.deg2rad(theta), dtype=np.float32, order="C"),
-        phi = np.array(np.deg2rad(phi), dtype=np.float32, order="C"),
-        data = np.zeros((2, 1, len(theta), len(phi)), dtype=np.complex64, order="C"),
-        working_grid_cmplx = np.zeros((n_threads, n_cells), dtype=np.complex64, order="C"),
-        working_grid_float = np.zeros((n_threads, n_cells), dtype=np.float32, order="C")
-    )
-
-    J_xyz_t = np.array(J_xyz.T, order="C", dtype=np.complex64)
-    M_xyz_t = np.array(M_xyz.T, order="C", dtype=np.complex64)
-
-    core.core_func.nf2ff_triangulated(J_xyz_t, M_xyz_t, cell_pos, cell_ds, ff_data, n_threads)
-
-    # cast as labeled array
-    return ldarray(
-        ff_data["data"],
-        coords=dict(polarization=["thetapol", "phipol"], frequency=frequency, theta=theta, phi=phi)
-    )
-
-
 f0 = 3e9
 lam0 = rfn.const.c0 / f0
 beta = 2 * np.pi / lam0
@@ -263,7 +206,7 @@ plt.show()
 
 scatterer1_center = np.average(scatterer1.cell_centers().points, axis=0)
 
-# vector from center of scatterer to antenna
+# vector from center of scatterer to rx antenna
 obj_rx_p = rx_pos - scatterer1_center
 # distance from scatterer to antenna
 obj_rx_r = np.linalg.norm(obj_rx_p)
@@ -275,16 +218,21 @@ theta_rx, phi_rx = rfn.antennas.phitheta_uvw(*obj_rx_v)
 rE_at_rx = get_farfield_rE(J_xyz, M_xyz, theta_rx.item(), phi_rx.item(), frequency)
 
 # propagate rE to get e-field at source
-e_backscattered = rE_at_rx * np.exp(1j * beta * obj_rx_r) / obj_rx_r
+e_rx = rE_at_rx * np.exp(1j * beta * obj_rx_r) / obj_rx_r
 # convert to rectangular polarization
-e_backscattered = rfn.antennas.pattern_spherical2rectangular(e_backscattered)
+e_rx = rfn.antennas.pattern_spherical2rectangular(e_rx).squeeze()
 
 # get incident power E x H = E x (E / eta)
 # s_scattered = e_scattered * np.conjugate(e_scattered) / eta0
 
+# gain of rx pattern at incident direction from scatterer
+rx_az, rx_el = rfn.antennas.azel_uvw(*(-obj_rx_v))
+rx_patt_inc = rx_patt.sel(frequency=frequency).interpolate(az=rx_az, el=rx_el).squeeze()
 # effective voltage area of rx antenna
 # e_eff = G (lam^2 / 4pi)
-eff_area_rx = rx_patt * np.sqrt(lam0**2 / (4 * np.pi))
-# received field at antenna terminals
-rx_e = eff_area_rx * e_backscattered
+eff_area_rx = rx_patt_inc * np.sqrt(lam0**2 / (4 * np.pi))
+# received field at antenna terminals.
+# divide by eta0 so when the result is squared it's equal to the power
+# at the terminals, E x H = E x E* / eta0
+rx_e = eff_area_rx * e_rx / np.sqrt(eta0)
 

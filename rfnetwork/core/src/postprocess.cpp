@@ -208,6 +208,27 @@ int get_pointer_index_4(int * shape, const std::array<int, 4>& index)
     return idx;
 }
 
+int get_pointer_index_3(int * shape, const std::array<int, 3>& index)
+{
+    int idx = 0;
+    int n_dim = 3;
+    
+    for (int i = 0; i < n_dim; i++)
+    {
+        // compute size of all lower dimensions
+        int block_size = 1; 
+        for (int j = i + 1; j < n_dim; j++)
+        {
+            block_size *= shape[j];
+        }
+
+        // increment by the number of blocks given by this index, at the last index block_size is 1.
+        idx += (index[i] * block_size);
+    }
+
+    return idx;
+}
+
 /**
  * @brief Integrate J and M equivalent surface currents on a rectangular box to produce the far-field electric field values.
  * See Section 6.8.2 in Balanis Advanced Engineering Electromagnetics 2nd Edition.
@@ -793,7 +814,7 @@ int postprocess_nf2ff_thread(
  * 
  * @return 0 if successful.
  */
-int postprocess_nf2ff_triangulated(
+int postprocess_nf2ff_flat(
     PyObject * J_xyz_py, 
     PyObject * M_xyz_py, 
     PyObject * cell_pos_py, 
@@ -808,7 +829,7 @@ int postprocess_nf2ff_triangulated(
     PyObject* py_data = PyDict_GetItemString(ff_data_py, "data");
     PyArrayObject* py_data_arr = (PyArrayObject*) py_data;
 
-    if (PyArray_NDIM(py_data_arr) != FFDATA_NDIM)
+    if (PyArray_NDIM(py_data_arr) != (FFDATA_NDIM - 1))
     {
         throw std::runtime_error("Invalid far-field data array. Expected four dimensions.");
     }
@@ -849,15 +870,15 @@ int postprocess_nf2ff_triangulated(
     int n_cells = npy_shape[1];
 
     // dimensions are polarization, frequency, theta, phi
-    int data_shape[FFDATA_NDIM];
+    int data_shape[FFDATA_NDIM - 1];
     npy_shape = PyArray_SHAPE(py_data_arr); 
 
-    for (int i = 0; i < FFDATA_NDIM; ++i) { 
+    for (int i = 0; i < (FFDATA_NDIM - 1); ++i) { 
         data_shape[i] = (int) npy_shape[i];
     }
 
     // result data array
-    std::complex<float> * data_arr = get_complex_array(py_data, data_shape, FFDATA_NDIM);
+    std::complex<float> * data_arr = get_complex_array(py_data, data_shape, FFDATA_NDIM - 1);
 
     // beta (frequency) array
     int beta_shape[1] = {data_shape[FF_FREQUENCY]};
@@ -866,15 +887,14 @@ int postprocess_nf2ff_triangulated(
     );
 
     // theta array, in radius
-    int theta_shape[1] = {data_shape[FF_THETA]};
+    int phth_shape[1] = {data_shape[FF_THETA]};
     float * theta_arr = get_float_array(
-        PyDict_GetItemString(ff_data_py, "theta"), theta_shape, 1
+        PyDict_GetItemString(ff_data_py, "theta"), phth_shape, 1
     );
 
     // phi array, in radius
-    int phi_shape[1] = {data_shape[FF_PHI]};
     float * phi_arr = get_float_array(
-        PyDict_GetItemString(ff_data_py, "phi"), phi_shape, 1
+        PyDict_GetItemString(ff_data_py, "phi"), phth_shape, 1
     );
     
     // array pointers for J currents
@@ -917,7 +937,7 @@ int postprocess_nf2ff_triangulated(
 
         // assign thread a unique section of the theta vector
         threads[t] = std::thread(
-            postprocess_nf2ff_triangulated_thread, 
+            postprocess_nf2ff_flat_thread, 
             data_arr,
             beta_arr,
             theta_arr,
@@ -945,7 +965,7 @@ int postprocess_nf2ff_triangulated(
     return 0;
 }
 
-int postprocess_nf2ff_triangulated_thread(
+int postprocess_nf2ff_flat_thread(
     std::complex<float> * data_array,
     float * beta_arr,
     float * theta_arr,
@@ -1032,102 +1052,98 @@ int postprocess_nf2ff_triangulated_thread(
         for (int th = theta_start; th < theta_stop; th++)
         {
             theta = theta_arr[th];
-            // loop over phi
-            for (int ph = 0; ph < data_shape[FF_PHI]; ph++)
-            {
-                phi = phi_arr[ph];
+            phi = phi_arr[th];
                 
-                cos_ph = (float) std::cos((float) phi);
-                cos_th = (float) std::cos((float) theta);
-                sin_ph = (float) std::sin((float) phi);
-                sin_th = (float) std::sin((float) theta);
-                
-                // covert to uvw
-                u = sin_th * cos_ph;
-                v = sin_th * sin_ph;
-                w = cos_th;
+            cos_ph = (float) std::cos((float) phi);
+            cos_th = (float) std::cos((float) theta);
+            sin_ph = (float) std::sin((float) phi);
+            sin_th = (float) std::sin((float) theta);
+            
+            // covert to uvw
+            u = sin_th * cos_ph;
+            v = sin_th * sin_ph;
+            w = cos_th;
 
-                cos_ph_c = (std::complex<float>) cos_ph;
-                cos_th_c = (std::complex<float>) cos_th;
-                sin_ph_c = (std::complex<float>) sin_ph;
-                sin_th_c = (std::complex<float>) sin_th;
+            cos_ph_c = (std::complex<float>) cos_ph;
+            cos_th_c = (std::complex<float>) cos_th;
+            sin_ph_c = (std::complex<float>) sin_ph;
+            sin_th_c = (std::complex<float>) sin_th;
 
-                // phase term for integrand
-                MatrixFloatType r_dot (working_grid_float_p, 1, n_cells);
-                r_dot = ((rx * u).array() + (ry * v).array() + (rz * w).array()).array();
-                        
-                // msg.str("");
-                // msg.clear();
-                // msg << "theta " << theta << "phi " << phi << " " << grid_shape[axis][0] << " " << grid_shape[axis][1] << "\n";
-                
-                // std::cout << msg.str();
-                
-                // integrand term, same memory used for exponential phase term exp(1j * beta.item() * r_dot)
-                // and the differential dS.
-                MatrixComplexType intg (working_grid_cmplx_p, 1, n_cells);
-
-                // phs_term = exp(1j * beta.item() * r_dot)
-                intg = exp((p1J * beta_c) * r_dot.array().cast<std::complex<float>>());
-                // dS = phs_term * d1 * d2
-                intg = intg.array() * (ds.array());
-
-                // N_theta
-                // N_theta_intg = (Jx * cos_th * cos_ph) + (Jy * cos_th * sin_ph) - (Jz * sin_th)
-                // N_theta += np.sum(N_theta_intg * dS)
-                N_theta = (
-                    (
-                        (Jx.array() * (cos_th_c * cos_ph_c)) + 
-                        (Jy.array() * (cos_th_c * sin_ph_c)) -
-                        (Jz.array() * sin_th_c)
-                    ).array() * intg.array()
-                ).sum();
+            // phase term for integrand
+            MatrixFloatType r_dot (working_grid_float_p, 1, n_cells);
+            r_dot = ((rx * u).array() + (ry * v).array() + (rz * w).array()).array();
                     
-                // N_phi
-                // N_phi_intg = (-Jx * sin_ph) + (Jy * cos_ph)
-                // N_phi += np.sum(N_phi_intg * dS)
-                N_phi = (
-                    (
-                        (-Jx.array() * (sin_ph_c)) + 
-                        (Jy.array() * (cos_ph_c))
-                    ).array() * intg.array()
-                ).sum();
+            // msg.str("");
+            // msg.clear();
+            // msg << "theta " << theta << "phi " << phi << " " << grid_shape[axis][0] << " " << grid_shape[axis][1] << "\n";
+            
+            // std::cout << msg.str();
+            
+            // integrand term, same memory used for exponential phase term exp(1j * beta.item() * r_dot)
+            // and the differential dS.
+            MatrixComplexType intg (working_grid_cmplx_p, 1, n_cells);
 
-                // # L_theta 
-                // L_theta_intg = (Mx * cos_th * cos_ph) + (My * cos_th * sin_ph) - (Mz * sin_th)
-                // L_theta += np.sum(L_theta_intg * dS)
-                L_theta = (
-                    (
-                        (Mx.array() * (cos_th_c * cos_ph_c)) + 
-                        (My.array() * (cos_th_c * sin_ph_c)) -
-                        (Mz.array() * sin_th_c)
-                    ).array() * intg.array()
-                ).sum();
+            // phs_term = exp(1j * beta.item() * r_dot)
+            intg = exp((p1J * beta_c) * r_dot.array().cast<std::complex<float>>());
+            // dS = phs_term * d1 * d2
+            intg = intg.array() * (ds.array());
 
-                // # L_phi
-                // L_phi_intg = (-Mx * sin_ph) + (My * cos_ph)
-                // L_phi += np.sum(L_phi_intg * dS)
-                L_phi = (
-                    (
-                        (-Mx.array() * (sin_ph_c)) + 
-                        (My.array() * (cos_ph_c))
-                    ).array() * intg.array()
-                ).sum();
+            // N_theta
+            // N_theta_intg = (Jx * cos_th * cos_ph) + (Jy * cos_th * sin_ph) - (Jz * sin_th)
+            // N_theta += np.sum(N_theta_intg * dS)
+            N_theta = (
+                (
+                    (Jx.array() * (cos_th_c * cos_ph_c)) + 
+                    (Jy.array() * (cos_th_c * sin_ph_c)) -
+                    (Jz.array() * sin_th_c)
+                ).array() * intg.array()
+            ).sum();
+                
+            // N_phi
+            // N_phi_intg = (-Jx * sin_ph) + (Jy * cos_ph)
+            // N_phi += np.sum(N_phi_intg * dS)
+            N_phi = (
+                (
+                    (-Jx.array() * (sin_ph_c)) + 
+                    (Jy.array() * (cos_ph_c))
+                ).array() * intg.array()
+            ).sum();
+
+            // # L_theta 
+            // L_theta_intg = (Mx * cos_th * cos_ph) + (My * cos_th * sin_ph) - (Mz * sin_th)
+            // L_theta += np.sum(L_theta_intg * dS)
+            L_theta = (
+                (
+                    (Mx.array() * (cos_th_c * cos_ph_c)) + 
+                    (My.array() * (cos_th_c * sin_ph_c)) -
+                    (Mz.array() * sin_th_c)
+                ).array() * intg.array()
+            ).sum();
+
+            // # L_phi
+            // L_phi_intg = (-Mx * sin_ph) + (My * cos_ph)
+            // L_phi += np.sum(L_phi_intg * dS)
+            L_phi = (
+                (
+                    (-Mx.array() * (sin_ph_c)) + 
+                    (My.array() * (cos_ph_c))
+                ).array() * intg.array()
+            ).sum();
 
 
-                // pointer to thetapol result
-                thetapol_p = (data_array + get_pointer_index_4(data_shape, {0, f, th, ph}));
+            // pointer to thetapol result
+            thetapol_p = (data_array + get_pointer_index_3(data_shape, {0, f, th}));
 
-                // pointer to phipol result
-                phipol_p = (data_array + get_pointer_index_4(data_shape, {1, f, th, ph}));
+            // pointer to phipol result
+            phipol_p = (data_array + get_pointer_index_3(data_shape, {1, f, th}));
 
-                // contributions to N and L have been summed from all faces by this point. Calculate far-field
-                // # electric field for thetapol and phipol
-                // E_theta[i] = (-j * beta / (4 * np.pi)) * (L_phi + eta0 * N_theta)
-                *thetapol_p = ((n1J * beta_c / pi4_c) * (L_phi + (eta0_c * N_theta)));
-                // E_phi[i] = (j * beta / (4 * np.pi)) * (L_theta - eta0 * N_phi)
-                *phipol_p = ((p1J * beta_c / pi4_c) * (L_theta - (eta0_c * N_phi)));
+            // contributions to N and L have been summed from all faces by this point. Calculate far-field
+            // # electric field for thetapol and phipol
+            // E_theta[i] = (-j * beta / (4 * np.pi)) * (L_phi + eta0 * N_theta)
+            *thetapol_p = ((n1J * beta_c / pi4_c) * (L_phi + (eta0_c * N_theta)));
+            // E_phi[i] = (j * beta / (4 * np.pi)) * (L_theta - eta0 * N_phi)
+            *phipol_p = ((p1J * beta_c / pi4_c) * (L_theta - (eta0_c * N_phi)));
 
-            } // end phi loop
 
         } // end theta loop
 

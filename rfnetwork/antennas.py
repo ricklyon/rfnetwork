@@ -98,7 +98,7 @@ def uvw_phitheta(phi: np.ndarray, theta: np.ndarray, deg: bool = True):
     return ldarray(u, coords=coords), ldarray(v, coords=coords), ldarray(w, coords=coords)
 
 
-def phitheta_uvw(u: np.ndarray, v: np.ndarray, w: np.ndarray, deg: bool = True):
+def phitheta_uvw(u: np.ndarray, v: np.ndarray, w: np.ndarray, deg: bool = True, flat: bool = False):
     """
     Convert far-field spatial coordinates from (u, v) to (phi, theta)
 
@@ -121,7 +121,10 @@ def phitheta_uvw(u: np.ndarray, v: np.ndarray, w: np.ndarray, deg: bool = True):
 
     u, v, w = np.atleast_1d(u), np.atleast_1d(v), np.atleast_1d(w)
     # form into a meshgrid
-    u_m, v_m, w_m = _create_meshgrid(u, v, w)
+    if not flat:
+        u_m, v_m, w_m = _create_meshgrid(u, v, w)
+    else:
+         u_m, v_m, w_m = u, v, w
 
     with np.errstate(all='ignore'):
         phi = np.arctan2(v_m, u_m)
@@ -131,7 +134,7 @@ def phitheta_uvw(u: np.ndarray, v: np.ndarray, w: np.ndarray, deg: bool = True):
         phi, theta = np.rad2deg(phi), np.rad2deg(theta)
 
     # return phi, theta as labeled arrays, with u coordinates in the rows and v coordinates in the columns
-    if isinstance(phi, ldarray) and isinstance(theta, ldarray):
+    if flat or (isinstance(phi, ldarray) and isinstance(theta, ldarray)):
         return phi, theta
     else:
         coords = dict(u=u, v=v, w=w)
@@ -211,8 +214,11 @@ def uvw_azel(az: np.ndarray, el: np.ndarray, flat: bool = False):
     v = np.sin(el_m)
     w = np.cos(el_m) * np.cos(az_m)
 
-    coords = dict(az=az, el=el)
-    return ldarray(u, coords=coords), ldarray(v, coords=coords), ldarray(w, coords=coords)
+    if flat or (isinstance(az, ldarray) and isinstance(el, ldarray)):
+        return az, el
+    else:
+        coords = dict(az=az, el=el)
+        return ldarray(u, coords=coords), ldarray(v, coords=coords), ldarray(w, coords=coords)
 
 def azel_uvw(u: np.ndarray, v: np.ndarray, w: np.ndarray, flat: bool = False):
     """
@@ -322,9 +328,11 @@ def pattern_spherical2rectangular(pattern: ldarray):
     if not all(pattern.polarization == ("thetapol", "phipol")):
         raise ValueError("Pattern polarization must be defined with spherical component vectors.")
 
-    pattern = np.transpose(pattern, (..., "theta", "phi"))
-    
-    theta_m, phi_m = np.meshgrid(pattern.theta, pattern.phi, indexing="ij")
+    if "phitheta" in pattern.coords.keys():
+        theta_m, phi_m = pattern.theta, pattern.phi 
+    else:
+        pattern = np.transpose(pattern, (..., "theta", "phi"))
+        theta_m, phi_m = np.meshgrid(pattern.theta, pattern.phi, indexing="ij")
 
     # convert to radians
     theta_m, phi_m = np.deg2rad(theta_m), np.deg2rad(phi_m)
@@ -342,9 +350,11 @@ def pattern_spherical2rectangular(pattern: ldarray):
     coords = dict(**pattern.coords)
     coords["polarization"] = ["x", "y", "z"]
 
+    # use "t" for spatial axis if phi and theta are flattened into a single dimension, otherwise use "tp"
+    tp_axis = "t" if "phitheta" in pattern.coords.keys() else "tp"
     # matrix multiply by the transformation matrix to get rectangular polarization vectors
     return ldarray(
-        np.einsum("nmtp,m...tp->n...tp", A, pattern), coords=coords
+        np.einsum(f"nm{tp_axis},m...{tp_axis}->n...{tp_axis}", A, pattern), coords=coords
     )
 
 
