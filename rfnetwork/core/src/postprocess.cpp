@@ -869,7 +869,7 @@ int postprocess_nf2ff_flat(
     // get shape of working grid array. The shape of the last dimension is the number of cells
     int n_cells = npy_shape[1];
 
-    // dimensions are polarization, frequency, theta, phi
+    // dimensions are polarization, frequency, theta-phi
     int data_shape[FFDATA_NDIM - 1];
     npy_shape = PyArray_SHAPE(py_data_arr); 
 

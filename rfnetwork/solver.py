@@ -3407,7 +3407,8 @@ class FDTD_Solver():
         """
         Compile E-field monitor data from the farfield monitor attached to the solver.
 
-        E-field values are returned for thetapol and phipol, and are normalized by (exp(1j * beta * r) / r).
+        E-field values are returned for thetapol and phipol, with the  e^(-jBr) / r term omitted. To compute the true 
+        field values at a distance r, divide the result by r e^(jBr). 
 
         Parameters
         ----------
