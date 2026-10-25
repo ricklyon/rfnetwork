@@ -9,6 +9,7 @@ from matplotlib.axes import Axes
 import matplotlib.pyplot as plt
 import pyvista as pv
 import itertools
+import vtk
 
 from PIL import Image
 
@@ -637,3 +638,32 @@ def plot_gerber(filepath: Path, origin: tuple = None, axes: Axes = None):
     )
     
     return axes
+
+
+def visible_faces(obj: pv.PolyData, source_pos: tuple) -> np.ndarray:
+    """
+    Return a boolean mask, shape (n_cells,), that is True for faces whose center has a clear line of
+    sight to the source, i.e. the first face hit by a ray from the source towards the face center is the face itself.
+    """
+    source_pos = np.asarray(source_pos, dtype=float)
+    obj_centers = obj.cell_centers().points
+
+    # spatial search structure over the mesh faces, built once and reused for every ray
+    locator = vtk.vtkStaticCellLocator()
+    locator.SetDataSet(obj)
+    locator.BuildLocator()
+
+    # output references filled in by IntersectWithLine, only the hit cell id is used
+    t, x, pcoords = vtk.reference(0.0), [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]
+    sub_id, cell_id, cell = vtk.reference(0), vtk.reference(0), vtk.vtkGenericCell()
+
+    visible = np.zeros(obj.n_cells, dtype=bool)
+    for i, center in enumerate(obj_centers):
+        # extend the ray slightly past the face center so the face itself is always intersected
+        ray_v = center - source_pos
+        ray_end = center + 1e-3 * ray_v / np.linalg.norm(ray_v)
+        # IntersectWithLine returns the intersection closest to the start of the ray
+        locator.IntersectWithLine(source_pos, ray_end, 1e-9, t, x, pcoords, sub_id, cell_id, cell)
+        visible[i] = cell_id.get() == i
+
+    return visible
