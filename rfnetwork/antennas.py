@@ -60,6 +60,7 @@ def illuminate_object(
     src_patt: ldarray, 
     src_pwr: float,
     frequency: float, 
+    spherical: bool = False,
     image: bool = False, 
 ):
     """
@@ -79,6 +80,9 @@ def illuminate_object(
         input power to tx antenna, in watts.
     frequency: float, list
         frequency values to compute surface currents for, in Hz. 
+    spherical: bool, default: False
+        If True, allows surface currents on the non-illuminated side of a spherical objects. This has negligible effect
+        for large objects in the optical region, but approximates the Mie resonances.
     image: bool, default: False
         if True, computes the currents from the ground bounce, assuming the ground is a perfect conductor along the
         xz plane. 
@@ -99,7 +103,7 @@ def illuminate_object(
     if image:
         src_pos = list(src_pos)
         src_pos[1] = -src_pos[1]
-        
+
     # center of each scatterer face, shape (n_cells, 3)
     obj_centers = obj.cell_centers().points
     # unit normal of each scatterer face, pointing out of the surface, shape (n_cells, 3)
@@ -110,6 +114,11 @@ def illuminate_object(
     obj_src_r = np.linalg.norm(obj_src_p, axis=-1)
     # normalized vectors from source to each face (direction only)
     poynting_v = (obj_src_p) / obj_src_r[..., None]
+
+    # center of object
+    obj_midpoint = np.average(obj_centers, axis=0)
+    # maximum distance of any face from midpoint normalized by the wavelength
+    obj_max_r = np.max(np.linalg.norm(obj_centers - obj_midpoint, axis=1)) / lam0
 
     # azimuth angle of each face center from the z axis (antenna boresight), positive towards +x, in degrees
     obj_az = np.rad2deg(np.arctan2(obj_src_p[:, 0], obj_src_p[:, 2]))
@@ -129,7 +138,25 @@ def illuminate_object(
     # scale the incident e-field by the effective area of the face that is facing towards the source.
     # cell is facing the source if the dot product between the face normal and poynting vector
     eff_area = np.einsum("ij,ij->i", obj_face_normals, poynting_v)
-    eff_area = np.abs(np.where(eff_area > 0 , 0, eff_area))
+
+    if spherical:
+        # allow surface currents to wrap around to the non-illuminated side. Coefficients are fit to the Mie series
+        # backscatter of a PEC sphere (ka = 0.1 to 60).
+        ka = 2 * np.pi * obj_max_r
+        # angle past the shadow boundary, 0 at the shadow boundary and pi/2 at the back of the object
+        psi = np.arcsin(np.clip(eff_area, 0, 1))
+        # low frequency (Rayleigh / first resonance) wrap around, uses the straight through incident phase
+        wrap_lf = (1 + 2.046 * ka**0.843) * np.exp(-(ka / 1.268)**4.073)
+        # creeping wave launched from the opposite shadow boundary, travels an arc of a(pi - psi) to reach the face.
+        # The straight through incident phase (ka sin(psi)) is removed and replaced with the arc length phase.
+        creep_amp = (
+            (1 - np.exp(-(ka / 1.717)**8.316)) * 0.540 * ka**-2.206 * np.exp((0.846 - 2.008j) * ka**(1 / 3) + 3.864j)
+        )
+        creep = creep_amp * np.exp(-1j * ka * (np.pi - psi)) * np.exp(1j * ka * np.sin(psi))
+        eff_area = np.where(eff_area > 0, (wrap_lf + creep) * eff_area, -eff_area)
+    else:
+        # allow currents on the non-illuminated side for very small objects, approximates Rayleigh scattering.
+        eff_area = np.abs(np.where(eff_area > 0, np.exp(-1.6 * obj_max_r) * eff_area, eff_area))
 
     # the gain is related to the e-field strength by
     # G = (4pi / 2 eta0) (|rE|^2 / Pin)
@@ -225,6 +252,137 @@ def get_scattering_rE(
         coords=dict(polarization=["thetapol", "phipol"], frequency=frequency, phitheta=np.arange(len(theta))),
         attrs=dict(theta=theta, phi=phi)
     )
+
+def get_scattering_rxE(
+    obj: pv.PolyData, 
+    Js: np.ndarray, 
+    Ms: np.ndarray, 
+    rx_patt: ldarray,
+    rx_pos: np.ndarray, 
+    frequency: float
+):
+    """
+    Compute received field at the terminals of an RX antenna, from a scattering object with surface currents Js and Ms.
+
+    Parameters
+    ----------
+    obj: pv.PolyData
+        scattering pyvista object with n_cells, cell sizes must be sufficiently small 
+        (around 1/10th of wavelength) for good results.
+    Js: np.ndarray
+        n_cells x 3 array of the electric surface current densities on each face of scatterer.
+    Ms: np.ndarray
+        n_cells x 3 array of the magnetic surface current densities on each face of scatterer.
+    rx_patt: ldarray
+        labeled array in rectangular polarization basis of the source antenna. Coordinate frame must be az/el.
+    rx_pos: tuple
+        3-tuple of xyz position of source antenna, in meters
+
+    Returns
+    -------
+    e_field: ldarray
+        e-field values. labeled numpy array with dimensions (polarization, frequency). Values are normalized so
+        that taking the square will give the power at the RX antenna terminal.
+    rx_patt: ldarray
+        rx pattern values at the incident direction from scatterer.
+        
+    """
+
+    lam0 = const.c0 / frequency
+    beta = 2 * np.pi / lam0
+
+    # midpoint of scatterer
+    obj_mid_p = np.average(obj.points, axis=0)
+    # vector from center of scatterer to rx antenna
+    obj_rx_p = rx_pos - obj_mid_p
+    # distance from scatterer to antenna
+    obj_rx_r = np.linalg.norm(obj_rx_p)
+    # normalized uvw position of rx antenna from the local coordinate frame of scatterer
+    obj_rx_v = obj_rx_p / obj_rx_r
+
+    # theta and phi angle back to the rx antenna from scatterer
+    phi_rx, theta_rx = phitheta_uvw(*(obj_rx_v.T), flat=True)
+
+    rE_at_rx = get_scattering_rE(obj, Js, Ms, theta_rx, phi_rx, frequency)
+    # convert to rectangular polarization
+    rE_at_rx = pattern_spherical2rectangular(rE_at_rx).squeeze()
+
+    # propagate rE to get e-field at source
+    e_inc_rx = rE_at_rx * np.exp(-1j * beta * obj_rx_r) / obj_rx_r
+
+    # gain of rx pattern at incident direction from scatterer
+    rx_az, rx_el = azel_uvw(*(-obj_rx_v.T), flat=True)
+    rx_patt_inc = rx_patt.sel(frequency=frequency).interpolate(az=rx_az, el=rx_el, flat=True).squeeze()
+    # effective voltage area of rx antenna
+    # e_eff = G (lam^2 / 4pi)
+    eff_area_rx = np.abs(rx_patt_inc) * np.sqrt(lam0**2 / (4 * np.pi))
+
+    # received field at antenna terminals.
+    # e_inc_rx is a peak phasor (same convention as the 2 * eta0 used for the tx field), so the incident
+    # power density is |E|^2 / (2 eta0). Divide by sqrt(2 eta0) so the squared result is the received power.
+    e_rx_terminal = eff_area_rx * e_inc_rx / np.sqrt(2 * const.eta0)
+
+    return e_rx_terminal
+
+def monostatic_rcs(
+    obj: pv.PolyData,
+    src_pos: tuple,
+    src_pwr: float,
+    e_rx: np.ndarray,
+    frequency: float,
+    tx_patt: ldarray,
+    rx_patt: ldarray,
+):
+    """
+    Compute monostatic RCS of scatterer given the received e-field values at the RX antenna.
+
+    Parameters
+    ----------
+    obj: pv.PolyData
+        pyvista object with n_cells, cell sizes must be sufficiently small (around 1/10th of wavelength) for good 
+        results.
+    src_pos: tuple
+        3-tuple of xyz position of source antenna, in meters
+    src_pwr: float
+        input power to tx antenna, in watts.
+    e_rx: np.ndarray
+        e-field at RX antenna, in rectangular polarization.
+    frequency: float, list
+        frequency values to compute surface currents for, in Hz. 
+    tx_patt: ldarray
+        labeled array in rectangular polarization basis of the tx antenna. Coordinate frame must be az/el.
+    rx_patt: ldarray
+        labeled array in rectangular polarization basis of the rx antenna. Coordinate frame must be az/el.
+
+    Returns
+    -------
+    rcs: ldarray
+        RCS values in rectangular polarization basis
+    """
+    lam0 = const.c0 / frequency
+    
+    obj_mid_p = np.average(obj.points, axis=0)
+    # solve radar equation for radar cross section
+    #  {P_{r}={{P_{t}G_{t}} \over {4\pi r^{2}}}\sigma {{1} \over {4\pi r^{2}}}A_{\mathrm {eff} }}
+    # power received
+    pwr_rx = np.abs(e_rx)**2
+
+    # azimuth and elevation angle object is at from antenna position
+    tx_obj_r = np.linalg.norm(obj_mid_p - src_pos)
+    tx_obj_v = obj_mid_p / tx_obj_r
+    tx_az, tx_el = azel_uvw(*tx_obj_v, flat=True)
+    # tx antenna gain pointing towards object
+    tx_gain_v = tx_patt.sel(frequency=frequency).interpolate(az=tx_az, el=tx_el, flat=True).squeeze()
+
+    # gain of rx pattern at incident direction from scatterer
+    rx_gain_v = rx_patt.sel(frequency=frequency).interpolate(az=tx_az, el=tx_el, flat=True).squeeze()
+
+    # radar range equation for each polarization
+    eff_area_rx = np.abs(rx_gain_v) * np.sqrt(lam0**2 / (4 * np.pi))
+    sig_rcs = (pwr_rx / (src_pwr * np.abs(tx_gain_v)**2 * eff_area_rx**2)) * ((4 * np.pi * tx_obj_r**2)**2) 
+
+    return sig_rcs
+
 
 def _create_meshgrid(*args):
     """ 
