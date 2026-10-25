@@ -97,8 +97,20 @@ def illuminate_object(
     # scale the incident e-field by the effective area of the face that is facing towards the source.
     # cell is facing the source if the dot product between the face normal and poynting vector
     eff_area = np.einsum("ij,ij->i", obj_face_normals, poynting_v)
-    # allow surface currents to wrap around to the non-illuminated side for small objects
-    eff_area = np.abs(np.where(eff_area > 0, np.exp(-1.6 * obj_max_r) * eff_area, eff_area))
+    # allow surface currents to wrap around to the non-illuminated side. Coefficients are fit to the Mie series
+    # backscatter of a PEC sphere (ka = 0.1 to 60).
+    ka = 2 * np.pi * obj_max_r
+    # angle past the shadow boundary, 0 at the shadow boundary and pi/2 at the back of the object
+    psi = np.arcsin(np.clip(eff_area, 0, 1))
+    # low frequency (Rayleigh / first resonance) wrap around, uses the straight through incident phase
+    wrap_lf = (1 + 2.046 * ka**0.843) * np.exp(-(ka / 1.268)**4.073)
+    # creeping wave launched from the opposite shadow boundary, travels an arc of a(pi - psi) to reach the face.
+    # The straight through incident phase (ka sin(psi)) is removed and replaced with the arc length phase.
+    creep_amp = (
+        (1 - np.exp(-(ka / 1.717)**8.316)) * 0.540 * ka**-2.206 * np.exp((0.846 - 2.008j) * ka**(1 / 3) + 3.864j)
+    )
+    creep = creep_amp * np.exp(-1j * ka * (np.pi - psi)) * np.exp(1j * ka * np.sin(psi))
+    eff_area = np.where(eff_area > 0, (wrap_lf + creep) * eff_area, -eff_area)
 
     # the gain is related to the e-field strength by
     # G = (4pi / 2 eta0) (|rE|^2 / Pin)
