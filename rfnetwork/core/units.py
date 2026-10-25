@@ -72,8 +72,8 @@ class conv():
     dbm_v = lambda v,   R=50 : 10*np.log10(((np.abs(v)**2)/(2*R))/1e-3)
 
     # ratios
-    db20_lin  = lambda x   : 20*np.log10(np.abs(x))
-    db10_lin  = lambda x   : 10*np.log10(np.abs(x))
+    db20_lin  = lambda x   : 20*np.log10(np.where(np.abs(x) < 1e-12, 1e-12, np.abs(x)))
+    db10_lin  = lambda x   : 10*np.log10(np.where(np.abs(x) < 1e-12, 1e-12, np.abs(x)))
 
     lin_db10  = lambda x   : 10**((np.abs(x) * np.sign(x))/10)
     lin_db20  = lambda x   : 10**((np.abs(x) * np.sign(x))/20)

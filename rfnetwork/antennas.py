@@ -1,6 +1,8 @@
 from np_struct import ldarray
 import numpy as np
-from rfnetwork import const, conv
+import pyvista as pv
+
+from rfnetwork import const, core
 
 
 def translate(pattern: ldarray, position: np.ndarray) -> ldarray:
@@ -51,6 +53,178 @@ def translate(pattern: ldarray, position: np.ndarray) -> ldarray:
     k = 2 * np.pi / lam
 
     return pattern * np.exp(1j * k * r_dot)
+
+def illuminate_object(
+    obj: pv.PolyData, 
+    src_pos: tuple, 
+    src_patt: ldarray, 
+    src_pwr: float,
+    frequency: float, 
+    image: bool = False, 
+):
+    """
+    Illuminate the faces on an object from a source antenna and compute the resulting surface currents.
+    
+    Parameters
+    ----------
+
+    obj: pv.PolyData
+        pyvista object with n_cells, cell sizes must be sufficiently small (around 1/10th of wavelength) for good 
+        results.
+    src_patt: ldarray
+        labeled array in rectangular polarization basis of the source antenna. Coordinate frame must be az/el.
+    src_pos: tuple
+        3-tuple of xyz position of source antenna, in meters
+    src_pwr: float
+        input power to tx antenna, in watts.
+    frequency: float, list
+        frequency values to compute surface currents for, in Hz. 
+    image: bool, default: False
+        if True, computes the currents from the ground bounce, assuming the ground is a perfect conductor along the
+        xz plane. 
+
+    Returns
+    -------
+    Js: np.ndarray
+        n_cells x 3 array of the electric surface current densities on each face.
+    Ms: np.ndarray
+        n_cells x 3 array of the magnetic surface current densities on each face.
+    
+    """
+    eta0 = const.eta0
+    lam0 = const.c0 / frequency
+    beta = 2 * np.pi / lam0
+
+    # flip location of source to the other side of ground plane if computing the image
+    if image:
+        src_pos = list(src_pos)
+        src_pos[1] = -src_pos[1]
+        
+    # center of each scatterer face, shape (n_cells, 3)
+    obj_centers = obj.cell_centers().points
+    # unit normal of each scatterer face, pointing out of the surface, shape (n_cells, 3)
+    obj_face_normals = obj.cell_normals
+    # vector from source location to scatterer
+    obj_src_p = obj_centers - src_pos
+    # distance r from source to center of each face
+    obj_src_r = np.linalg.norm(obj_src_p, axis=-1)
+    # normalized vectors from source to each face (direction only)
+    poynting_v = (obj_src_p) / obj_src_r[..., None]
+
+    # azimuth angle of each face center from the z axis (antenna boresight), positive towards +x, in degrees
+    obj_az = np.rad2deg(np.arctan2(obj_src_p[:, 0], obj_src_p[:, 2]))
+    # elevation angle of each face center above the xz plane, positive towards +y, in degrees.
+    obj_el = np.rad2deg(np.arctan2(obj_src_p[:, 1], obj_src_p[:, 2]))
+
+    # mirror elevation if image. The pattern flips in elevation because the object is being illuminated by the
+    # ground bounce, which starts from the mirrored side of the antenna.
+    if image:
+        src_patt = -src_patt
+        obj_el = -obj_el
+
+    # evaluate tx pattern at scatterer faces, remove frequency axis. Flattened list of gain values at each objec
+    # face
+    gain_at_faces = src_patt.sel(frequency=frequency).interpolate(az=obj_az, el=obj_el, flat=True)
+
+    # scale the incident e-field by the effective area of the face that is facing towards the source.
+    # cell is facing the source if the dot product between the face normal and poynting vector
+    eff_area = np.einsum("ij,ij->i", obj_face_normals, poynting_v)
+    eff_area = np.abs(np.where(eff_area > 0 , 0, eff_area))
+
+    # the gain is related to the e-field strength by
+    # G = (4pi / 2 eta0) (|rE|^2 / Pin)
+    # E = sqrt(Pin G (2 eta0 / 4pi r^2))
+    # the tx_patt is already complex voltage gain (sqrt(G))
+    # E = g * sqrt(Pin (2 eta0 / 4pi r^2))
+    e_inc = gain_at_faces * np.sqrt(src_pwr * (2 * eta0 / (4 * np.pi * obj_src_r**2))) * np.exp(-1j * beta * obj_src_r)
+    e_inc = e_inc.transpose(("azel", "polarization")) * eff_area[:, None]
+
+    # cross product with propagation direction vector to get incident h field, H = k^ x E / eta0
+    h_inc = np.cross(poynting_v, e_inc) / eta0
+
+    # physical optics electric surface current on the PEC scatterer, Js = n^ x H_inc on lit faces.
+    js_at_faces = np.cross(obj_face_normals, h_inc)
+    ms_at_faces = np.cross(obj_face_normals, e_inc)
+
+    return js_at_faces, ms_at_faces
+
+
+def get_scattering_rE(
+    obj: pv.PolyData, 
+    Js: np.ndarray, 
+    Ms: np.ndarray, 
+    theta: np.ndarray, 
+    phi: np.ndarray, 
+    frequency: np.ndarray = None, 
+    n_threads: int = 4
+) -> ldarray:
+    """
+    Compute far-field scattering pattern for the surface currents on an object.
+
+    E-field values are returned for thetapol and phipol, with the  e^(-jBr) / r term omitted. To compute the true 
+    field values at a distance r, multiply the result by e^(-jBr) / r. 
+
+    Parameters
+    ----------
+    obj: pv.PolyData
+        pyvista object with n_cells, cell sizes must be sufficiently small (around 1/10th of wavelength) for good 
+        results.
+    Js: np.ndarray
+        n_cells x 3 array of the electric surface current densities on each face.
+    Ms: np.ndarray
+        n_cells x 3 array of the magnetic surface current densities on each face.
+    theta : np.ndarray | float
+        spatial theta values in degrees. These are pair-wise points with phi and must have the same length.
+    phi : np.ndarray | float
+        spatial phi values in degrees. These are pair-wise points with phi and must have the same length.
+
+    Returns
+    -------
+    ldarray
+        rE field values. labeled numpy array with dimensions (polarization, frequency, phitheta)
+    """
+
+    theta = np.atleast_1d(theta)
+    phi = np.atleast_1d(phi)
+
+    frequency = np.atleast_1d(frequency)
+
+    # check that theta and phi are same length
+    if theta.ndim != 1 or phi.ndim != 1 or len(theta) != len(phi):
+        raise RuntimeError("theta and phi vectors must be equal length.")
+
+    cell_pos = np.array(obj.cell_centers().points.T, order="C", dtype=np.float32)
+    # compute pattern centered with the scatterer at the origin of the scatterer
+    cell_pos -= np.average(cell_pos, axis=-1)[..., None]
+
+    # area of each face
+    sized = obj.compute_cell_sizes(length=False, area=True, volume=False)
+    cell_ds = np.array(sized.cell_data["Area"], order="C", dtype=np.float32)
+
+    # max grid length for temporary working grid
+    n_cells = obj.n_cells
+
+    ff_data = dict(
+        beta = np.array(2 * np.pi * frequency / const.c0, dtype=np.float32, order="C"),
+        theta = np.array(np.deg2rad(theta), dtype=np.float32, order="C"),
+        phi = np.array(np.deg2rad(phi), dtype=np.float32, order="C"),
+        data = np.zeros((2, 1, len(theta)), dtype=np.complex64, order="C"),
+        working_grid_cmplx = np.zeros((n_threads, n_cells), dtype=np.complex64, order="C"),
+        working_grid_float = np.zeros((n_threads, n_cells), dtype=np.float32, order="C")
+    )
+
+    # transpose surface currents so shape is 3 x n_cells
+    J_xyz = np.array(Js.T, order="C", dtype=np.complex64)
+    M_xyz = np.array(Ms.T, order="C", dtype=np.complex64)
+
+    core.core_func.nf2ff_flat(J_xyz, M_xyz, cell_pos, cell_ds, ff_data, n_threads)
+
+    # cast as labeled array
+    return ldarray(
+        ff_data["data"],
+        coords=dict(polarization=["thetapol", "phipol"], frequency=frequency, phitheta=np.arange(len(theta))),
+        attrs=dict(theta=theta, phi=phi)
+    )
 
 def _create_meshgrid(*args):
     """ 
