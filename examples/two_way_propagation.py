@@ -8,7 +8,7 @@ import rfnetwork as rfn
 
 from pathlib import Path
 
-from rfnetwork import const, conv, utils, core, utils_mesh
+from rfnetwork import const, conv, utils, core, utils_mesh, antennas
 
 dir_ = Path(__file__).parent
 
@@ -43,134 +43,6 @@ def visible_faces(obj: pv.PolyData, source_pos: tuple) -> np.ndarray:
 
     return visible
 
-def illuminate_object(
-        obj: pv.PolyData, source_pos: tuple, src_patt: ldarray, source_pwr: float, frequency: float, image: bool = False, ray_trace: bool = False
-    ):
-
-    # flip location of source to the other side of ground plane if computing the image
-    if image:
-        source_pos = list(source_pos)
-        source_pos[1] = -source_pos[1]
-        src_patt = -src_patt
-
-    # center of each scatterer face, shape (n_cells, 3)
-    obj_centers = obj.cell_centers().points
-    # unit normal of each scatterer face, pointing out of the surface, shape (n_cells, 3)
-    obj_face_normals = obj.cell_normals
-    # vector from source location to scatterer
-    obj_src_p = obj_centers - source_pos
-    # distance r from source to center of each face
-    obj_src_r = np.linalg.norm(obj_src_p, axis=-1)
-    # normalized vectors from source to each face (direction only)
-    poynting_v = (obj_src_p) / obj_src_r[..., None]
-
-    # azimuth angle of each face center from the z axis (antenna boresight), positive towards +x, in degrees
-    obj_az = np.rad2deg(np.arctan2(obj_src_p[:, 0], obj_src_p[:, 2]))
-    # elevation angle of each face center above the xz plane, positive towards +y, in degrees.
-    # matches the rfnetwork az/el convention: u = cos(el) sin(az), v = sin(el), w = cos(el) cos(az)
-    obj_el = np.rad2deg(np.arctan2(obj_src_p[:, 1], obj_src_p[:, 2]))
-
-    # flip elevation if image
-    if image:
-        obj_el = -obj_el
-
-    # evaluate tx pattern at scatterer faces, remove frequency axis
-    gain_at_faces = src_patt.sel(frequency=frequency).interpolate(az=obj_az, el=obj_el, flat=True)
-
-    # the gain is related to the e-field strength by
-    # G = (4pi / 2 eta0) (|rE|^2 / Pin)
-    # E = sqrt(Pin G (2 eta0 / 4pi r^2))
-    # the tx_patt is already complex voltage gain (sqrt(G))
-    # E = g * sqrt(Pin (2 eta0 / 4pi r^2))
-    e_inc = gain_at_faces * np.sqrt(source_pwr * (2 * eta0 / (4 * np.pi * obj_src_r**2))) * np.exp(-1j * beta * obj_src_r)
-    e_inc = e_inc.transpose(("azel", "polarization"))
-    # cross product with propagation direction vector to get incident h field
-    # TODO: I think this should be k X E, not -k X E. This is probably correcting a sign flip somewhere downstream
-    h_inc = np.cross(-poynting_v, e_inc) / eta0
-
-    # compute intercepted field using the dot product of face normal with position vector
-    eff_area = np.einsum("ij,ij->i", obj_face_normals, poynting_v)
-    # clip values that are positive. If face normal is in same direction as the position vector,
-    # it's dot product is positive
-    eff_area = np.abs(np.where(eff_area > 0 , 0, eff_area))
-
-    # compute surface currents on each face
-    # physical optics electric surface current on the PEC scatterer, Js = 2 n^ x H_inc on lit faces
-    js_at_faces = np.cross(obj_face_normals, h_inc) * eff_area[..., None]
-    ms_at_faces = np.cross(-obj_face_normals, e_inc) * eff_area[..., None]
-
-    # A face is lit if it points towards the source
-    # and no other part of the object blocks the line of sight to it.
-    if ray_trace:
-        lit = visible_faces(obj, source_pos)
-        js_at_faces *= lit[..., None]
-        ms_at_faces *= lit[..., None]
-
-    return js_at_faces, ms_at_faces
-
-
-
-def get_farfield_rE(
-    obj: pv.PolyData, J_xyz, M_xyz, theta: np.ndarray, phi: np.ndarray, frequency: np.ndarray = None, n_threads: int = 4
-) -> ldarray:
-    """
-    Compile E-field monitor data from the farfield monitor attached to the solver.
-
-    E-field values are returned for thetapol and phipol, and are normalized by (exp(1j * beta * r) / r).
-
-    Parameters
-    ----------
-    theta : np.ndarray | float
-        spatial theta values in degrees
-
-    phi : np.ndarray | float
-        spatial phi values in degrees
-
-    Returns
-    -------
-    ldarray
-        rE field values. labeled numpy array with dimensions (polarization, frequency, theta, phi)
-    """
-
-    theta = np.atleast_1d(theta)
-    phi = np.atleast_1d(phi)
-    frequency = np.atleast_1d(frequency)
-
-    # check that theta and phi are same length
-    if theta.ndim != 1 or phi.ndim != 1 or len(theta) != len(phi):
-        raise RuntimeError("theta and phi vectors must be equal length.")
-
-    cell_pos = np.array(obj.cell_centers().points.T, order="C", dtype=np.float32)
-    # compute pattern centered with the scatterer at the origin
-    cell_pos -= np.average(cell_pos, axis=-1)[..., None]
-
-    # area of each face
-    sized = obj.compute_cell_sizes(length=False, area=True, volume=False)
-    cell_ds = np.array(sized.cell_data["Area"], order="C", dtype=np.float32)   # n_cells
-
-    # max grid length for temporary working grid
-    n_cells = obj.n_cells
-
-    ff_data = dict(
-        beta = np.array(2 * np.pi * frequency / rfn.const.c0, dtype=np.float32, order="C"),
-        theta = np.array(np.deg2rad(theta), dtype=np.float32, order="C"),
-        phi = np.array(np.deg2rad(phi), dtype=np.float32, order="C"),
-        data = np.zeros((2, 1, len(theta)), dtype=np.complex64, order="C"),
-        working_grid_cmplx = np.zeros((n_threads, n_cells), dtype=np.complex64, order="C"),
-        working_grid_float = np.zeros((n_threads, n_cells), dtype=np.float32, order="C")
-    )
-
-    J_xyz_t = np.array(J_xyz.T, order="C", dtype=np.complex64)
-    M_xyz_t = np.array(M_xyz.T, order="C", dtype=np.complex64)
-
-    core.core_func.nf2ff_flat(J_xyz_t, M_xyz_t, cell_pos, cell_ds, ff_data, n_threads)
-
-    # cast as labeled array
-    return ldarray(
-        ff_data["data"],
-        coords=dict(polarization=["thetapol", "phipol"], frequency=frequency, phitheta=np.arange(len(theta))),
-        attrs=dict(theta=theta, phi=phi)
-    )
 
 def polar_dir(theta, phi):
     """Unit vectors in the global frame for each theta of a constant phi cut, u = sin(th)cos(ph), v = sin(th)sin(ph), w = cos(th)"""
@@ -178,41 +50,41 @@ def polar_dir(theta, phi):
     return np.stack([np.sin(th_r) * np.cos(ph_r), np.sin(th_r) * np.sin(ph_r), np.cos(th_r) * np.ones_like(th_r)], axis=-1)
 
 
-def add_polar_lines(plotter: pv.Plotter, J_xyz, M_xyz, frequency):
+# def add_polar_lines(plotter: pv.Plotter, J_xyz, M_xyz, frequency):
 
-    theta = np.arange(-180, 182, 2)
-    rE_local_phi0 = get_farfield_rE(scatterer1, J_xyz, M_xyz, theta, np.ones_like(theta) * 0, frequency).squeeze()
-    rE_local_phi90 = get_farfield_rE(scatterer1, J_xyz, M_xyz, theta, np.ones_like(theta) * 90, frequency).squeeze()
+#     theta = np.arange(-180, 182, 2)
+#     rE_local_phi0 = antennas.get_farfield_rE(scatterer1, J_xyz, M_xyz, theta, np.ones_like(theta) * 0, frequency).squeeze()
+#     rE_local_phi90 = aget_farfield_rE(scatterer1, J_xyz, M_xyz, theta, np.ones_like(theta) * 90, frequency).squeeze()
 
-    # 2D polar patterns of the scattered field, drawn in the scene around the scatterer.
-    # total field magnitude (thetapol and phipol combined), both cuts normalized to the common peak
-    polar_cuts = {0: rE_local_phi0, 90: rE_local_phi90}
-    polar_mag = {ph: np.sqrt(np.sum(np.abs(rE) ** 2, axis=0)) for ph, rE in polar_cuts.items()}
-    polar_peak = max(np.max(m) for m in polar_mag.values())
-    # map dB values to a radius, floor at polar_range_db below the peak
-    polar_range_db = 30
-    polar_radius = 1.5  # radius in meters of the 0 dB ring
-    polar_grid_db = np.arange(-polar_range_db + 10, 1, 10)  # dB values of the grid rings
-    polar_grid_spokes = np.arange(-180, 180, 30)  # theta values of the grid spokes
+#     # 2D polar patterns of the scattered field, drawn in the scene around the scatterer.
+#     # total field magnitude (thetapol and phipol combined), both cuts normalized to the common peak
+#     polar_cuts = {0: rE_local_phi0, 90: rE_local_phi90}
+#     polar_mag = {ph: np.sqrt(np.sum(np.abs(rE) ** 2, axis=0)) for ph, rE in polar_cuts.items()}
+#     polar_peak = max(np.max(m) for m in polar_mag.values())
+#     # map dB values to a radius, floor at polar_range_db below the peak
+#     polar_range_db = 30
+#     polar_radius = 1.5  # radius in meters of the 0 dB ring
+#     polar_grid_db = np.arange(-polar_range_db + 10, 1, 10)  # dB values of the grid rings
+#     polar_grid_spokes = np.arange(-180, 180, 30)  # theta values of the grid spokes
 
-    polar_lines, polar_grids = [], []
-    for ph, mag in polar_mag.items():
-        rE_db = conv.db20_lin(mag / polar_peak)
-        polar_r = polar_radius * np.clip(rE_db + polar_range_db, 0, None) / polar_range_db
-        polar_lines.append(pv.lines_from_points(scatterer1_center + polar_r[:, None] * polar_dir(theta, ph)))
+#     polar_lines, polar_grids = [], []
+#     for ph, mag in polar_mag.items():
+#         rE_db = conv.db20_lin(mag / polar_peak)
+#         polar_r = polar_radius * np.clip(rE_db + polar_range_db, 0, None) / polar_range_db
+#         polar_lines.append(pv.lines_from_points(scatterer1_center + polar_r[:, None] * polar_dir(theta, ph)))
 
-        # rings at constant dB in the plane of the cut
-        for db in polar_grid_db:
-            ring_r = polar_radius * (db + polar_range_db) / polar_range_db
-            polar_grids.append(pv.lines_from_points(scatterer1_center + ring_r * polar_dir(theta, ph)))
-        # spokes from the center out to the 0 dB ring
-        for th in polar_grid_spokes:
-            polar_grids.append(pv.Line(scatterer1_center, scatterer1_center + polar_radius * polar_dir(th, ph)))
+#         # rings at constant dB in the plane of the cut
+#         for db in polar_grid_db:
+#             ring_r = polar_radius * (db + polar_range_db) / polar_range_db
+#             polar_grids.append(pv.lines_from_points(scatterer1_center + ring_r * polar_dir(theta, ph)))
+#         # spokes from the center out to the 0 dB ring
+#         for th in polar_grid_spokes:
+#             polar_grids.append(pv.Line(scatterer1_center, scatterer1_center + polar_radius * polar_dir(th, ph)))
 
-    # phi=0 cut in blue, phi=90 cut in red, same order as polar_cuts
-    for line, color in zip(polar_lines, ["blue", "red"]):
-        plotter.add_mesh(line, color=color, line_width=2, opacity=0.5)
-    plotter.add_mesh(pv.merge(polar_grids), color="gray", opacity=0.2, line_width=1)
+#     # phi=0 cut in blue, phi=90 cut in red, same order as polar_cuts
+#     for line, color in zip(polar_lines, ["blue", "red"]):
+#         plotter.add_mesh(line, color=color, line_width=2, opacity=0.5)
+#     plotter.add_mesh(pv.merge(polar_grids), color="gray", opacity=0.2, line_width=1)
 
 def add_ground_plane(plotter, width, length):
     # --- Create a ground plane ---
@@ -323,8 +195,8 @@ scatterer1.points += (-1, 1.5, 10)
 ##############################
 # Illuminate scene from transmitter
 ##############################
-J_xyz_dir, M_xyz_dir = illuminate_object(scatterer1, source_pos, tx_patt, 1, frequency, ray_trace=True)
-J_xyz_im, M_xyz_im = illuminate_object(scatterer1, source_pos, tx_patt, 1, frequency, image=True, ray_trace=True)
+J_xyz_dir, M_xyz_dir, r = antennas.illuminate_object(scatterer1, source_pos, tx_patt, 1, frequency)
+J_xyz_im, M_xyz_im, r_im = antennas.illuminate_object(scatterer1, source_pos, tx_patt, 1, frequency, image=True)
 
 J_xyz = J_xyz_dir + J_xyz_im
 M_xyz = M_xyz_dir + M_xyz_im
@@ -343,7 +215,7 @@ add_ground_plane(plotter, 5, 12)
 plotter.add_mesh(antenna, color="tan")
 # plotter.add_mesh(gnd, color="k", opacity=0.2)
 plotter.add_mesh(scatterer1, cmap="jet", scalars="Ms", clim=(-30, 20))
-add_polar_lines(plotter, J_xyz, M_xyz, frequency)
+# add_polar_lines(plotter, J_xyz, M_xyz, frequency)
 plotter.add_axes()
 # plotter.show_bounds(bounds=(-2.5, 2.5, 0, 3.5, 0, 12), show_zlabels=False, show_xlabels=False, show_ylabels=False, xtitle=" ", ytitle=" ", ztitle=" ")
 # plotter.show_grid()
@@ -383,7 +255,7 @@ obj_rx_v = obj_rx_p / obj_rx_r
 # theta and phi angle back to the rx antenna from scatterer
 phi_rx, theta_rx = rfn.antennas.phitheta_uvw(*(obj_rx_v.T), flat=True)
 
-rE_at_rx = get_farfield_rE(scatterer1, J_xyz, M_xyz, theta_rx, phi_rx, frequency)
+rE_at_rx, rx_r = antennas.get_scattering_rxE(scatterer1, J_xyz, M_xyz, rx_patt, rx_pos, frequency)
 # convert to rectangular polarization
 rE_at_rx = rfn.antennas.pattern_spherical2rectangular(rE_at_rx).squeeze().rename(phitheta="ele")
 

@@ -93,6 +93,8 @@ def illuminate_object(
         n_cells x 3 array of the electric surface current densities on each face.
     Ms: np.ndarray
         n_cells x 3 array of the magnetic surface current densities on each face.
+    r: float
+        propagation distance from source to object (including reflection if image is True), in meters
     
     """
     eta0 = const.eta0
@@ -128,7 +130,10 @@ def illuminate_object(
     # mirror elevation if image. The pattern flips in elevation because the object is being illuminated by the
     # ground bounce, which starts from the mirrored side of the antenna.
     if image:
-        src_patt = -src_patt
+        # vertical currents remain in the same direction (y-pol)
+        # horizontal currents parallel to ground flip direction in the image
+        src_patt[dict(polarization="x")] = -src_patt.sel(polarization="x")
+        src_patt[dict(polarization="z")] = -src_patt.sel(polarization="z")
         obj_el = -obj_el
 
     # evaluate tx pattern at scatterer faces, remove frequency axis. Flattened list of gain values at each objec
@@ -173,7 +178,10 @@ def illuminate_object(
     js_at_faces = np.cross(obj_face_normals, h_inc)
     ms_at_faces = np.cross(obj_face_normals, e_inc)
 
-    return js_at_faces, ms_at_faces
+    # distance from source to object center
+    r_mid = np.linalg.norm(obj_midpoint - src_pos)
+
+    return js_at_faces, ms_at_faces, r_mid
 
 
 def get_scattering_rE(
@@ -283,8 +291,8 @@ def get_scattering_rxE(
     e_field: ldarray
         e-field values. labeled numpy array with dimensions (polarization, frequency). Values are normalized so
         that taking the square will give the power at the RX antenna terminal.
-    rx_patt: ldarray
-        rx pattern values at the incident direction from scatterer.
+    r: ldarray
+        propagation distance in meters from center of scatterer to rx antenna
         
     """
 
@@ -296,7 +304,7 @@ def get_scattering_rxE(
     # vector from center of scatterer to rx antenna
     obj_rx_p = rx_pos - obj_mid_p
     # distance from scatterer to antenna
-    obj_rx_r = np.linalg.norm(obj_rx_p)
+    obj_rx_r = np.linalg.norm(obj_rx_p, axis=-1)
     # normalized uvw position of rx antenna from the local coordinate frame of scatterer
     obj_rx_v = obj_rx_p / obj_rx_r
 
@@ -322,7 +330,7 @@ def get_scattering_rxE(
     # power density is |E|^2 / (2 eta0). Divide by sqrt(2 eta0) so the squared result is the received power.
     e_rx_terminal = eff_area_rx * e_inc_rx / np.sqrt(2 * const.eta0)
 
-    return e_rx_terminal
+    return e_rx_terminal, obj_rx_r
 
 def monostatic_rcs(
     obj: pv.PolyData,

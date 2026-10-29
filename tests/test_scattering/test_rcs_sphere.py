@@ -69,9 +69,9 @@ class TestSphereRCS(unittest.TestCase):
         # move to desired location
         obj.points += scatterer1_loc
 
-        Js, Ms = antennas.illuminate_object(obj, src_pos, src_patt, src_pwr, frequency, spherical=True)
+        Js, Ms, _ = antennas.illuminate_object(obj, src_pos, src_patt, src_pwr, frequency, spherical=True)
 
-        e_rx_terminal = antennas.get_scattering_rxE(obj, Js, Ms, rx_patt, rx_pos, frequency)
+        e_rx_terminal, _ = antennas.get_scattering_rxE(obj, Js, Ms, rx_patt, rx_pos, frequency)
 
         rcs_actual = antennas.monostatic_rcs(
             obj, src_pos, src_pwr, e_rx_terminal, frequency, tx_patt, rx_patt
