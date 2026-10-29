@@ -481,7 +481,7 @@ def phitheta_uvw(u: np.ndarray, v: np.ndarray, w: np.ndarray, deg: bool = True, 
         return ldarray(phi, coords=coords), ldarray(theta, coords=coords)
 
 
-def phitheta_uv(u: np.ndarray, v: np.ndarray, deg: bool = True):
+def phitheta_uv(u: np.ndarray, v: np.ndarray, deg: bool = True, flat: bool = False):
     """
     Convert far-field spatial coordinates from (u, v) to (phi, theta)
 
@@ -501,8 +501,12 @@ def phitheta_uv(u: np.ndarray, v: np.ndarray, deg: bool = True):
     """
 
     u, v = np.atleast_1d(u), np.atleast_1d(v)
+
     # form into a meshgrid
-    u_m, v_m = _create_meshgrid(u, v)
+    if not flat:
+        u_m, v_m = _create_meshgrid(u, v)
+    else:
+        u_m, v_m = u, v
 
     with np.errstate(all='ignore'):
         phi = np.arctan2(v_m, u_m)
@@ -512,7 +516,7 @@ def phitheta_uv(u: np.ndarray, v: np.ndarray, deg: bool = True):
         phi, theta = np.rad2deg(phi), np.rad2deg(theta)
 
     # return phi, theta as labeled arrays, with u coordinates in the rows and v coordinates in the columns
-    if isinstance(phi, ldarray) and isinstance(theta, ldarray):
+    if flat or (isinstance(phi, ldarray) and isinstance(theta, ldarray)):
         return phi, theta
     else:
         coords = dict(u=u, v=v)
