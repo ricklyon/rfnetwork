@@ -310,17 +310,17 @@ def get_scattering_rxE(
 
     # theta and phi angle back to the rx antenna from scatterer
     phi_rx, theta_rx = phitheta_uvw(*(obj_rx_v.T), flat=True)
-
+    # evaluate far-field pattern of scatterer at the directions of the RX antennas
     rE_at_rx = get_scattering_rE(obj, Js, Ms, theta_rx, phi_rx, frequency)
     # convert to rectangular polarization
-    rE_at_rx = pattern_spherical2rectangular(rE_at_rx).squeeze()
+    rE_at_rx = pattern_spherical2rectangular(rE_at_rx).squeeze().rename(phitheta="ele")
 
     # propagate rE to get e-field at source
     e_inc_rx = rE_at_rx * np.exp(-1j * beta * obj_rx_r) / obj_rx_r
 
     # gain of rx pattern at incident direction from scatterer
     rx_az, rx_el = azel_uvw(*(-obj_rx_v.T), flat=True)
-    rx_patt_inc = rx_patt.sel(frequency=frequency).interpolate(az=rx_az, el=rx_el, flat=True).squeeze()
+    rx_patt_inc = rx_patt.sel(frequency=frequency).interpolate(az=rx_az, el=rx_el, ele=rx_patt.ele, flat=True).squeeze()
     # effective voltage area of rx antenna
     # e_eff = G (lam^2 / 4pi)
     eff_area_rx = np.abs(rx_patt_inc) * np.sqrt(lam0**2 / (4 * np.pi))
@@ -328,7 +328,7 @@ def get_scattering_rxE(
     # received field at antenna terminals.
     # e_inc_rx is a peak phasor (same convention as the 2 * eta0 used for the tx field), so the incident
     # power density is |E|^2 / (2 eta0). Divide by sqrt(2 eta0) so the squared result is the received power.
-    e_rx_terminal = eff_area_rx * e_inc_rx / np.sqrt(2 * const.eta0)
+    e_rx_terminal = eff_area_rx.rename(azelele="ele") * e_inc_rx / np.sqrt(2 * const.eta0)
 
     return e_rx_terminal, obj_rx_r
 
