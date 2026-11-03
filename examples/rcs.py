@@ -43,12 +43,12 @@ scatterer.points += (-1, 0.8, 5)
 J_xyz_dir, M_xyz_dir, _ = rfn.antennas.illuminate_object(scatterer, source_pos, tx_patt, 1, f0)
 J_xyz_im, M_xyz_im, _ = rfn.antennas.illuminate_object(scatterer, source_pos, tx_patt, 1, f0, image=True)
 
-J_xyz = J_xyz_dir + J_xyz_im
-M_xyz = M_xyz_dir + M_xyz_im
+Js = J_xyz_dir + J_xyz_im
+Ms = M_xyz_dir + M_xyz_im
 
 plotter = pv.Plotter()
-scatterer.cell_data["Js"] = np.linalg.norm(J_xyz, axis=-1) 
-scatterer.cell_data["Ms"] = np.linalg.norm(M_xyz, axis=-1) 
+scatterer.cell_data["Js"] = np.linalg.norm(Js, axis=-1) 
+scatterer.cell_data["Ms"] = np.linalg.norm(Ms, axis=-1) 
 
 # ground plane
 gnd = pv.Rectangle(((-2, 0, 0), (2, 0, 0), (2, 0, 6)))
@@ -67,7 +67,7 @@ plotter.show()
 theta = np.arange(-180, 182, 2)
 phi = np.zeros_like(theta)
 
-rE_local = rfn.antennas.get_scattering_rE(scatterer, J_xyz, M_xyz, theta, phi, f0)
+rE_local = rfn.antennas.get_scattering_rE(scatterer, Js, Ms, theta, phi, f0)
 rE_local = rE_local.rename(phitheta="theta")
 rE_local.coords["theta"] = theta
 
@@ -84,4 +84,6 @@ rx_pos = ldarray(rx_pos, coords=dict(ele=range(2), axis=("x", "y", "z")))
 
 rx_patt = rfn.antennas.translate(tx_patt, rx_pos)
 
-rx_e, _ = rfn.antennas.get_scattering_rxE(scatterer, J_xyz, M_xyz, rx_patt, rx_pos, f0)
+obj = scatterer
+frequency = f0
+rx_e, _ = rfn.antennas.get_scattering_rxE(scatterer, Js, Ms, rx_patt, rx_pos, f0)

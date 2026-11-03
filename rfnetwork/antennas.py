@@ -299,6 +299,17 @@ def get_scattering_rxE(
     lam0 = const.c0 / frequency
     beta = 2 * np.pi / lam0
 
+    if isinstance(rx_pos, ldarray):
+        ele_keys = [k for k in rx_pos.coords if k not in ("axis")]
+        rx_pos = rx_pos.transpose((..., "axis"))
+    else:
+        ele_keys = []
+
+    if len(ele_keys) > 1:
+        raise ValueError("RX elements must be flattened into a single dimension.")
+
+    ele_key = ele_keys[0] if len(ele_keys) else "ele"
+
     # midpoint of scatterer
     obj_mid_p = np.average(obj.points, axis=0)
     # vector from center of scatterer to rx antenna
@@ -313,24 +324,47 @@ def get_scattering_rxE(
     # evaluate far-field pattern of scatterer at the directions of the RX antennas
     rE_at_rx = get_scattering_rE(obj, Js, Ms, theta_rx, phi_rx, frequency)
     # convert to rectangular polarization
-    rE_at_rx = pattern_spherical2rectangular(rE_at_rx).squeeze().rename(phitheta="ele")
+    rE_at_rx = pattern_spherical2rectangular(rE_at_rx)
+    rE_at_rx = rE_at_rx.rename(phitheta=ele_key)
 
     # propagate rE to get e-field at source
     e_inc_rx = rE_at_rx * np.exp(-1j * beta * obj_rx_r) / obj_rx_r
 
     # gain of rx pattern at incident direction from scatterer
-    rx_az, rx_el = azel_uvw(*(-obj_rx_v.T), flat=True)
-    rx_patt_inc = rx_patt.sel(frequency=frequency).interpolate(az=rx_az, el=rx_el, ele=rx_patt.ele, flat=True).squeeze()
+    # convert pattern coordinates to uvw
+    ptn_keys = rx_patt.coords.keys()
+
+    if "phi" in ptn_keys and "theta" in ptn_keys:
+        phi, theta = phitheta_uvw(*(-obj_rx_v.T), flat=True)
+        interp_coords = dict(phi=phi, theta=theta)
+    elif "az" in ptn_keys and "el" in ptn_keys:
+        az, el = azel_uvw(*(-obj_rx_v.T), flat=True)
+        interp_coords = dict(az=az, el=el)
+    elif "u" in ptn_keys and "v" in ptn_keys:
+        interp_coords = dict(u=obj_rx_v.axis("x"), v=obj_rx_v.axis("y"))
+    else:
+        raise NotImplementedError("Coordinate frame not supported")
+
+    # add coordinates that map to each element
+    for k in ele_keys:
+        interp_coords[k] = rx_pos.coords[k]
+    
+    rx_patt_incident = rx_patt.sel(frequency=frequency).interpolate(**interp_coords, flat=True)
+
+    # rename the flattened interp coord back to the name matching the rE_at_rx array
+    interp_key = list(rx_patt_incident.coords.keys())[-1]
+    rx_patt_incident = rx_patt_incident.rename(**{interp_key: ele_key})
+
     # effective voltage area of rx antenna
     # e_eff = G (lam^2 / 4pi)
-    eff_area_rx = np.abs(rx_patt_inc) * np.sqrt(lam0**2 / (4 * np.pi))
+    eff_area_rx = np.abs(rx_patt_incident) * np.sqrt(lam0**2 / (4 * np.pi))
 
     # received field at antenna terminals.
     # e_inc_rx is a peak phasor (same convention as the 2 * eta0 used for the tx field), so the incident
     # power density is |E|^2 / (2 eta0). Divide by sqrt(2 eta0) so the squared result is the received power.
-    e_rx_terminal = eff_area_rx.rename(azelele="ele") * e_inc_rx / np.sqrt(2 * const.eta0)
+    e_rx_terminal = eff_area_rx * e_inc_rx / np.sqrt(2 * const.eta0)
 
-    return e_rx_terminal, obj_rx_r
+    return e_rx_terminal.squeeze(), obj_rx_r
 
 def monostatic_rcs(
     obj: pv.PolyData,
@@ -403,7 +437,7 @@ def _create_meshgrid(*args):
     else:
         return args
 
-def uvw_phitheta(phi: np.ndarray, theta: np.ndarray, deg: bool = True):
+def uvw_phitheta(phi: np.ndarray, theta: np.ndarray, deg: bool = True, flat: bool = False):
     """
     Convert far-field spatial coordinates from (phi, theta) to (u, v, w).
 
@@ -424,7 +458,10 @@ def uvw_phitheta(phi: np.ndarray, theta: np.ndarray, deg: bool = True):
 
     phi, theta = np.atleast_1d(phi), np.atleast_1d(theta)
     # form into a meshgrid
-    phi_m, theta_m = _create_meshgrid(phi, theta)
+    if not flat:
+        phi_m, theta_m = _create_meshgrid(phi, theta)
+    else:
+        phi_m, theta_m = phi, theta
 
     if deg:
         phi_m, theta_m = np.deg2rad(phi_m), np.deg2rad(theta_m)
@@ -434,8 +471,11 @@ def uvw_phitheta(phi: np.ndarray, theta: np.ndarray, deg: bool = True):
     w = np.cos(theta_m) * np.ones_like(phi_m)
 
     # return as labeled arrays, 
-    coords = dict(phi=phi, theta=theta)
-    return ldarray(u, coords=coords), ldarray(v, coords=coords), ldarray(w, coords=coords)
+    if flat or (isinstance(u, ldarray) and isinstance(v, ldarray) and isinstance(w, ldarray)):
+        return u, v, w
+    else:
+        coords = dict(phi=phi, theta=theta)
+        return ldarray(u, coords=coords), ldarray(v, coords=coords), ldarray(w, coords=coords)
 
 
 def phitheta_uvw(u: np.ndarray, v: np.ndarray, w: np.ndarray, deg: bool = True, flat: bool = False):
@@ -564,6 +604,29 @@ def uvw_azel(az: np.ndarray, el: np.ndarray, flat: bool = False):
         coords = dict(az=az, el=el)
         return ldarray(u, coords=coords), ldarray(v, coords=coords), ldarray(w, coords=coords)
 
+
+def azel_uv(u: np.ndarray, v: np.ndarray, flat: bool = False):
+    """
+    Convert u, v coordinates to az, el.
+
+    Parameters
+    ----------
+    u : ldarray
+        u coordinate
+    v : ldarray
+        v coordinate
+
+    Returns
+    -------
+    az : np.ndarray
+        azimuth coordinates
+    el : np.ndarray
+        elevation coordinates
+    """
+
+    return azel_uvw(*uvw_uv(u=u, v=v, flat=flat), flat=flat)
+
+
 def azel_uvw(u: np.ndarray, v: np.ndarray, w: np.ndarray, flat: bool = False):
     """
     Convert u, v, w to azimuth and elevation coordinates [degrees].
@@ -606,7 +669,28 @@ def azel_uvw(u: np.ndarray, v: np.ndarray, w: np.ndarray, flat: bool = False):
         coords = dict(u=u, v=v, w=w)
         return  ldarray(az, coords=coords), ldarray(el, coords=coords)
 
-def uvw_uv(u: np.ndarray, v: np.ndarray):
+def uv_azel(az: np.ndarray, el: np.ndarray, flat: bool = False):
+    """
+    Convert az, el coordinates to u, v.
+
+    Parameters
+    ----------
+    az : np.ndarray
+        azimuth coordinates
+    el : np.ndarray
+        elevation coordinates
+
+    Returns
+    -------
+    u : ldarray
+        u coordinate
+    v : ldarray
+        v coordinate
+    """
+
+    return uvw_azel(az=az, el=el, flat=flat)[:2]
+
+def uvw_uv(u: np.ndarray, v: np.ndarray, flat: bool = False):
     """
     Convert u, v to u, v, w defined in the upper hemisphere.
 
@@ -627,11 +711,14 @@ def uvw_uv(u: np.ndarray, v: np.ndarray):
         w coordinate
     """
 
-    phi, theta = phitheta_uv(u, v)
-    u_new, v_new, w_new = uvw_phitheta(phi, theta)
+    phi, theta = phitheta_uv(u, v, flat=flat)
+    u_new, v_new, w_new = uvw_phitheta(phi, theta, flat=flat)
 
-    coords = dict(u=u, v=v)
-    return ldarray(u_new, coords=coords), ldarray(v_new, coords=coords), ldarray(w_new, coords=coords)
+    if flat or (isinstance(u_new, ldarray) and isinstance(v_new, ldarray) and isinstance(w_new, ldarray)):
+        return u_new, v_new, w_new
+    else:
+        coords = dict(u=u, v=v)
+        return ldarray(u_new, coords=coords), ldarray(v_new, coords=coords), ldarray(w_new, coords=coords)
 
 def pattern_phitheta2azel(pattern: ldarray, az: np.ndarray, el: np.ndarray):
     """
