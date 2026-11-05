@@ -1,6 +1,7 @@
 from np_struct import ldarray
 import numpy as np
 import pyvista as pv
+from copy import deepcopy as dcopy
 
 from rfnetwork import const, core
 
@@ -132,6 +133,7 @@ def illuminate_object(
     if image:
         # vertical currents remain in the same direction (y-pol)
         # horizontal currents parallel to ground flip direction in the image
+        src_patt = dcopy(src_patt)
         src_patt[dict(polarization="x")] = -src_patt.sel(polarization="x")
         src_patt[dict(polarization="z")] = -src_patt.sel(polarization="z")
         obj_el = -obj_el
@@ -191,7 +193,7 @@ def get_scattering_rE(
     theta: np.ndarray, 
     phi: np.ndarray, 
     frequency: np.ndarray = None, 
-    n_threads: int = 4
+    n_threads: int = 8
 ) -> ldarray:
     """
     Compute far-field scattering pattern for the surface currents on an object.
