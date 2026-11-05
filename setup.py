@@ -86,7 +86,8 @@ core_cpp = [
     "rfnetwork/core/src/postprocess.cpp",
     "rfnetwork/core/src/core_binding.cpp",
     "rfnetwork/core/src/connect.cpp",
-    "rfnetwork/core/src/solver.cpp"
+    "rfnetwork/core/src/solver.cpp",
+    "rfnetwork/core/src/mesh.cpp"
 ]
 
 cuda_cpp = [

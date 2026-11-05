@@ -8,6 +8,7 @@
 #include "connect.h"
 #include "solver.h"
 #include "postprocess.h"
+#include "mesh.h"
 
 #include <stdio.h>
 #include <cstdint>
@@ -16,6 +17,8 @@
 #include <cstring>
 #include <complex>
 #include <stdexcept>
+#include <string>
+#include <vector>
 
 #define DATA_NDIM 3
 
@@ -43,6 +46,33 @@ void array_data_shape(PyArrayObject* array, int * shape)
     for (int i = 0; i < DATA_NDIM; ++i) {
         shape[i] = (int) npy_shape[i];
     }
+}
+
+PyArrayObject * check_array(PyObject * obj, int ndim, int type, const char * name)
+{
+    if (!PyArray_Check(obj))
+    {
+        throw std::runtime_error(std::string("Expected ") + name + " as a numpy array.");
+    }
+
+    PyArrayObject * array = (PyArrayObject *) obj;
+
+    if (PyArray_NDIM(array) != ndim)
+    {
+        throw std::runtime_error(std::string("Invalid ") + name + " array. Wrong number of dimensions.");
+    }
+
+    if (PyArray_TYPE(array) != type)
+    {
+        throw std::runtime_error(std::string("Invalid ") + name + " array. Wrong data type.");
+    }
+
+    if (!(PyArray_FLAGS(array) & NPY_ARRAY_C_CONTIGUOUS))
+    {
+        throw std::runtime_error(std::string("Invalid ") + name + " array. Must row ordered (C-style)");
+    }
+
+    return array;
 }
 
 static PyObject * connect_other_bind(PyObject *self, PyObject *args)
@@ -510,6 +540,192 @@ static PyObject* nf2ff_flat(PyObject* self, PyObject* args) {
     return PyLong_FromLong(0);
 }
 
+static PyObject* blend_cell_widths_bind(PyObject* self, PyObject* args) {
+
+    double a;
+    double b;
+    double d;
+    int n_min;
+    double tol;
+
+    if (!PyArg_ParseTuple(args, "dddid", &a, &b, &d, &n_min, &tol)) {
+        return NULL;
+    }
+
+    std::vector<double> cells;
+
+    try
+    {
+        cells = blend_cell_widths(a, b, d, n_min, tol);
+    }
+    catch (const std::exception& e) {
+        PyErr_SetString(PyExc_RuntimeError, e.what());
+        return NULL;
+    }
+
+    // copy the sub-cell widths into a new 1D numpy array
+    npy_intp dims[1] = {(npy_intp) cells.size()};
+    PyObject * cells_array = PyArray_SimpleNew(1, dims, NPY_DOUBLE);
+    if (cells_array == NULL) {
+        return NULL;
+    }
+
+    std::memcpy(PyArray_DATA((PyArrayObject *) cells_array), cells.data(), cells.size() * sizeof(double));
+
+    return cells_array;
+}
+
+
+static PyObject* remove_interior_edges_bind(PyObject* self, PyObject* args) {
+
+    PyObject * edges;
+    double tolerance;
+    double zero;
+
+    if (!PyArg_ParseTuple(args, "Odd", &edges, &tolerance, &zero)) {
+        return NULL;
+    }
+
+    std::vector<double> nonovl_edges;
+
+    try
+    {
+        PyArrayObject * edges_array = check_array(edges, 3, NPY_DOUBLE, "edges");
+        npy_intp * edges_shape = PyArray_SHAPE(edges_array);
+
+        if ((edges_shape[1] != 2) || (edges_shape[2] != 3))
+        {
+            throw std::runtime_error("Invalid edges array. Must have shape (N, 2, 3).");
+        }
+
+        nonovl_edges = remove_interior_edges(
+            (double *) PyArray_DATA(edges_array), (int) edges_shape[0], tolerance, zero
+        );
+    }
+    catch (const std::exception& e) {
+        PyErr_SetString(PyExc_RuntimeError, e.what());
+        return NULL;
+    }
+
+    // copy the edges into a new (M, 2, 3) numpy array
+    npy_intp dims[3] = {(npy_intp) (nonovl_edges.size() / 6), 2, 3};
+    PyObject * edges_out = PyArray_SimpleNew(3, dims, NPY_DOUBLE);
+    if (edges_out == NULL) {
+        return NULL;
+    }
+
+    std::memcpy(
+        PyArray_DATA((PyArrayObject *) edges_out), nonovl_edges.data(), nonovl_edges.size() * sizeof(double)
+    );
+
+    return edges_out;
+}
+
+static PyObject* is_point_in_surface_bind(PyObject* self, PyObject* args) {
+
+    PyObject * points;
+    PyObject * vertices;
+    PyObject * vertex_count;
+    PyObject * edges;
+    PyObject * edge_count;
+
+    int axis;
+    int c1_axis;
+    int c2_axis;
+    double plane_pos;
+    double tolerance;
+    double d_min;
+    double zero_tol;
+
+    if (!PyArg_ParseTuple(
+        args, "OOOOOiiidddd", &points, &vertices, &vertex_count, &edges, &edge_count,
+        &axis, &c1_axis, &c2_axis, &plane_pos, &tolerance, &d_min, &zero_tol
+    )) {
+        return NULL;
+    }
+
+    PyObject * in_surface = NULL;
+
+    try
+    {
+        PyArrayObject * points_array = check_array(points, 2, NPY_DOUBLE, "points");
+        PyArrayObject * vertices_array = check_array(vertices, 2, NPY_DOUBLE, "vertices");
+        PyArrayObject * vertex_count_array = check_array(vertex_count, 1, NPY_INT32, "vertex_count");
+        PyArrayObject * edges_array = check_array(edges, 3, NPY_DOUBLE, "edges");
+        PyArrayObject * edge_count_array = check_array(edge_count, 1, NPY_INT32, "edge_count");
+
+        npy_intp * points_shape = PyArray_SHAPE(points_array);
+        npy_intp * vertices_shape = PyArray_SHAPE(vertices_array);
+        npy_intp * edges_shape = PyArray_SHAPE(edges_array);
+
+        if (points_shape[1] != 3)
+        {
+            throw std::runtime_error("Invalid points array. Must have shape (N, 3).");
+        }
+
+        if (vertices_shape[1] != 3)
+        {
+            throw std::runtime_error("Invalid vertices array. Must have shape (N, 3).");
+        }
+
+        if ((edges_shape[1] != 2) || (edges_shape[2] != 3))
+        {
+            throw std::runtime_error("Invalid edges array. Must have shape (N, 2, 3).");
+        }
+
+        int n_faces = (int) PyArray_SHAPE(vertex_count_array)[0];
+        if (PyArray_SHAPE(edge_count_array)[0] != n_faces)
+        {
+            throw std::runtime_error("vertex_count and edge_count must have the same length.");
+        }
+
+        // counts must add up to the length of the vertices and edges arrays
+        int * vertex_count_p = (int *) PyArray_DATA(vertex_count_array);
+        int * edge_count_p = (int *) PyArray_DATA(edge_count_array);
+        npy_intp n_vertices = 0;
+        npy_intp n_edges = 0;
+        for (int f = 0; f < n_faces; ++f)
+        {
+            n_vertices += vertex_count_p[f];
+            n_edges += edge_count_p[f];
+        }
+
+        if ((n_vertices != vertices_shape[0]) || (n_edges != edges_shape[0]))
+        {
+            throw std::runtime_error("Face vertex or edge counts do not match the vertices or edges arrays.");
+        }
+
+        if ((axis < 0) || (axis > 2) || (c1_axis < 0) || (c1_axis > 2) || (c2_axis < 0) || (c2_axis > 2))
+        {
+            throw std::runtime_error("Invalid axis.");
+        }
+
+        npy_intp dims[1] = {points_shape[0]};
+        in_surface = PyArray_SimpleNew(1, dims, NPY_BOOL);
+        if (in_surface == NULL) {
+            return NULL;
+        }
+
+        is_point_in_surface(
+            (double *) PyArray_DATA(points_array),
+            (int) points_shape[0],
+            (double *) PyArray_DATA(vertices_array),
+            vertex_count_p,
+            (double *) PyArray_DATA(edges_array),
+            edge_count_p,
+            n_faces, axis, c1_axis, c2_axis, plane_pos, tolerance, d_min, zero_tol,
+            (uint8_t *) PyArray_DATA((PyArrayObject *) in_surface)
+        );
+    }
+    catch (const std::exception& e) {
+        Py_XDECREF(in_surface);
+        PyErr_SetString(PyExc_RuntimeError, e.what());
+        return NULL;
+    }
+
+    return in_surface;
+}
+
 
 static PyMethodDef moduleMethods[] = {
     {"connect_other",  connect_other_bind, METH_VARARGS, ""},
@@ -519,6 +735,9 @@ static PyMethodDef moduleMethods[] = {
     {"nf2ff",  nf2ff, METH_VARARGS, ""},
     {"nf2ff_flat",  nf2ff_flat, METH_VARARGS, ""},
     {"solver_run",  solver_run, METH_VARARGS, ""},
+    {"blend_cell_widths",  blend_cell_widths_bind, METH_VARARGS, ""},
+    {"remove_interior_edges",  remove_interior_edges_bind, METH_VARARGS, ""},
+    {"is_point_in_surface",  is_point_in_surface_bind, METH_VARARGS, ""},
     {NULL, NULL, 0, NULL}        /* Sentinel */
 };
 
