@@ -62,6 +62,8 @@ class FDTD_Solver():
         self._solved = False
         self._time = None
 
+        self._mesh_oblique_edges = True
+
         self.dtype_ = np.float32
 
     @property
@@ -487,7 +489,7 @@ class FDTD_Solver():
         return tuple(idx)
     
     
-    def generate_mesh(self, d_max, d_min: float = None, surface_tolerance: float = 0.1):
+    def generate_mesh(self, d_max, d_min: float = None, surface_tolerance: float = 0.1, mesh_oblique: bool = True):
         """
         Generate the grid and FDTD coefficients for the model geometry.
 
@@ -500,6 +502,9 @@ class FDTD_Solver():
         surface_tolerance : float, optional
             tolerance in inches used to determine if grid cells are inside or outside a conductor object.
             Default is 1/3 the minimum grid cell width.
+        mesh_oblique: bool, default: True
+            if False, mesh grid ignores oblique edges. Setting to False can speed up meshing if all edges are 
+            aligned with cartesian grid.
         """
 
         if d_min is None:
@@ -509,6 +514,7 @@ class FDTD_Solver():
 
         self._meshed = True
         self.invalidate_solution()
+        self._mesh_oblique_edges = bool(mesh_oblique)
 
         self._init_grid(d_max=d_max, d_min=d_min)
         # init dielectrics sets the cell sigma and er but does not set the coefficients
@@ -758,15 +764,17 @@ class FDTD_Solver():
                         if (abs(p - self.sbox_max[axis]) > self._tol) and (abs(p - self.sbox_min[axis]) > self._tol):
                             soft_points = np.append(soft_points, [p - d_min, p + d_min])
 
-            for i, edge in enumerate(obj_edges):
-                # grade mesh cells along angled edges
-                if obj_edges_oblique[i] and obj_edge_v[i][axis] > d_min:
-                    # break angled edges along x and y into sub-cells separated by d_min
-                    nx_ny = np.around(np.abs(obj_edge_v[i][axis]) / d_min).astype(int)
+            # create additional points along oblique edges that are not aligned with the grid cells.
+            if self._mesh_oblique_edges:
+                for i, edge in enumerate(obj_edges):
+                    # grade mesh cells along angled edges
+                    if obj_edges_oblique[i] and obj_edge_v[i][axis] > d_min:
+                        # break angled edges along x and y into sub-cells separated by d_min
+                        nx_ny = np.around(np.abs(obj_edge_v[i][axis]) / d_min).astype(int)
 
-                    soft_points = np.append(
-                        soft_points, np.linspace(edge[0, axis], edge[1, axis], nx_ny)
-                    )
+                        soft_points = np.append(
+                            soft_points, np.linspace(edge[0, axis], edge[1, axis], nx_ny)
+                        )
 
             # add gerber vertices
             hard_points = np.concatenate((hard_points, gbr_hard_points[axis]))
