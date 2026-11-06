@@ -63,6 +63,7 @@ def illuminate_object(
     frequency: float, 
     spherical: bool = False,
     image: bool = False, 
+    small: bool = False
 ):
     """
     Illuminate the faces on an object from a source antenna and compute the resulting surface currents.
@@ -86,7 +87,11 @@ def illuminate_object(
         for large objects in the optical region, but approximates the Mie resonances.
     image: bool, default: False
         if True, computes the currents from the ground bounce, assuming the ground is a perfect conductor along the
-        xz plane. 
+        xz plane. Assumes src_patt is already modified to represent the image.
+    small: bool, default: False
+        if True, object is assumed to be in either in far-field or electrically small enough that the power and phase
+        from the source can be assumed to be constant for all object faces, with the exception of phase differences
+        in the radial direction.
 
     Returns
     -------
@@ -102,11 +107,11 @@ def illuminate_object(
     lam0 = const.c0 / frequency
     beta = 2 * np.pi / lam0
 
-    # flip location of source to the other side of ground plane if computing the image
     if image:
+        # image antenna postion
         src_pos = list(src_pos)
         src_pos[1] = -src_pos[1]
-
+        
     # center of each scatterer face, shape (n_cells, 3)
     obj_centers = obj.cell_centers().points
     # unit normal of each scatterer face, pointing out of the surface, shape (n_cells, 3)
@@ -123,24 +128,27 @@ def illuminate_object(
     # maximum distance of any face from midpoint normalized by the wavelength
     obj_max_r = np.max(np.linalg.norm(obj_centers - obj_midpoint, axis=1)) / lam0
 
-    # azimuth angle of each face center from the z axis (antenna boresight), positive towards +x, in degrees
-    obj_az = np.rad2deg(np.arctan2(obj_src_p[:, 0], obj_src_p[:, 2]))
-    # elevation angle of each face center above the xz plane, positive towards +y, in degrees.
-    obj_el = np.rad2deg(np.arctan2(obj_src_p[:, 1], obj_src_p[:, 2]))
+    if small:
+        # azimuth angle of each face center from the z axis (antenna boresight), positive towards +x, in degrees
+        obj_az = np.rad2deg(np.arctan2(obj_midpoint[0], obj_midpoint[2]))
+        # elevation angle of each face center above the xz plane, positive towards +y, in degrees.
+        obj_el = np.rad2deg(np.arctan2(obj_midpoint[1], obj_midpoint[2]))
+
+    else:
+        # azimuth angle of each face center from the z axis (antenna boresight), positive towards +x, in degrees
+        obj_az = np.rad2deg(np.arctan2(obj_src_p[:, 0], obj_src_p[:, 2]))
+        # elevation angle of each face center above the xz plane, positive towards +y, in degrees.
+        obj_el = np.rad2deg(np.arctan2(obj_src_p[:, 1], obj_src_p[:, 2]))
 
     # mirror elevation if image. The pattern flips in elevation because the object is being illuminated by the
     # ground bounce, which starts from the mirrored side of the antenna.
     if image:
-        # vertical currents remain in the same direction (y-pol)
-        # horizontal currents parallel to ground flip direction in the image
-        src_patt = dcopy(src_patt)
-        src_patt[dict(polarization="x")] = -src_patt.sel(polarization="x")
-        src_patt[dict(polarization="z")] = -src_patt.sel(polarization="z")
         obj_el = -obj_el
 
     # evaluate tx pattern at scatterer faces, remove frequency axis. Flattened list of gain values at each objec
     # face
     gain_at_faces = src_patt.sel(frequency=frequency).interpolate(az=obj_az, el=obj_el, flat=True)
+    # result shape is polarization, azel. Cast as numpy array to avoid overhead
 
     # scale the incident e-field by the effective area of the face that is facing towards the source.
     # cell is facing the source if the dot product between the face normal and poynting vector
@@ -171,7 +179,9 @@ def illuminate_object(
     # the tx_patt is already complex voltage gain (sqrt(G))
     # E = g * sqrt(Pin (2 eta0 / 4pi r^2))
     e_inc = gain_at_faces * np.sqrt(src_pwr * (2 * eta0 / (4 * np.pi * obj_src_r**2))) * np.exp(-1j * beta * obj_src_r)
-    e_inc = e_inc.transpose(("azel", "polarization")) * eff_area[:, None]
+    e_inc = e_inc * eff_area
+    # transpose to faces, polarization
+    e_inc = e_inc.T
 
     # cross product with propagation direction vector to get incident h field, H = k^ x E / eta0
     h_inc = np.cross(poynting_v, e_inc) / eta0
