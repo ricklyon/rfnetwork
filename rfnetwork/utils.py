@@ -151,6 +151,54 @@ def ifft(Xw: ldarray):
         xt, coords = dict(time=time, **d_coords)
     )
 
+def fractional_delay(xn: np.ndarray, delay: float, fs: int, n_tap: int = 61, axis: int = -1):
+    """
+    Delays a signal by a delay [s], supporting delays that are a fraction of the sampling period with an
+    interpolating FIR filter.
+
+    Parameters
+    ---------
+    xn : np.ndarray
+        input signal
+    delay : float
+        delay in seconds
+    fs : int
+        sampling rate of xn
+    n_tap : int, default: 61
+        number of taps for fractional filter. The integer part of the filter is not applied
+        with a FIR filter and is not affected by the number of taps.
+
+    Returns
+    -------
+    np.ndarray
+        output signal with the same length as xn.
+    """
+
+    # number of fractional samples to achieve desired delay
+    sample_delay = delay * fs
+    smp_delay_int = int(sample_delay)
+    smp_delay_frac = sample_delay - smp_delay_int
+
+    # apply integer delay
+    yn = np.zeros_like(xn)
+    yn[smp_delay_int:] += np.roll(xn, smp_delay_int)[smp_delay_int:] 
+
+    # build filter response (h) for fractional part
+    n = np.arange(n_tap)
+    # Center index of the filter
+    center = (n_tap - 1) / 2.0
+    # Shifted time indices
+    t = n - center - smp_delay_frac
+    # Sinc impulse response with windowing
+    h = np.sinc(t)
+    win = np.hamming(n_tap)
+    h = h * win
+    # Normalize for unity gain at DC
+    h = h / np.sum(h)
+
+    # apply fractional fir filter
+    return signal.fftconvolve(yn, h, mode="same", axes=axis)
+
 def n_ports_from_snp(path: str) -> int:
     """
     Get the number of ports from a .snp file extension.
