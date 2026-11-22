@@ -6,6 +6,7 @@ from scipy.special import ellipk
 from scipy import signal
 from np_struct import ldarray
 from scipy import optimize
+from scipy.special import spherical_jn, spherical_yn
 
 from .core.units import const, conv
 
@@ -837,3 +838,30 @@ def phase_delay_signal(signal: ldarray, phase: float, f0: float):
 
     return ldarray(np.roll(signal, n_delay, axis="time"), coords=signal.coords)
 
+def _mie_coeffs(x):
+    n_max = int(x + 4 * x ** (1 / 3) + 4)
+    n = np.arange(1, n_max + 1)
+    jn, yn = spherical_jn(n, x), spherical_yn(n, x)
+    jnp, ynp = spherical_jn(n, x, True), spherical_yn(n, x, True)
+    hn, hnp = jn + 1j * yn, jnp + 1j * ynp
+    # PEC limit of Bohren & Huffman coefficients; psi = x j_n, xi = x h_n
+    a = (jn + x * jnp) / (hn + x * hnp)
+    b = jn / hn
+    return n, a, b
+
+def sphere_mie_monostatic(radius: float, frequency: float):
+    """
+    RCS of a conducting sphere following the analytical Mie resonance.
+
+    Parameters
+    ----------
+    radius : float
+        radius in meters of the conducting sphere
+    frequency : float
+        frequency in Hz
+    """
+    lam0 = const.c0 / frequency
+    ka = 2 * np.pi * radius / lam0
+    n, a, b = _mie_coeffs(ka)
+    s = np.sum((-1) ** n * (2 * n + 1) * (a - b))
+    return np.pi * radius ** 2 * np.abs(s) ** 2 / ka ** 2

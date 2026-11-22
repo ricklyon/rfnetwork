@@ -1,3 +1,12 @@
+"""
+Conducting Sphere RCS
+=====================
+
+Compute the monostatic RCS of a conducting sphere.
+"""
+
+# sphinx_gallery_thumbnail_number = 3
+
 import pyvista as pv
 import vtk
 from np_struct import ldarray
@@ -5,85 +14,114 @@ import numpy as np
 from scipy.spatial.transform import Rotation
 import matplotlib.pyplot as plt
 import rfnetwork as rfn
+from rfnetwork import antennas
 
 from pathlib import Path
 
 dir_ = Path(__file__).parent
 
-
-f0 = 3e9
-lam0 = rfn.const.c0 / f0
-beta = 2 * np.pi / lam0
-
+# set matplotlib style
+plt.style.use(rfn.DEFAULT_STYLE)
 pv.set_jupyter_backend("trame")
 
-# TX beam pattern, x-polarization
-tx_patt = ldarray.load(dir_ / "data/vivaldi_antenna_patt.npy")
+# %%
+# User defined Parameters [meters]
+# ------------------------
+
+frequency = 3e9
+lam0 = rfn.const.c0 / frequency
+# radius of sphere in meters
+radius_list = np.array([0.02, 0.08, 0.25])
+
+# isotropic source antenna at the origin
+# TX beam pattern, y-polarization
+src_patt = ldarray.load(dir_ / "data/vivaldi_antenna_patt.npy")
 tx_pin = 1 # input power in watts
 
-# move the tx pattern to the source position, currently centered at the origin
-antenna_height = 1.5
-source_pos = (0, antenna_height, 0)
-src_patt = rfn.antennas.translate(tx_patt, source_pos)
+# xyz location of sphere in meters
+sphere_loc = (0, 0, 2)
+# tx power in watts
+src_pwr = 1
+# position of receiving and tx antenna
+rx_pos = np.array((0, 0, 0))
+src_pos = np.array((0, 0, 0))
+rx_patt = src_patt.copy()
 
-# rx antenna patterns
-rx_pos = (0, antenna_height - 0.1, 0)
-rx_patt = rfn.antennas.translate(tx_patt, rx_pos)
+# %%
+#  Build Models
+# ------------
+rcs = [0] * len(radius_list)
+rE = [None] * len(radius_list)
 
-# add antenna rendering
-antenna = pv.read(dir_ / "data/horn_antenna.stl")
-antenna.points *= 0.1
-antenna.points += source_pos
+for i, radius in enumerate(radius_list):
+    # set theta/phi resolution of sphere object to around 1/5 of a wavelength
+    res = np.clip(int(2 * np.pi * radius / lam0 * 5), 60, 500)
+    obj = pv.Sphere(radius=radius, theta_resolution=res, phi_resolution=res)
 
-scatterer = pv.Sphere(radius=0.4, theta_resolution=100, phi_resolution=100)
+    # move to desired location
+    obj.points += sphere_loc
 
-# move to desired location
-scatterer.points += (-1, 0.8, 5)
+    # compute surface currents on sphere from transmitter
+    Js, Ms, _ = antennas.illuminate_object(obj, src_pos, src_patt, src_pwr, frequency, spherical=True)
+    # get scattered fields back at the rx antenna
+    e_rx_terminal, _ = antennas.get_scattering_rxE(obj, Js, Ms, rx_patt, rx_pos, frequency)
+    # compute rcs of sphere in the y-polarization (co-pol)
+    rcs[i] = antennas.monostatic_rcs(
+        obj, src_pos, src_pwr, e_rx_terminal, frequency, src_patt, rx_patt
+    ).sel(polarization="y")
 
-J_xyz_dir, M_xyz_dir, _ = rfn.antennas.illuminate_object(scatterer, source_pos, tx_patt, 1, f0)
-J_xyz_im, M_xyz_im, _ = rfn.antennas.illuminate_object(scatterer, source_pos, tx_patt, 1, f0, image=True)
+    # %%
+    #  Plot Scene
+    # ------------
+    plotter = pv.Plotter()
+    obj.cell_data["Js"] = np.linalg.norm(Js, axis=-1) 
+    obj.cell_data["Ms"] = np.linalg.norm(Ms, axis=-1) 
 
-Js = J_xyz_dir + J_xyz_im
-Ms = M_xyz_dir + M_xyz_im
+    # add antenna rendering, scale to roughly 5x3in
+    antenna = pv.read(dir_ / "data/horn_antenna.stl")
+    antenna.points *= (rfn.conv.m_in(5) / np.max(antenna.points[:, 0]))
+    # move to desired location
+    antenna.points += src_pos
 
-plotter = pv.Plotter()
-scatterer.cell_data["Js"] = np.linalg.norm(Js, axis=-1) 
-scatterer.cell_data["Ms"] = np.linalg.norm(Ms, axis=-1) 
+    plotter.add_mesh(antenna, color="tan")
+    plotter.add_mesh(obj, cmap="jet", scalars="Ms")
+    plotter.add_axes()
+    plotter.show_bounds(bounds=(-0.5, 0.5, -0.5, 0.5, 0, 2), show_zlabels=False, show_xlabels=False, show_ylabels=False, xtitle=" ", ytitle=" ", ztitle=" ")
+    plotter.add_bounding_box()
 
-# ground plane
-gnd = pv.Rectangle(((-2, 0, 0), (2, 0, 0), (2, 0, 6)))
+    cpos = pv.CameraPosition(position=(-1.9900, 1.0525, -2.1575), focal_point=(-0.1086, -0.0931, 0.7756), viewup=(0, 1, 0))
+    plotter.camera_position = cpos
+    plotter.show()
 
-plotter.add_mesh(antenna, color="tan")
-plotter.add_mesh(gnd, color="silver", metallic=1, specular=1.0)
-plotter.add_mesh(scatterer, cmap="jet", scalars="Ms", clim=(0, 6))
-plotter.add_axes()
-plotter.show_bounds(bounds=(-2, 2, 0, 3, 0, 6), show_zlabels=False, show_xlabels=False, show_ylabels=False, xtitle=" ", ytitle=" ", ztitle=" ")
-plotter.add_bounding_box()
+    # get scattering pattern
+    theta = np.arange(-180, 182, 2)
+    phi = np.zeros_like(theta)
 
-cpos = pv.CameraPosition(position=(-9.2541, 4.4767, -3.2586), focal_point=(-0.1153, 1.0408, 2.8409), viewup=(0, 1, 0))
-plotter.camera_position = cpos
-plotter.show()
+    rE_local = rfn.antennas.get_scattering_rE(obj, Js, Ms, theta, phi, frequency)
+    rE_local = rE_local.rename(phitheta="theta")
+    rE_local.coords["theta"] = theta
+    rE[i] = rE_local
 
-theta = np.arange(-180, 182, 2)
-phi = np.zeros_like(theta)
-
-rE_local = rfn.antennas.get_scattering_rE(scatterer, Js, Ms, theta, phi, f0)
-rE_local = rE_local.rename(phitheta="theta")
-rE_local.coords["theta"] = theta
-
+# %%
+# Plot Scattering Pattern
+# -----------------------
 fig, ax = plt.subplots(subplot_kw=dict(projection="polar"))
-rE_local.plot("theta", xfmt=np.deg2rad, yfmt="db20")
+for rE_i in rE:
+    rE_i.plot("theta", xfmt=np.deg2rad, yfmt="db20", polarization="phipol")
 plt.show()
 
-# rx antenna pattern
-rx_pos = [
-    (-0.1, antenna_height, 0), 
-    (0.1, antenna_height, 0),
-]
-rx_pos = ldarray(rx_pos, coords=dict(ele=range(2), axis=("x", "y", "z")))
+# %%
+# Compare with Analytical Values
+# ------------------------------
 
-rx_patt = rfn.antennas.translate(tx_patt, rx_pos)
+r_lam = np.logspace(-2, 1, 241)
+ref_rcs = np.array([rfn.utils.sphere_mie_monostatic(r * lam0, frequency) for r in r_lam])
 
-obj = scatterer
-frequency = f0
-rx_e, _ = rfn.antennas.get_scattering_rxE(scatterer, Js, Ms, rx_patt, rx_pos, f0)
+fig, ax = plt.subplots()
+ax.plot(2 * np.pi * r_lam, ref_rcs / (np.pi * (r_lam * lam0)**2), alpha=0.3, color="k")
+ax.set_xscale("log")
+ax.set_yscale("log")
+ax.set_xlabel(f"$2\pi r / \lambda$")
+ax.set_ylabel("RCS / $\pi r^2$")
+
+ax.plot([2 * np.pi * radius_list / lam0], [rcs / (np.pi * (radius_list)**2)], marker=".")
