@@ -6,7 +6,7 @@ from copy import deepcopy as dcopy
 from rfnetwork import const, core
 
 
-def translate(pattern: ldarray, position: np.ndarray) -> ldarray:
+def translate(pattern: ldarray, position: np.ndarray, flat: bool = False) -> ldarray:
     """
     Move the phase center of a pattern to a new location.
 
@@ -26,23 +26,26 @@ def translate(pattern: ldarray, position: np.ndarray) -> ldarray:
     """
 
     # convert pattern coordinates to uvw
-    ptn_keys = pattern.coords.keys()
+    spatial_dims = ("phi", "theta", "az", "el", "u", "v", "phitheta", "azel", "uv")
+    ptn_dims = tuple(pattern.coords.keys())
+    ptn_keys = ptn_dims + tuple(pattern.attrs.keys())
 
     if "phi" in ptn_keys and "theta" in ptn_keys:
-        uvw = uvw_phitheta(pattern.phi, pattern.theta)
+        uvw = uvw_phitheta(pattern.phi, pattern.theta, flat="phitheta" in ptn_dims)
     elif "az" in ptn_keys and "el" in ptn_keys:
-        uvw = uvw_azel(pattern.az, pattern.el)
+        uvw = uvw_azel(pattern.az, pattern.el, flat="azel" in ptn_dims)
     elif "u" in ptn_keys and "v" in ptn_keys:
-        uvw = uvw_uv(pattern.u, pattern.v)
+        uvw = uvw_uv(pattern.u, pattern.v, flat="uv" in ptn_dims)
     else:
         raise NotImplementedError("Coordinate frame not supported")
 
     # replace uwv dimension with xyz 
+    base_coords = {k: v for k, v in pattern.coords.items() if k in spatial_dims} # get all spatial coords from pattern
     uvw = ldarray(
-        uvw, coords=dict(axis=("x", "y", "z"), **uvw[0].coords)
+        uvw, coords=dict(axis=("x", "y", "z"), **base_coords)
     )
 
-    # cast as ldarray if not already
+    # cast position as ldarray if not already
     if not isinstance(position, ldarray):
         position = ldarray(position, coords=dict(axis=("x", "y", "z")))
 
