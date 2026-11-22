@@ -8,25 +8,7 @@ from scipy.spatial.transform import Rotation
 import matplotlib.pyplot as plt
 import rfnetwork as rfn
 
-from rfnetwork import const, conv, antennas
-from scipy.special import spherical_jn, spherical_yn
-
-def _mie_coeffs(x):
-    n_max = int(x + 4 * x ** (1 / 3) + 4)
-    n = np.arange(1, n_max + 1)
-    jn, yn = spherical_jn(n, x), spherical_yn(n, x)
-    jnp, ynp = spherical_jn(n, x, True), spherical_yn(n, x, True)
-    hn, hnp = jn + 1j * yn, jnp + 1j * ynp
-    # PEC limit of Bohren & Huffman coefficients; psi = x j_n, xi = x h_n
-    a = (jn + x * jnp) / (hn + x * hnp)
-    b = jn / hn
-    return n, a, b
-
-def mie_monostatic(ka, radius):
-    n, a, b = _mie_coeffs(ka)
-    s = np.sum((-1) ** n * (2 * n + 1) * (a - b))
-    return np.pi * radius ** 2 * np.abs(s) ** 2 / ka ** 2
-
+from rfnetwork import const, conv, antennas, utils
 
 class TestSphereRCS(unittest.TestCase):
 
@@ -89,7 +71,7 @@ class TestSphereRCS(unittest.TestCase):
         # plot normalized rcs
         ka = 2 * np.pi * r_lam 
 
-        ref_rcs = mie_monostatic(ka, r_lam * lam0)
+        ref_rcs = utils.sphere_mie_monostatic(r_lam * lam0, frequency)
         err = np.abs(conv.db10_lin(rcs_actual / ref_rcs))
 
         # check RCS is correct up to half a dB
